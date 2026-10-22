@@ -4,7 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Harv is a personal AI assistant in the spirit of Jarvis. The project is at the planning stage: no code exists yet, and the language, framework, and architecture have not been chosen. Do not assume a stack. Ask, or update this file once one is decided.
+Harv is a personal AI assistant in the spirit of Jarvis, with a local web dashboard. **`docs/PLAN.md` is the source of truth** for the architecture, milestones (M0–M9), the research findings (Agent SDK, usage meter, hardware sensors), and the open risks. Read it before starting any milestone, and update it when decisions change.
+
+Stack: TypeScript everywhere, using npm workspaces. `apps/server` runs Node 24 with Fastify, ws, `@anthropic-ai/claude-agent-sdk`, systeminformation, nvidia-smi, LibreHardwareMonitor and SQLite. `apps/web` is React, Vite and Tailwind. `apps/desktop` (Tauri 2) comes later.
+
+The user's hardware: Ryzen 7 5700X3D (8 cores / 16 threads), RTX 3060 Ti 8 GB, 32 GB RAM, Windows 11.
+
+## Locked design: "Mission Control Glass"
+
+The mockup is board "2b" at https://claude.ai/artifact/NAbsVqrzJ1MQMSmn3couH4. Its source is `MissionGlass.dc.html` in that artifact.
+
+- IBM Plex Mono throughout.
+- The user's misty forest photo, blurred, behind a dark scrim of `rgba(10,16,24,0.55)`. Frosted glass panels use `rgba(16,24,34,0.5)` with a 22px blur and a thin light border. The accent is ice blue `#A8C8E8`, with amber `#F2B880` for warnings at 85% or above.
+- Header: a small status pill (idle, thinking or working), then the model switcher with **AUTO** first, then `auto → model · effort`.
+- Left: a collapsible chat history. Center: Chrome-style chat tabs over a log-style chat, with attachment chips and a `harv>` command line. Right: a stats panel that starts narrow (label, % and thin bar) and expands to show everything, including Claude plan usage and Harv's own tracking.
+- Animations are subtle, with a toggle to turn motion off.
+
+## Auto router
+
+Auto picks both model and effort for each task. The best possible result comes first and saving usage second. The pipeline is: instant rules, then a cheap Haiku classifier, then a lookup table, then escalation ("Try harder", automatic step-up), then logging. Every reply is tagged `[model·effort]`. Full spec: `docs/PLAN.md` §5.
 
 ## Hard constraint: subscription only, never anything billed
 
@@ -20,15 +38,15 @@ Harv runs only on the user's Claude subscription, which reaches Claude through t
 - Development happens on Windows 11. Both PowerShell and Git Bash are available.
 - Available runtimes: Node.js 24 and Python 3.14.
 - The git default branch is `main`.
-- Secrets such as API keys go in `.env`, which is gitignored. Commit only an `.env.example` that shows the variable names.
+- Any local secrets go in `.env`, which is gitignored (the repo is public). Commit only an `.env.example` that shows the variable names.
+
+## Terms
+
+- Use Harv only within Anthropic's terms for personal use: never host or share it, never read or store Claude credentials, keep the Claude Code binary unmodified, and brand it "Harv", never "Claude Code". See `docs/PLAN.md` §1.
 
 ## Commands
 
-None yet. Add build, run, lint, and test commands here (including how to run a single test) once the stack is chosen.
-
-## Architecture
-
-Not yet designed. Record the high-level structure here as it takes shape.
+None yet; they get added in M0. Add build, run, lint and test commands here, including how to run a single test.
 
 ## Harv's safety model (agreed with the user; tweak as we go)
 
