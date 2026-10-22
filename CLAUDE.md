@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Harv is a personal AI assistant in the spirit of Jarvis. The project is at the planning stage: no code exists yet, and the language, framework, and architecture have not been chosen. Do not assume a stack. Ask, or update this file once one is decided.
 
+## Hard constraint: subscription only, never anything billed
+
+Harv runs only on the user's Claude subscription, which reaches Claude through the Claude Agent SDK / Claude Code login. The user has no API account and wants no extra charges, ever.
+
+- Never use an Anthropic API key or the API's billing. That rules out the Messages API, the Admin/Usage API, Managed Agents, and any paid third-party service.
+- Make sure `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are unset in Harv's process environment. If either is set, Claude Code / the Agent SDK uses it instead of the subscription login and bills per token.
+- No paid fallbacks. When plan limits run out, Harv pauses, shows the reset time, and queues work. It never switches to a paid route.
+- Every model call counts against plan limits, including the Auto router's Haiku classifier. Keep overhead calls cheap and rare.
+
 ## Environment
 
 - Development happens on Windows 11. Both PowerShell and Git Bash are available.
