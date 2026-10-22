@@ -31,6 +31,21 @@
   animation: fade-in 0.35s ease both;
 }
 
+@utility animate-blink {
+  animation: blink 1.2s infinite;
+}
+
+@keyframes blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
 @keyframes pulse-ring {
   0% {
     box-shadow: 0 0 0 0 rgb(220 235 250 / 0.5);
@@ -73,4 +88,73 @@ body {
   color: var(--color-ink);
   font-family: var(--font-mono);
   font-size: 13px;
+}
+
+/* Harv's Markdown replies, kept compact to fit the log style. */
+.harv-md > :first-child {
+  margin-top: 0;
+}
+.harv-md > :last-child {
+  margin-bottom: 0;
+}
+.harv-md p,
+.harv-md ul,
+.harv-md ol,
+.harv-md pre,
+.harv-md table,
+.harv-md blockquote {
+  margin: 0.5em 0;
+}
+.harv-md ul,
+.harv-md ol {
+  padding-left: 1.4em;
+}
+.harv-md ul {
+  list-style: disc;
+}
+.harv-md ol {
+  list-style: decimal;
+}
+.harv-md h1,
+.harv-md h2,
+.harv-md h3 {
+  margin: 0.8em 0 0.4em;
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+.harv-md a {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+.harv-md code {
+  border-radius: 4px;
+  background: rgb(0 0 0 / 0.3);
+  padding: 0.1em 0.35em;
+}
+.harv-md pre {
+  overflow-x: auto;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: rgb(0 0 0 / 0.3);
+  padding: 0.75em 1em;
+}
+.harv-md pre code {
+  background: none;
+  padding: 0;
+}
+.harv-md table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.harv-md th,
+.harv-md td {
+  border: 1px solid var(--color-line);
+  padding: 0.3em 0.6em;
+}
+.harv-md blockquote {
+  border-left: 2px solid var(--color-line);
+  padding-left: 0.8em;
+  color: var(--color-muted);
 }

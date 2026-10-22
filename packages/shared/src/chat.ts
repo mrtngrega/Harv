@@ -1,0 +1,46 @@
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+export const EFFORT_LEVELS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/** A model the user's plan offers, as reported by Claude Code. */
+export interface ModelOption {
+  /** Alias passed to the SDK ("opus", "sonnet", ...). */
+  id: string;
+  name: string;
+  description: string;
+  efforts: EffortLevel[];
+}
+
+export interface Catalog {
+  /** e.g. "Claude Pro". */
+  plan: string | null;
+  models: ModelOption[];
+}
+
+/** "auto" lets Harv pick; anything else is a model id from the catalog. */
+export type ModelChoice = 'auto' | (string & {});
+
+/** What AUTO resolves to until the router lands in M6. */
+export const AUTO_FALLBACK = { model: 'sonnet', effort: 'medium' } as const satisfies { model: string; effort: EffortLevel };
+
+export interface ChatUsage {
+  inputTokens: number;
+  outputTokens: number;
+  durationMs: number;
+}
+
+export type ChatClientMessage =
+  | { type: 'chat.send'; tabId: string; text: string; model: ModelChoice; effort: EffortLevel }
+  | { type: 'chat.stop'; tabId: string }
+  | { type: 'chat.close'; tabId: string };
+
+export type ChatServerMessage =
+  /** A turn began; `model`/`effort` are what actually runs (AUTO resolved). */
+  | { type: 'chat.started'; tabId: string; model: string; effort: EffortLevel; auto: boolean }
+  | { type: 'chat.delta'; tabId: string; text: string }
+  /** Final text of one assistant message (replaces the streamed text). */
+  | { type: 'chat.assistant'; tabId: string; text: string }
+  | { type: 'chat.tool'; tabId: string; name: string; detail: string }
+  | { type: 'chat.done'; tabId: string; ok: boolean; stopped: boolean; error?: string; usage?: ChatUsage }
+  | { type: 'chat.notice'; tabId: string; message: string }
+  | { type: 'chat.error'; tabId: string; message: string };

@@ -60,6 +60,7 @@ Harv runs only on the user's Claude subscription, which reaches Claude through t
 - `npm test`: Vitest across workspaces. Run one test file with `npx vitest run apps/server/src/env.test.ts`, or one test by name with `npx vitest run -t "removes API credentials"`.
 - `npm run typecheck` (`tsc --noEmit` in each workspace), `npm run lint` (ESLint flat config), `npm run format` (Prettier).
 - `npm run build`: builds the dashboard. The server runs from TypeScript source via tsx, and there's no server build step.
+- On Windows, stopping a background `npm run dev` (TaskStop, Ctrl+C in some shells) can leave orphaned `tsx`/`vite`/`node` children holding ports 4317/5173, and a stale tree makes new servers hang silently. Check `netstat -ano | grep -E ":(4317|5173)"` and kill those PIDs by tree. Never kill the user's `claude.exe`.
 - New npm packages with install scripts are blocked by npm's allowScripts. Review a package before running `npm install-scripts approve <pkg>` (esbuild is approved).
 
 ## Code layout
@@ -71,7 +72,21 @@ Harv runs only on the user's Claude subscription, which reaches Claude through t
   - systeminformation (`system.ts`) is slow on Windows (0.5–5 s per call, since it shells out to PowerShell), so it only covers processes (5 s), volumes (30 s), static CPU info, and a CPU/RAM fallback.
   - `nvidia.ts` is the GPU fallback when LHM is down.
   - Missing sources leave fields undefined, and the UI hides them.
-- `apps/web/src`: `App.tsx` lays out Header, HistorySidebar, ChatPanel and StatsPanel. `lib/useHarvSocket.ts` is a module-level store over the single WebSocket: `useConnection()` and `useMetrics()` via `useSyncExternalStore`, so 1 s ticks only re-render what reads metrics. `components/stats/` holds the expanded panel's cards. Theme tokens and the `glass` and animation utilities live in `index.css` (Tailwind v4 `@theme` / `@utility`).
+- `apps/server/src/agent`: one `ChatSession` per chat tab (`session.ts`).
+  - Each session is a long-lived Agent SDK `query()` in streaming-input mode, fed by `AsyncQueue`.
+  - Model changes use `q.setModel()`. Effort changes use `q.applyFlagSettings({ effortLevel })`, so context is kept.
+  - `manager.ts` maps tabs to sessions, derives `idle`/`thinking`/`working`, and resolves AUTO (until M6 it's `AUTO_FALLBACK` = sonnet·medium).
+  - `catalog.ts` reads `accountInfo()` and `supportedModels()` without sending a prompt, so it uses no plan usage.
+  - `options.ts` builds every query:
+    - an explicit `env` with no API key
+    - `cwd` set to `~/.harv/workspace`
+    - `settingSources: []` and `strictMcpConfig`, for isolation from the user's Claude Code config
+    - Harv's own system prompt
+    - read-only tools only, until M5
+    - the `guard.ts` `PreToolUse` hook plus `canUseTool`
+  - A session refuses to run if the init message's `apiKeySource` isn't `none`/`oauth` (a subscription login).
+- `apps/web/src`: `App.tsx` lays out Header, HistorySidebar, ChatPanel and StatsPanel. `lib/useHarvSocket.ts` is a module-level store over the single WebSocket: `useConnection()` and `useMetrics()` via `useSyncExternalStore`, so 1 s ticks only re-render what reads metrics. `components/stats/` holds the expanded panel's cards.
+- Web state: `lib/socket.ts` is the only WebSocket (`onServerMessage`, `sendMessage`). Stores are built with `lib/createStore.ts`: connection/metrics/catalog in `useHarvSocket.ts`, and tabs/lines/model/effort in `chatStore.ts`, where `applyChatEvent` turns server events into chat lines. Theme tokens and the `glass` and animation utilities live in `index.css` (Tailwind v4 `@theme` / `@utility`).
 - The user's background photo is personal. It lives at `~/.harv/background.*` and is served by `/api/background`. Never commit it to this public repo.
 
 ## Harv's safety model (agreed with the user; tweak as we go)

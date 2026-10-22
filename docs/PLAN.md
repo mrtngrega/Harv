@@ -1,6 +1,6 @@
 # Harv: build plan
 
-Status: M0 + M1 done 2026-10-22 (scaffold, glass shell, live hardware panel). Next: M2 (chat on the subscription). Web app only for now; the desktop app (M9) is deferred until the user asks.
+Status: M0–M2 done 2026-10-22 (scaffold, glass shell, live hardware panel, chat on the subscription). Next: M3 (tabs persistence + history). Web app only for now; the desktop app (M9) is deferred until the user asks.
 
 ## 1. Can Harv run on a Claude subscription? (research summary)
 
@@ -29,7 +29,7 @@ What Anthropic's docs say ([Legal and compliance](https://code.claude.com/docs/e
 |---|---|
 | Claude engine | `@anthropic-ai/claude-agent-sdk` (TypeScript), v0.3.308 at research time, Node >= 18. Claude Code 2.1.308 is installed. |
 | Model per chat | `model` option. Mid-session: `query.setModel()` (streaming input mode). |
-| Effort | `effort` option: `low`, `medium`, `high`, `xhigh`, `max`. Changing effort mid-session isn't confirmed. Fallback: resume the session with a new `effort`. **Verify in M2.** |
+| Effort | `effort` option: `low`, `medium`, `high`, `xhigh`, `max`. **Verified in M2:** mid-session changes work through `query.applyFlagSettings({ effortLevel })`, and context is kept. |
 | Live streaming | `includePartialMessages: true` |
 | Tabs and history | One streaming-input `query()` per tab. Session IDs are stored, and `resume` reopens old chats. `forkSession` is available. |
 | Stop button | `query.interrupt()` plus `abortController` |
@@ -88,7 +88,7 @@ Shell commands are parsed for risky patterns: `rm`, `del`, `Remove-Item`, `forma
 - `max` effort only for difficulty 5.
 - Haiku handles more of the trivial work.
 - The classifier is skipped whenever the rules or the previous turn already decide.
-- Fable is off unless the plan exposes it and the user turns it on.
+- Fable 5.1 **is** offered on Pro (verified in M2). It stays out of AUTO unless the user turns it on, and is available as a manual pick.
 - At M2, check which models the subscription actually offers in Claude Code (the SDK's model list) and remove any that aren't available from the switcher and the router.
 - Plan-aware trimming starts at about 70% weekly instead of 80%.
 
@@ -111,7 +111,7 @@ Shell commands are parsed for risky patterns: `rm`, `del`, `Remove-Item`, `forma
 
 - **Terms can change.** Re-check the legal page and the Agent SDK credit status before each milestone release.
 - `/usage` report shape is experimental. Parse it defensively, and the meter hides itself if the data is missing.
-- Effort mid-session is unconfirmed. Check in M2.
+- ~~Effort mid-session~~: works (M2).
 - LibreHardwareMonitor needs admin rights. Without it: no fans, CPU temperature, or motherboard sensors (everything else still works).
 - Plan limits depend on which plan you have.
 

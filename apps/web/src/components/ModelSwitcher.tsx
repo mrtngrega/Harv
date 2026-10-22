@@ -1,30 +1,53 @@
-import { useState } from 'react';
+import { EFFORT_LEVELS, type EffortLevel } from '@harv/shared';
+import { chat, useChat } from '../lib/chatStore.ts';
+import { useCatalog } from '../lib/useHarvSocket.ts';
 
-// Placeholder list until M2, when Harv asks Claude Code which models the plan actually offers.
-const MODELS = ['AUTO', 'Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5'] as const;
-type Model = (typeof MODELS)[number];
+const EFFORT_LABEL: Record<EffortLevel, string> = { low: 'LOW', medium: 'MED', high: 'HIGH', xhigh: 'XHI', max: 'MAX' };
+
+function Segment({ on, label, title, onClick }: { on: boolean; label: string; title?: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      title={title}
+      onClick={onClick}
+      className={`min-h-[34px] cursor-pointer rounded-[9px] px-3 text-xs font-semibold whitespace-nowrap transition-colors ${
+        on ? 'bg-accent text-[#0f1620]' : 'text-[#d5dee7] hover:bg-white/5'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
 
 export function ModelSwitcher() {
-  const [model, setModel] = useState<Model>('AUTO');
+  const catalog = useCatalog();
+  const { model, effort, routed } = useChat();
+  const current = catalog?.models.find((m) => m.id === model);
+  const efforts = current?.efforts.length ? current.efforts : EFFORT_LEVELS;
 
   return (
-    <div role="group" aria-label="Model" className="flex gap-1 rounded-xl bg-black/20 p-[3px]">
-      {MODELS.map((m) => {
-        const on = m === model;
-        return (
-          <button
-            key={m}
-            type="button"
-            aria-pressed={on}
-            onClick={() => setModel(m)}
-            className={`min-h-[34px] cursor-pointer rounded-[9px] px-3 text-xs font-semibold transition-colors ${
-              on ? 'bg-accent text-[#0f1620]' : 'text-[#d5dee7] hover:bg-white/5'
-            }`}
-          >
-            {m}
-          </button>
-        );
-      })}
+    <div className="flex flex-wrap items-center gap-2">
+      <div role="group" aria-label="Model" className="flex gap-1 rounded-xl bg-black/20 p-[3px]">
+        <Segment on={model === 'auto'} label="AUTO" title="Harv picks the model and effort" onClick={() => chat.setModel('auto')} />
+        {catalog ? (
+          catalog.models.map((m) => (
+            <Segment key={m.id} on={model === m.id} label={m.name} title={m.description} onClick={() => chat.setModel(m.id)} />
+          ))
+        ) : (
+          <span className="flex items-center px-3 text-xs text-faint">loading models…</span>
+        )}
+      </div>
+
+      {model === 'auto' ? (
+        routed && <span className="animate-fade-in text-xs text-muted">auto → {routed}</span>
+      ) : (
+        <div role="group" aria-label="Effort" className="flex gap-1 rounded-xl bg-black/20 p-[3px]">
+          {efforts.map((e) => (
+            <Segment key={e} on={effort === e} label={EFFORT_LABEL[e]} title={`${e} effort`} onClick={() => chat.setEffort(e)} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

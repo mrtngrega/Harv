@@ -1,7 +1,9 @@
 import { createReadStream } from 'node:fs';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
-import { HARV_VERSION, SERVER_PORT, type ClientMessage, type HarvStatus, type ServerMessage } from '@harv/shared';
+import { HARV_VERSION, SERVER_PORT, type ClientMessage, type ServerMessage } from '@harv/shared';
+import { loadCatalog } from './agent/catalog.ts';
+import { ChatManager } from './agent/manager.ts';
 import { findBackground } from './background.ts';
 import { MetricsCollector } from './metrics/collector.ts';
 import { ensureLhmRunning } from './metrics/lhmLauncher.ts';
@@ -18,9 +20,14 @@ if (removed.length > 0) {
   app.log.warn({ removed }, 'Removed API credentials from the environment: Harv is subscription-only');
 }
 
-const status: HarvStatus = 'idle';
+// Every connected dashboard window gets every update, so several windows stay in sync.
+const clients = new Set<(msg: ServerMessage) => void>();
+const broadcast = (msg: ServerMessage) => clients.forEach((send) => send(msg));
 
-app.get('/api/health', async () => ({ ok: true, version: HARV_VERSION, status, home: HARV_HOME }));
+const metrics = new MetricsCollector();
+const chats = new ChatManager(broadcast, (status) => broadcast({ type: 'harv.status', status }));
+
+app.get('/api/health', async () => ({ ok: true, version: HARV_VERSION, status: chats.status, home: HARV_HOME }));
 
 app.get('/api/background', async (_req, reply) => {
   const bg = findBackground();
@@ -28,17 +35,19 @@ app.get('/api/background', async (_req, reply) => {
   return reply.type(bg.contentType).header('Cache-Control', 'no-cache').send(createReadStream(bg.path));
 });
 
-const metrics = new MetricsCollector();
-
 // Lets the dashboard retry starting the sensors (e.g. after the UAC prompt was declined).
 app.post('/api/sensors/start', async () => ({ result: await ensureLhmRunning() }));
 
 app.get('/ws', { websocket: true }, (socket) => {
   const send = (msg: ServerMessage) => socket.send(JSON.stringify(msg));
-  send({ type: 'hello', version: HARV_VERSION, status, metrics: metrics.latest });
+  clients.add(send);
+  send({ type: 'hello', version: HARV_VERSION, status: chats.status, metrics: metrics.latest, catalog: chats.catalog });
 
   const unsubscribe = metrics.onSnapshot((snapshot) => send({ type: 'metrics.tick', metrics: snapshot }));
-  socket.on('close', unsubscribe);
+  socket.on('close', () => {
+    unsubscribe();
+    clients.delete(send);
+  });
 
   socket.on('message', (raw) => {
     let msg: ClientMessage;
@@ -47,11 +56,36 @@ app.get('/ws', { websocket: true }, (socket) => {
     } catch {
       return;
     }
-    if (msg.type === 'ping') send({ type: 'harv.status', status });
+    switch (msg.type) {
+      case 'ping':
+        send({ type: 'harv.status', status: chats.status });
+        break;
+      case 'chat.send':
+        void chats.send(msg.tabId, msg.text, msg.model, msg.effort);
+        break;
+      case 'chat.stop':
+        void chats.stop(msg.tabId);
+        break;
+      case 'chat.close':
+        chats.close(msg.tabId);
+        break;
+    }
   });
 });
 
-app.addHook('onClose', async () => metrics.stop());
+app.addHook('onClose', async () => {
+  metrics.stop();
+  chats.closeAll();
+});
+
+// Claude Code subprocesses would otherwise keep the process alive on restart (tsx watch hangs).
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK'] as const) {
+  process.once(signal, () => {
+    app.log.info({ signal }, 'Shutting down');
+    void app.close().finally(() => process.exit(0));
+    setTimeout(() => process.exit(0), 3000).unref();
+  });
+}
 
 // Localhost only: Harv controls this PC, so it must never be reachable from the network.
 await app.listen({ host: '127.0.0.1', port: SERVER_PORT });
@@ -61,3 +95,11 @@ await metrics.start();
 if (process.env.HARV_START_LHM !== '0') {
   void ensureLhmRunning().then((result) => app.log.info({ result }, 'LibreHardwareMonitor'));
 }
+
+loadCatalog()
+  .then((catalog) => {
+    chats.catalog = catalog;
+    broadcast({ type: 'catalog', catalog });
+    app.log.info({ plan: catalog.plan, models: catalog.models.map((m) => m.id) }, 'Claude models');
+  })
+  .catch((err: Error) => app.log.error({ err: err.message }, 'Could not load Claude models'));

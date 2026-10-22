@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.308",
     "@fastify/static": "^10.1.7",
     "@fastify/websocket": "^11.3.4",
     "@harv/shared": "*",

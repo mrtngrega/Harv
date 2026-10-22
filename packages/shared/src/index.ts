@@ -9,13 +9,17 @@ export type HarvStatus = 'idle' | 'thinking' | 'working';
 export type LhmLaunchResult = 'already-running' | 'started' | 'declined' | 'not-installed' | 'failed';
 
 export type * from './metrics.ts';
+export * from './chat.ts';
 import type { MetricsSnapshot } from './metrics.ts';
+import type { Catalog, ChatClientMessage, ChatServerMessage } from './chat.ts';
 
 /** Messages the server pushes to the dashboard over /ws. */
 export type ServerMessage =
-  | { type: 'hello'; version: string; status: HarvStatus; metrics: MetricsSnapshot | null }
+  | { type: 'hello'; version: string; status: HarvStatus; metrics: MetricsSnapshot | null; catalog: Catalog | null }
   | { type: 'harv.status'; status: HarvStatus }
-  | { type: 'metrics.tick'; metrics: MetricsSnapshot };
+  | { type: 'metrics.tick'; metrics: MetricsSnapshot }
+  | { type: 'catalog'; catalog: Catalog }
+  | ChatServerMessage;
 
 /** Messages the dashboard sends to the server over /ws. */
-export type ClientMessage = { type: 'ping' };
+export type ClientMessage = { type: 'ping' } | ChatClientMessage;

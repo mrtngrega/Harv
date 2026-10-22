@@ -1,58 +1,79 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { chat, useChat, type Line } from '../lib/chatStore.ts';
 
-interface Tab {
-  id: number;
-  title: string;
+function Thinking() {
+  return (
+    <span aria-label="Harv is thinking" className="inline-flex gap-1 text-accent">
+      <span className="animate-blink">●</span>
+      <span className="animate-blink [animation-delay:.2s]">●</span>
+      <span className="animate-blink [animation-delay:.4s]">●</span>
+    </span>
+  );
 }
 
-interface Line {
-  id: number;
-  who: 'you' | 'harv';
-  text: string;
+function ChatLine({ line }: { line: Line }) {
+  switch (line.kind) {
+    case 'you':
+      return (
+        <div className="animate-fade-in whitespace-pre-wrap">
+          <span className="text-accent">you ›</span> {line.text}
+        </div>
+      );
+    case 'harv':
+      return (
+        <div className="animate-fade-in">
+          <div className="flex items-baseline gap-2">
+            <span className="text-ok">harv ›</span>
+            {line.tag && <span className="text-[11px] text-faint">[{line.tag}]</span>}
+            {line.streaming && line.text === '' && <Thinking />}
+          </div>
+          {line.text && (
+            <div className="harv-md mt-1">
+              <Markdown remarkPlugins={[remarkGfm]}>{line.text}</Markdown>
+            </div>
+          )}
+        </div>
+      );
+    case 'tool':
+      return <div className="animate-fade-in truncate text-faint">&nbsp;&nbsp;▸ {line.text}</div>;
+    case 'notice':
+      return <div className="animate-fade-in text-muted">— {line.text}</div>;
+    case 'error':
+      return <div className="animate-fade-in text-warn">! {line.text}</div>;
+  }
 }
 
 export function ChatPanel() {
-  const [tabs, setTabs] = useState<Tab[]>([{ id: 1, title: 'New chat' }]);
-  const [active, setActive] = useState(1);
-  const [nextId, setNextId] = useState(2);
-  const [lines, setLines] = useState<Record<number, Line[]>>({});
+  const { tabs, activeId } = useChat();
   const [draft, setDraft] = useState('');
+  const logRef = useRef<HTMLDivElement>(null);
+  const active = tabs.find((t) => t.id === activeId) ?? null;
 
-  const newTab = () => {
-    setTabs((t) => [...t, { id: nextId, title: 'New chat' }]);
-    setActive(nextId);
-    setNextId((n) => n + 1);
-  };
-
-  const closeTab = (id: number) => {
-    const rest = tabs.filter((t) => t.id !== id);
-    setTabs(rest);
-    if (id === active) setActive(rest.at(-1)?.id ?? 0);
-  };
+  // Keep the newest output in view while Harv streams.
+  const lastText = active?.lines.at(-1)?.text;
+  useEffect(() => {
+    const el = logRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [active?.lines.length, lastText, activeId]);
 
   const send = (e: FormEvent) => {
     e.preventDefault();
     const text = draft.trim();
-    if (!text || !active) return;
-    // Chat with Claude arrives in M2; until then Harv answers with a placeholder.
-    setLines((all) => ({
-      ...all,
-      [active]: [
-        ...(all[active] ?? []),
-        { id: Date.now(), who: 'you', text },
-        { id: Date.now() + 1, who: 'harv', text: 'Chat comes online in M2. The dashboard shell works.' },
-      ],
-    }));
+    if (!text || active?.busy) return;
+    chat.send(text);
     setDraft('');
   };
 
-  const current = lines[active] ?? [];
-
   return (
-    <section aria-label="Chat" className="glass flex min-w-0 flex-[999_1_520px] flex-col overflow-hidden rounded-2xl">
+    <section
+      aria-label="Chat"
+      className="glass flex max-h-[calc(100vh-110px)] min-w-0 flex-[999_1_520px] flex-col overflow-hidden rounded-2xl"
+    >
       <div role="tablist" aria-label="Open chats" className="flex items-end gap-1 overflow-x-auto border-b border-line px-2 pt-2">
         {tabs.map((t) => {
-          const on = t.id === active;
+          const on = t.id === activeId;
           return (
             <div
               key={t.id}
@@ -64,14 +85,15 @@ export function ChatPanel() {
                 type="button"
                 role="tab"
                 aria-selected={on}
-                onClick={() => setActive(t.id)}
-                className={`min-h-9 cursor-pointer truncate pr-1 pl-3 text-xs ${on ? 'text-ink' : 'text-muted'}`}
+                onClick={() => chat.setActive(t.id)}
+                className={`flex min-h-9 cursor-pointer items-center gap-1.5 truncate pr-1 pl-3 text-xs ${on ? 'text-ink' : 'text-muted'}`}
               >
-                {t.title}
+                {t.busy && <span aria-hidden="true" className="animate-blink size-1.5 flex-none rounded-full bg-accent" />}
+                <span className="truncate">{t.title}</span>
               </button>
               <button
                 type="button"
-                onClick={() => closeTab(t.id)}
+                onClick={() => chat.closeTab(t.id)}
                 aria-label={`Close ${t.title}`}
                 className="mr-1 size-7 cursor-pointer rounded-md text-[13px] text-muted hover:bg-white/10"
               >
@@ -80,22 +102,16 @@ export function ChatPanel() {
             </div>
           );
         })}
-        <button type="button" onClick={newTab} aria-label="New chat" className="size-9 cursor-pointer text-base hover:text-accent">
+        <button type="button" onClick={chat.newTab} aria-label="New chat" className="size-9 cursor-pointer text-base hover:text-accent">
           +
         </button>
       </div>
 
-      <div className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-4 leading-relaxed">
-        {current.length === 0 ? (
-          <p className="m-auto text-center text-muted">
-            {active ? 'New chat. Ask Harv anything, or type /model, /attach.' : 'No chat open. Press + to start one.'}
-          </p>
+      <div ref={logRef} className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-4 leading-relaxed">
+        {!active || active.lines.length === 0 ? (
+          <p className="m-auto text-center text-muted">{active ? 'New chat. Ask Harv anything.' : 'No chat open. Press + to start one.'}</p>
         ) : (
-          current.map((l) => (
-            <div key={l.id} className="animate-fade-in">
-              <span className={l.who === 'you' ? 'text-accent' : 'text-ok'}>{l.who} ›</span> {l.text}
-            </div>
-          ))
+          active.lines.map((l) => <ChatLine key={l.id} line={l} />)
         )}
       </div>
 
@@ -106,9 +122,10 @@ export function ChatPanel() {
         <input
           id="harv-cmd"
           type="text"
+          autoComplete="off"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="type a command or ask anything · /model · /attach"
+          placeholder="ask anything · read a file · search the web"
           className="min-h-11 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
         />
         <button
@@ -119,9 +136,19 @@ export function ChatPanel() {
         >
           + ATTACH
         </button>
-        <button type="submit" className="min-h-11 cursor-pointer rounded-[10px] bg-accent px-4 text-xs font-semibold text-[#0f1620]">
-          RUN ⏎
-        </button>
+        {active?.busy ? (
+          <button
+            type="button"
+            onClick={() => chat.stop(active.id)}
+            className="min-h-11 cursor-pointer rounded-[10px] bg-warn px-4 text-xs font-semibold text-[#0f1620]"
+          >
+            STOP ■
+          </button>
+        ) : (
+          <button type="submit" className="min-h-11 cursor-pointer rounded-[10px] bg-accent px-4 text-xs font-semibold text-[#0f1620]">
+            RUN ⏎
+          </button>
+        )}
       </form>
     </section>
   );
