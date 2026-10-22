@@ -82,6 +82,16 @@ Shell commands are parsed for risky patterns: `rm`, `del`, `Remove-Item`, `forma
 6. **Log and learn**: every decision is stored with the user's feedback. The panel shows the routing split. The table gets tuned from that data.
 7. **Transparency**: every reply is tagged `[model·effort]`, and hovering shows the reason.
 
+**Tuning for Claude Pro.** The user has Pro, which has the smallest limits.
+- Sonnet is the workhorse for difficulty 2-3.
+- Opus is reserved for difficulty 4-5 and red actions.
+- `max` effort only for difficulty 5.
+- Haiku handles more of the trivial work.
+- The classifier is skipped whenever the rules or the previous turn already decide.
+- Fable is off unless the plan exposes it and the user turns it on.
+- At M2, check which models the subscription actually offers in Claude Code (the SDK's model list) and remove any that aren't available from the switcher and the router.
+- Plan-aware trimming starts at about 70% weekly instead of 80%.
+
 ## 6. Milestones (each ends with something you can see working)
 
 | # | Milestone | Done when |
@@ -107,7 +117,7 @@ Shell commands are parsed for risky patterns: `rm`, `del`, `Remove-Item`, `forma
 
 ## 8. Needed from the user
 
-- Which plan: Pro, Max 5x, or Max 20x? This affects how aggressive the router can be.
+- ~~Which plan~~ → **Claude Pro** (answered 2026-10-22). The router is tuned for it (§5).
 - Confirm Claude Code is logged in with that subscription (`claude` → `/status`).
 - Before M1: install LibreHardwareMonitor and enable its web server on 127.0.0.1:8085. I'll give exact steps.
 - On claude.ai → Settings → Usage, make sure "extra usage" is **off** if your plan has it.
