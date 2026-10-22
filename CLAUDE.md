@@ -16,7 +16,7 @@ The user's hardware: Ryzen 7 5700X3D (8 cores / 16 threads), RTX 3060 Ti 8 GB, 3
 - When the user teaches a new behaviour rule that applies to Harv generally, add it to `harv/persona.md` as well as saving it to memory.
 - Dev-only rules (git, tests, wrap-up chores) stay in dev memory or here.
 - `harv/persona.md` is public, so it must never contain personal data.
-- The runtime Harv's private facts live in `~/.harv/memory/*.md`. It reads them into its prompt at session start and changes them via its `remember`/`forget` tools (`apps/server/src/agent/memory.ts`), which can only write in that folder.
+- The runtime Harv's private facts live in `~/.harv/memory/*.md`. That folder is also **your** source of truth about the user, so read it when user context matters and update it there. It reads them into its prompt at session start and changes them via its `remember`/`forget` tools (`apps/server/src/agent/memory.ts`), which can only write in that folder.
 
 ## Locked design: "Mission Control Glass"
 
