@@ -46,7 +46,18 @@ Harv runs only on the user's Claude subscription, which reaches Claude through t
 
 ## Commands
 
-None yet; they get added in M0. Add build, run, lint and test commands here, including how to run a single test.
+- `npm run dev`: server (tsx watch, http://127.0.0.1:4317) and web (Vite, http://127.0.0.1:5173). Vite proxies `/api` and `/ws` to the server.
+- `npm test`: Vitest across workspaces. Run one test file with `npx vitest run apps/server/src/env.test.ts`, or one test by name with `npx vitest run -t "removes API credentials"`.
+- `npm run typecheck` (`tsc --noEmit` in each workspace), `npm run lint` (ESLint flat config), `npm run format` (Prettier).
+- `npm run build`: builds the dashboard. The server runs from TypeScript source via tsx, and there's no server build step.
+- New npm packages with install scripts are blocked by npm's allowScripts. Review a package before running `npm install-scripts approve <pkg>` (esbuild is approved).
+
+## Code layout
+
+- `packages/shared`: the WebSocket protocol (`ServerMessage` / `ClientMessage`) and constants. It's consumed as TS source (`exports: ./src/index.ts`).
+- `apps/server/src`: `index.ts` (Fastify routes and `/ws`), `env.ts` (strips billed credentials at startup; keep this first), `paths.ts` (`~/.harv`, override with `HARV_HOME`), `background.ts`.
+- `apps/web/src`: `App.tsx` lays out Header, HistorySidebar, ChatPanel and StatsPanel. `lib/useHarvSocket.ts` is the single WebSocket. Theme tokens and the `glass` and animation utilities live in `index.css` (Tailwind v4 `@theme` / `@utility`).
+- The user's background photo is personal. It lives at `~/.harv/background.*` and is served by `/api/background`. Never commit it to this public repo.
 
 ## Harv's safety model (agreed with the user; tweak as we go)
 
