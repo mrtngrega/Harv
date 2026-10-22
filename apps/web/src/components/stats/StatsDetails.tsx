@@ -1,4 +1,5 @@
-import type { MetricsSnapshot } from '@harv/shared';
+import { useState } from 'react';
+import type { LhmLaunchResult, MetricsSnapshot } from '@harv/shared';
 import { celsius, countDuplicates, duration, gb, ghz, pct, rate, sizePair, watts } from '../../lib/format.ts';
 import { BarList, Card, Rows, ThreadBars } from './parts.tsx';
 
@@ -11,16 +12,53 @@ function gpuFans(fanPct: number | undefined, rpm: number[]): string | undefined 
   return parts.length ? parts.join(' · ') : undefined;
 }
 
+const LAUNCH_MESSAGES: Record<LhmLaunchResult, string> = {
+  'already-running': 'LibreHardwareMonitor is running; sensors will appear in a moment.',
+  started: 'Started. Sensors will appear in a moment.',
+  declined: 'The Windows prompt was declined. Click again and choose Yes.',
+  'not-installed': 'LibreHardwareMonitor isn’t installed (winget install LibreHardwareMonitor.LibreHardwareMonitor).',
+  failed: 'Couldn’t start LibreHardwareMonitor. Check the server log.',
+};
+
+function SensorsOffline() {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const start = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch('/api/sensors/start', { method: 'POST' });
+      const { result } = (await res.json()) as { result: LhmLaunchResult };
+      setMessage(LAUNCH_MESSAGES[result]);
+    } catch {
+      setMessage(LAUNCH_MESSAGES.failed);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-warn/40 bg-black/20 p-3 text-xs leading-relaxed text-muted">
+      <p className="m-0">LibreHardwareMonitor isn't running, so temperatures, fans, power and drive health are hidden.</p>
+      <button
+        type="button"
+        onClick={start}
+        disabled={busy}
+        className="min-h-9 cursor-pointer self-start rounded-lg border border-line bg-white/5 px-3 text-ink hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
+      >
+        {busy ? 'Waiting for Windows prompt…' : 'Start sensors'}
+      </button>
+      {message && <p className="m-0 text-ink">{message}</p>}
+    </div>
+  );
+}
+
 export function StatsDetails({ m }: { m: MetricsSnapshot }) {
   const { cpu, gpu, memory, network, cooling } = m;
 
   return (
     <>
-      {!m.sources.lhm && (
-        <p className="m-0 rounded-xl border border-warn/40 bg-black/20 p-3 text-xs leading-relaxed text-muted">
-          LibreHardwareMonitor isn't running, so temperatures, fans, power and drive health are hidden. Start it to see everything.
-        </p>
-      )}
+      {!m.sources.lhm && <SensorsOffline />}
 
       <Card title="CPU" sub={`${shortCpu(cpu.name)} · ${cpu.cores}C/${cpu.threads}T`} value={pct(cpu.load)} load={cpu.load}>
         {cpu.perThread.length > 0 && <ThreadBars loads={cpu.perThread} />}

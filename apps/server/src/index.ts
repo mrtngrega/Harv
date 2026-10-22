@@ -4,6 +4,7 @@ import websocket from '@fastify/websocket';
 import { HARV_VERSION, SERVER_PORT, type ClientMessage, type HarvStatus, type ServerMessage } from '@harv/shared';
 import { findBackground } from './background.ts';
 import { MetricsCollector } from './metrics/collector.ts';
+import { ensureLhmRunning } from './metrics/lhmLauncher.ts';
 import { stripBilledCredentials } from './env.ts';
 import { ensureHarvHome, HARV_HOME } from './paths.ts';
 
@@ -29,6 +30,9 @@ app.get('/api/background', async (_req, reply) => {
 
 const metrics = new MetricsCollector();
 
+// Lets the dashboard retry starting the sensors (e.g. after the UAC prompt was declined).
+app.post('/api/sensors/start', async () => ({ result: await ensureLhmRunning() }));
+
 app.get('/ws', { websocket: true }, (socket) => {
   const send = (msg: ServerMessage) => socket.send(JSON.stringify(msg));
   send({ type: 'hello', version: HARV_VERSION, status, metrics: metrics.latest });
@@ -52,3 +56,8 @@ app.addHook('onClose', async () => metrics.stop());
 // Localhost only: Harv controls this PC, so it must never be reachable from the network.
 await app.listen({ host: '127.0.0.1', port: SERVER_PORT });
 await metrics.start();
+
+// LibreHardwareMonitor starts with Harv (set HARV_START_LHM=0 to skip).
+if (process.env.HARV_START_LHM !== '0') {
+  void ensureLhmRunning().then((result) => app.log.info({ result }, 'LibreHardwareMonitor'));
+}

@@ -43,7 +43,9 @@ Harv runs only on the user's Claude subscription, which reaches Claude through t
 ## Sensors setup on the user's PC
 
 - LibreHardwareMonitor 0.9.6 was installed with winget, under `%LOCALAPPDATA%\Microsoft\WinGet\Packages\LibreHardwareMonitor.LibreHardwareMonitor_*`.
-- Its `LibreHardwareMonitor.config` enables the web server on `127.0.0.1:8085`, starts it minimized to the tray, and starts it with Windows.
+- Its `LibreHardwareMonitor.config` enables the web server on `127.0.0.1:8085` and starts it minimized to the tray.
+- **Harv starts LHM, not Windows** (the user's choice). On server start, `metrics/lhmLauncher.ts` launches it elevated if it isn't running, which shows a UAC prompt. `POST /api/sensors/start` retries, and the panel has a "Start sensors" button. `HARV_START_LHM=0` skips the launch, and `HARV_LHM_PATH` overrides the exe path.
+- Don't create logon tasks or other autostart entries. Startup behavior is decided with the desktop app (M9).
 - It must run as admin to read sensors.
 - http.sys still listens on all addresses, so an inbound firewall rule, "Harv: block remote access to LibreHardwareMonitor (8085)", blocks the network. Keep it.
 - The PC has Hamachi and Tailscale adapters, so never expose ports beyond localhost.

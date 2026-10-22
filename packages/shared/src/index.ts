@@ -5,6 +5,9 @@ export const HARV_VERSION = '0.0.1';
 
 export type HarvStatus = 'idle' | 'thinking' | 'working';
 
+/** Result of POST /api/sensors/start (starting LibreHardwareMonitor). */
+export type LhmLaunchResult = 'already-running' | 'started' | 'declined' | 'not-installed' | 'failed';
+
 export type * from './metrics.ts';
 import type { MetricsSnapshot } from './metrics.ts';
 
