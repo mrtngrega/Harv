@@ -127,5 +127,5 @@ The user's principle: **the behaviour built in development sessions IS Harv.** T
 
 - ~~Which plan~~ → **Claude Pro** (answered 2026-10-22). The router is tuned for it (§5).
 - Confirm Claude Code is logged in with that subscription (`claude` → `/status`).
-- Before M1: install LibreHardwareMonitor and enable its web server on 127.0.0.1:8085. I'll give exact steps.
-- On claude.ai → Settings → Usage, make sure "extra usage" is **off** if your plan has it.
+- ~~LibreHardwareMonitor~~: installed and configured by Claude (M1). Harv starts it.
+- ~~Extra usage~~: confirmed **off** via the `/usage` report (2026-10-22).
