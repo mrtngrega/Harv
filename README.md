@@ -5,7 +5,7 @@
 **A personal, Jarvis-style AI assistant for your PC: a live dashboard, powered by Claude.**
 
 ![status](https://img.shields.io/badge/status-early%20build-A8C8E8?style=flat-square&labelColor=141B23)
-![milestone](https://img.shields.io/badge/milestone-M0%20of%20M9-9FE0C4?style=flat-square&labelColor=141B23)
+![milestone](https://img.shields.io/badge/milestone-M1%20of%20M9-9FE0C4?style=flat-square&labelColor=141B23)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-A8C8E8?style=flat-square&logo=typescript&logoColor=E8EDF2&labelColor=141B23)
 ![platform](https://img.shields.io/badge/platform-Windows%2011-A8C8E8?style=flat-square&labelColor=141B23)
 
@@ -61,7 +61,7 @@ flowchart LR
 ## ✦ Roadmap
 
 - [x] **M0**: Scaffold and the glass dashboard shell
-- [ ] **M1**: Live hardware panel
+- [x] **M1**: Live hardware panel
 - [ ] **M2**: Chat with Claude (streaming, model and effort)
 - [ ] **M3**: Tabs and persistent history
 - [ ] **M4**: File attachments
@@ -75,7 +75,7 @@ The full plan is in [`docs/PLAN.md`](docs/PLAN.md).
 
 ## ✦ Getting started
 
-**Requirements:** Windows 11, [Node.js](https://nodejs.org) 24, and [Claude Code](https://code.claude.com) logged in with your Claude subscription. Optional: [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) for fans, CPU temperatures and motherboard sensors.
+**Requirements:** Windows 11, [Node.js](https://nodejs.org) 24, and [Claude Code](https://code.claude.com) logged in with your Claude subscription. Recommended: [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor), run as administrator with its web server on `127.0.0.1:8085` (Options → Remote Web Server). It supplies temperatures, fans, power and drive health. Without it Harv falls back to slower basic stats.
 
 ```bash
 npm install

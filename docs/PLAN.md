@@ -1,6 +1,6 @@
 # Harv: build plan
 
-Status: M0 done 2026-10-22 (scaffold + glass shell). Next: M1. Web app only for now; the desktop app (M9) is deferred until the user asks.
+Status: M0 + M1 done 2026-10-22 (scaffold, glass shell, live hardware panel). Next: M2 (chat on the subscription). Web app only for now; the desktop app (M9) is deferred until the user asks.
 
 ## 1. Can Harv run on a Claude subscription? (research summary)
 

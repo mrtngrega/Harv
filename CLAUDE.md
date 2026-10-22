@@ -40,6 +40,14 @@ Harv runs only on the user's Claude subscription, which reaches Claude through t
 - The git default branch is `main`.
 - Any local secrets go in `.env`, which is gitignored (the repo is public). Commit only an `.env.example` that shows the variable names.
 
+## Sensors setup on the user's PC
+
+- LibreHardwareMonitor 0.9.6 was installed with winget, under `%LOCALAPPDATA%\Microsoft\WinGet\Packages\LibreHardwareMonitor.LibreHardwareMonitor_*`.
+- Its `LibreHardwareMonitor.config` enables the web server on `127.0.0.1:8085`, starts it minimized to the tray, and starts it with Windows.
+- It must run as admin to read sensors.
+- http.sys still listens on all addresses, so an inbound firewall rule, "Harv: block remote access to LibreHardwareMonitor (8085)", blocks the network. Keep it.
+- The PC has Hamachi and Tailscale adapters, so never expose ports beyond localhost.
+
 ## Terms
 
 - Use Harv only within Anthropic's terms for personal use: never host or share it, never read or store Claude credentials, keep the Claude Code binary unmodified, and brand it "Harv", never "Claude Code". See `docs/PLAN.md` §1.
@@ -56,7 +64,12 @@ Harv runs only on the user's Claude subscription, which reaches Claude through t
 
 - `packages/shared`: the WebSocket protocol (`ServerMessage` / `ClientMessage`) and constants. It's consumed as TS source (`exports: ./src/index.ts`).
 - `apps/server/src`: `index.ts` (Fastify routes and `/ws`), `env.ts` (strips billed credentials at startup; keep this first), `paths.ts` (`~/.harv`, override with `HARV_HOME`), `background.ts`.
-- `apps/web/src`: `App.tsx` lays out Header, HistorySidebar, ChatPanel and StatsPanel. `lib/useHarvSocket.ts` is the single WebSocket. Theme tokens and the `glass` and animation utilities live in `index.css` (Tailwind v4 `@theme` / `@utility`).
+- `apps/server/src/metrics`: `collector.ts` merges the sources into one `MetricsSnapshot` (type in `packages/shared/src/metrics.ts`) and pushes `metrics.tick` every ~1 s.
+  - LibreHardwareMonitor (`lhm.ts` parses, `fromLhm.ts` maps) is the fast main source, about 40 ms per read. Its values are locale-formatted (`"38,5 °C"`), so always go through `parseLhmValue`.
+  - systeminformation (`system.ts`) is slow on Windows (0.5–5 s per call, since it shells out to PowerShell), so it only covers processes (5 s), volumes (30 s), static CPU info, and a CPU/RAM fallback.
+  - `nvidia.ts` is the GPU fallback when LHM is down.
+  - Missing sources leave fields undefined, and the UI hides them.
+- `apps/web/src`: `App.tsx` lays out Header, HistorySidebar, ChatPanel and StatsPanel. `lib/useHarvSocket.ts` is a module-level store over the single WebSocket: `useConnection()` and `useMetrics()` via `useSyncExternalStore`, so 1 s ticks only re-render what reads metrics. `components/stats/` holds the expanded panel's cards. Theme tokens and the `glass` and animation utilities live in `index.css` (Tailwind v4 `@theme` / `@utility`).
 - The user's background photo is personal. It lives at `~/.harv/background.*` and is served by `/api/background`. Never commit it to this public repo.
 
 ## Harv's safety model (agreed with the user; tweak as we go)

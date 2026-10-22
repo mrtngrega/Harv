@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import { HARV_VERSION, SERVER_PORT, type ClientMessage, type HarvStatus, type ServerMessage } from '@harv/shared';
 import { findBackground } from './background.ts';
+import { MetricsCollector } from './metrics/collector.ts';
 import { stripBilledCredentials } from './env.ts';
 import { ensureHarvHome, HARV_HOME } from './paths.ts';
 
@@ -26,9 +27,14 @@ app.get('/api/background', async (_req, reply) => {
   return reply.type(bg.contentType).header('Cache-Control', 'no-cache').send(createReadStream(bg.path));
 });
 
+const metrics = new MetricsCollector();
+
 app.get('/ws', { websocket: true }, (socket) => {
   const send = (msg: ServerMessage) => socket.send(JSON.stringify(msg));
-  send({ type: 'hello', version: HARV_VERSION, status });
+  send({ type: 'hello', version: HARV_VERSION, status, metrics: metrics.latest });
+
+  const unsubscribe = metrics.onSnapshot((snapshot) => send({ type: 'metrics.tick', metrics: snapshot }));
+  socket.on('close', unsubscribe);
 
   socket.on('message', (raw) => {
     let msg: ClientMessage;
@@ -41,5 +47,8 @@ app.get('/ws', { websocket: true }, (socket) => {
   });
 });
 
+app.addHook('onClose', async () => metrics.stop());
+
 // Localhost only: Harv controls this PC, so it must never be reachable from the network.
 await app.listen({ host: '127.0.0.1', port: SERVER_PORT });
+await metrics.start();

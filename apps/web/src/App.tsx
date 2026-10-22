@@ -2,10 +2,10 @@ import { Header } from './components/Header.tsx';
 import { HistorySidebar } from './components/HistorySidebar.tsx';
 import { ChatPanel } from './components/ChatPanel.tsx';
 import { StatsPanel } from './components/StatsPanel.tsx';
-import { useHarvSocket } from './lib/useHarvSocket.ts';
+import { useConnection } from './lib/useHarvSocket.ts';
 
 export function App() {
-  const conn = useHarvSocket();
+  const conn = useConnection();
 
   return (
     <div className="relative min-h-full overflow-hidden">

@@ -11,7 +11,8 @@
     "@fastify/static": "^10.1.7",
     "@fastify/websocket": "^11.3.4",
     "@harv/shared": "*",
-    "fastify": "^5.12.7"
+    "fastify": "^5.12.7",
+    "systeminformation": "^5.33.16"
   },
   "devDependencies": {
     "@types/ws": "^8.18.2",
