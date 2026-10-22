@@ -10,6 +10,14 @@ Stack: TypeScript everywhere, using npm workspaces. `apps/server` runs Node 24 w
 
 The user's hardware: Ryzen 7 5700X3D (8 cores / 16 threads), RTX 3060 Ti 8 GB, 32 GB RAM, Windows 11. Plan: **Claude Pro** (tight limits; the router is tuned for it, see `docs/PLAN.md` §5).
 
+## Harv's identity: same rules for you
+
+**The behaviour taught in these dev sessions IS Harv.** `harv/persona.md` is Harv's shared rulebook. The runtime Harv loads it into its system prompt, and you (Claude Code working in this repo) follow it too.
+- When the user teaches a new behaviour rule that applies to Harv generally, add it to `harv/persona.md` as well as saving it to memory.
+- Dev-only rules (git, tests, wrap-up chores) stay in dev memory or here.
+- `harv/persona.md` is public, so it must never contain personal data.
+- The runtime Harv's private facts live in `~/.harv/memory/*.md`. It reads them into its prompt at session start and changes them via its `remember`/`forget` tools (`apps/server/src/agent/memory.ts`), which can only write in that folder.
+
 ## Locked design: "Mission Control Glass"
 
 The mockup is board "2b" at https://claude.ai/artifact/NAbsVqrzJ1MQMSmn3couH4. Its source is `MissionGlass.dc.html` in that artifact.
@@ -86,6 +94,10 @@ Harv runs only on the user's Claude subscription, which reaches Claude through t
     - the `guard.ts` `PreToolUse` hook plus `canUseTool`
   - A session refuses to run if the init message's `apiKeySource` isn't `none`/`oauth` (a subscription login).
 - `apps/web/src`: `App.tsx` lays out Header, HistorySidebar, ChatPanel and StatsPanel. `lib/useHarvSocket.ts` is a module-level store over the single WebSocket: `useConnection()` and `useMetrics()` via `useSyncExternalStore`, so 1 s ticks only re-render what reads metrics. `components/stats/` holds the expanded panel's cards.
+- `apps/server/src/store/chats.ts` keeps chat history in `~/.harv/harv.db` (`node:sqlite`, so there's no native dependency).
+  - `ChatManager` writes every finished line through its `emit` wrapper. Deltas aren't stored.
+  - It also stores the Claude `session_id` per chat. Reopening or restarting creates the session with `resume`, and if that fails, `onResumeFailed` starts it fresh.
+  - Closing a tab sets `open=0`, so the chat stays in history. Delete removes it for good.
 - Web state: `lib/socket.ts` is the only WebSocket (`onServerMessage`, `sendMessage`). Stores are built with `lib/createStore.ts`: connection/metrics/catalog in `useHarvSocket.ts`, and tabs/lines/model/effort in `chatStore.ts`, where `applyChatEvent` turns server events into chat lines. Theme tokens and the `glass` and animation utilities live in `index.css` (Tailwind v4 `@theme` / `@utility`).
 - The user's background photo is personal. It lives at `~/.harv/background.*` and is served by `/api/background`. Never commit it to this public repo.
 

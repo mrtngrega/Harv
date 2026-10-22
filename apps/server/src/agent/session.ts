@@ -6,6 +6,14 @@ import { AsyncQueue } from './queue.ts';
 
 type Emit = (msg: ChatServerMessage) => void;
 
+export interface SessionHooks {
+  onStateChange: () => void;
+  /** Claude Code's session id, stored so the chat can be resumed after a restart. */
+  onSessionId: (sessionId: string) => void;
+  /** Resuming an old session failed before it started (e.g. its transcript is gone). */
+  onResumeFailed: () => void;
+}
+
 const ERROR_TEXT: Record<string, string> = {
   rate_limit: 'Claude Pro usage limit reached. Harv will be able to continue after the limit resets.',
   authentication_failed: 'Claude Code isn’t logged in. Run `claude` in a terminal and log in with your subscription.',
@@ -26,6 +34,7 @@ export class ChatSession {
   private q: Query;
   private stopping = false;
   private closed = false;
+  private started = false;
   busy = false;
   toolRunning = false;
 
@@ -34,9 +43,10 @@ export class ChatSession {
     private model: string,
     private effort: EffortLevel,
     private emit: Emit,
-    private onStateChange: () => void,
+    private hooks: SessionHooks,
+    private resume?: string,
   ) {
-    this.q = query({ prompt: this.input, options: buildOptions(model, effort, this.abort) });
+    this.q = query({ prompt: this.input, options: buildOptions(model, effort, this.abort, resume) });
     void this.consume();
   }
 
@@ -69,14 +79,18 @@ export class ChatSession {
   private setBusy(busy: boolean, toolRunning = false) {
     this.busy = busy;
     this.toolRunning = toolRunning;
-    this.onStateChange();
+    this.hooks.onStateChange();
   }
 
   private async consume() {
     try {
       for await (const msg of this.q) this.handle(msg);
     } catch (err) {
-      if (!this.closed) this.emit({ type: 'chat.error', tabId: this.tabId, message: `Claude session ended: ${(err as Error).message}` });
+      if (this.resume && !this.started) {
+        this.hooks.onResumeFailed();
+      } else if (!this.closed) {
+        this.emit({ type: 'chat.error', tabId: this.tabId, message: `Claude session ended: ${(err as Error).message}` });
+      }
     } finally {
       if (this.busy) this.emit({ type: 'chat.done', tabId: this.tabId, ok: false, stopped: this.stopping });
       this.setBusy(false);
@@ -87,7 +101,10 @@ export class ChatSession {
     const tabId = this.tabId;
     switch (msg.type) {
       case 'system':
-        if (msg.subtype === 'init' && !SUBSCRIPTION_KEY_SOURCES.has(msg.apiKeySource)) {
+        if (msg.subtype !== 'init') return;
+        this.started = true;
+        this.hooks.onSessionId(msg.session_id);
+        if (!SUBSCRIPTION_KEY_SOURCES.has(msg.apiKeySource)) {
           // Hard stop: this would bill per token instead of using the subscription.
           this.emit({
             type: 'chat.error',
@@ -125,7 +142,7 @@ export class ChatSession {
               text = '';
             }
             const input = (block.input ?? {}) as Record<string, unknown>;
-            this.emit({ type: 'chat.tool', tabId, name: block.name, detail: describeTool(block.name, input) });
+            this.emit({ type: 'chat.tool', tabId, name: block.name.replace(/^mcp__harv__/, ''), detail: describeTool(block.name, input) });
           }
         }
         if (text) this.emit({ type: 'chat.assistant', tabId, text });

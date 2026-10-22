@@ -29,10 +29,40 @@ export interface ChatUsage {
   durationMs: number;
 }
 
+export type LineKind = 'you' | 'harv' | 'tool' | 'notice' | 'error';
+
+/** A finished chat line as stored in the history database. */
+export interface StoredLine {
+  kind: LineKind;
+  text: string;
+  /** "sonnet·medium" on Harv's replies. */
+  tag?: string;
+}
+
+/** An open chat tab with its saved lines (sent on connect and when reopening from history). */
+export interface ChatSnapshot {
+  id: string;
+  title: string;
+  lines: StoredLine[];
+}
+
+export interface HistoryItem {
+  id: string;
+  title: string;
+  updatedAt: number;
+  open: boolean;
+  /** Matching text when the list is a search result. */
+  snippet?: string;
+}
+
 export type ChatClientMessage =
   | { type: 'chat.send'; tabId: string; text: string; model: ModelChoice; effort: EffortLevel }
   | { type: 'chat.stop'; tabId: string }
-  | { type: 'chat.close'; tabId: string };
+  | { type: 'chat.close'; tabId: string }
+  /** Reopen a chat from history as a tab. */
+  | { type: 'chat.open'; tabId: string }
+  | { type: 'chat.delete'; tabId: string }
+  | { type: 'history.search'; query: string };
 
 export type ChatServerMessage =
   /** A turn began; `model`/`effort` are what actually runs (AUTO resolved). */
@@ -43,4 +73,8 @@ export type ChatServerMessage =
   | { type: 'chat.tool'; tabId: string; name: string; detail: string }
   | { type: 'chat.done'; tabId: string; ok: boolean; stopped: boolean; error?: string; usage?: ChatUsage }
   | { type: 'chat.notice'; tabId: string; message: string }
-  | { type: 'chat.error'; tabId: string; message: string };
+  | { type: 'chat.error'; tabId: string; message: string }
+  | { type: 'chat.opened'; chat: ChatSnapshot }
+  | { type: 'chat.removed'; tabId: string }
+  /** The history list; `query` echoes the search it answers ("" = everything). */
+  | { type: 'history'; items: HistoryItem[]; query: string };

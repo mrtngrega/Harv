@@ -1,6 +1,6 @@
 # Harv: build plan
 
-Status: M0–M2 done 2026-10-22 (scaffold, glass shell, live hardware panel, chat on the subscription). Next: M3 (tabs persistence + history). Web app only for now; the desktop app (M9) is deferred until the user asks.
+Status: M0–M3 done 2026-10-22 (scaffold, glass shell, live hardware panel, chat on the subscription, persistent tabs/history + Harv's persona and memory). Next: M4 (file attachments). Web app only for now; the desktop app (M9) is deferred until the user asks.
 
 ## 1. Can Harv run on a Claude subscription? (research summary)
 
@@ -99,13 +99,21 @@ Shell commands are parsed for risky patterns: `rm`, `del`, `Remove-Item`, `forma
 | M0 | Scaffold: workspaces, TS, lint, tests, dev script | `npm run dev` opens an empty glass shell at localhost |
 | M1 | Live hardware panel (narrow and expanded) | Real CPU, GPU and RAM values tick every second. LHM sensors show when LHM is running. |
 | M2 | Chat on the subscription: one tab, streaming, manual model + effort | You chat with Harv. A check confirms no API key is used. Effort control is verified. |
-| M3 | Tabs + history (SQLite, resume) | Several chats open at once, survive a restart, history is searchable |
+| M3 | Tabs + history (SQLite, resume) + **Harv's persona and memory** | Several chats open at once, survive a restart, history is searchable. Harv follows the shared rulebook `harv/persona.md` (the same behaviour rules the user teaches in dev sessions) and has its own persistent memory in `~/.harv/memory` that it can read and update. |
 | M4 | Files: drag-and-drop, attach button | Harv reads a PDF or image you drop in |
 | M5 | Safety gate: tiers, approvals, backups, action log, stop | A red action shows a card, Undo restores a backup, Stop halts work |
 | M6 | Auto router | AUTO picks model·effort with reasons, Try harder works |
 | M7 | Plan usage meter + limit handling | Session and weekly % match `/usage`. Hitting a limit pauses and queues. |
 | M8 | Polish: animations, settings, background picker, status pill | It looks like the mockup |
 | M9 | Desktop: Tauri window, tray, autostart | Harv starts with Windows |
+
+## 6b. Harv's identity: one set of behaviours (decided 2026-10-22)
+
+The user's principle: **the behaviour built in development sessions IS Harv.** The Claude Code sessions that build Harv and the Harv running in the dashboard follow the same rules.
+
+- `harv/persona.md` (public repo): personality and behaviour rules. Runtime Harv loads it into its system prompt, and `CLAUDE.md` tells dev sessions to follow it too. No personal data goes here.
+- `~/.harv/memory/` (private, on the PC): what Harv knows about the user, such as their profile, preferences and decisions. It's read into context at session start and updated through a scoped `remember`/`forget` tool that can only write inside that folder.
+- When the user teaches a new rule, it goes into `harv/persona.md` if it applies to Harv generally. Dev-only rules (git, testing) stay in `CLAUDE.md` or dev memory.
 
 ## 7. Risks and open questions
 

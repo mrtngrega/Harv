@@ -11,11 +11,20 @@ export type LhmLaunchResult = 'already-running' | 'started' | 'declined' | 'not-
 export type * from './metrics.ts';
 export * from './chat.ts';
 import type { MetricsSnapshot } from './metrics.ts';
-import type { Catalog, ChatClientMessage, ChatServerMessage } from './chat.ts';
+import type { Catalog, ChatClientMessage, ChatServerMessage, ChatSnapshot, HistoryItem } from './chat.ts';
 
 /** Messages the server pushes to the dashboard over /ws. */
 export type ServerMessage =
-  | { type: 'hello'; version: string; status: HarvStatus; metrics: MetricsSnapshot | null; catalog: Catalog | null }
+  | {
+      type: 'hello';
+      version: string;
+      status: HarvStatus;
+      metrics: MetricsSnapshot | null;
+      catalog: Catalog | null;
+      /** Open chat tabs restored from the database. */
+      chats: ChatSnapshot[];
+      history: HistoryItem[];
+    }
   | { type: 'harv.status'; status: HarvStatus }
   | { type: 'metrics.tick'; metrics: MetricsSnapshot }
   | { type: 'catalog'; catalog: Catalog }

@@ -5,7 +5,7 @@
 **A personal, Jarvis-style AI assistant for your PC: a live dashboard, powered by Claude.**
 
 ![status](https://img.shields.io/badge/status-early%20build-A8C8E8?style=flat-square&labelColor=141B23)
-![milestone](https://img.shields.io/badge/milestone-M2%20of%20M9-9FE0C4?style=flat-square&labelColor=141B23)
+![milestone](https://img.shields.io/badge/milestone-M3%20of%20M9-9FE0C4?style=flat-square&labelColor=141B23)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-A8C8E8?style=flat-square&logo=typescript&logoColor=E8EDF2&labelColor=141B23)
 ![platform](https://img.shields.io/badge/platform-Windows%2011-A8C8E8?style=flat-square&labelColor=141B23)
 
@@ -21,7 +21,8 @@ Harv lives in a dashboard in your browser. You type what you want into one comma
 |---|---|
 | **Command line chat** | One `harv>` prompt for questions and commands, with streaming replies |
 | **Chat tabs** | Several conversations open at once, Chrome-style, each with its own model and files |
-| **Chat history** | Collapsible sidebar, searchable, and chats survive restarts |
+| **Chat history** | Collapsible sidebar, searchable, and chats survive restarts (resumed with full context) |
+| **Memory & persona** | Harv follows one rulebook ([`harv/persona.md`](harv/persona.md)) and keeps a private memory about you on your PC |
 | **AUTO router** | Picks the **model and effort** for each task by how hard it is (Haiku → Sonnet → Opus, low → max), with a *Try harder* button |
 | **Live hardware** | CPU (per thread), GPU, RAM, disks, network, temperatures, fans, clocks, power and top processes. The panel starts narrow and expands for full detail. |
 | **Plan usage** | Claude session and weekly usage with reset times, plus Harv's own token and routing stats |
@@ -63,7 +64,7 @@ flowchart LR
 - [x] **M0**: Scaffold and the glass dashboard shell
 - [x] **M1**: Live hardware panel
 - [x] **M2**: Chat with Claude (streaming, model and effort)
-- [ ] **M3**: Tabs and persistent history
+- [x] **M3**: Tabs, persistent history, Harv's persona and memory
 - [ ] **M4**: File attachments
 - [ ] **M5**: Safety gate, approvals, backups, stop button
 - [ ] **M6**: AUTO router

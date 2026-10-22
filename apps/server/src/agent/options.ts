@@ -1,9 +1,11 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { HookCallback, Options } from '@anthropic-ai/claude-agent-sdk';
 import { HARV_VERSION, type EffortLevel } from '@harv/shared';
 import { HARV_HOME } from '../paths.ts';
 import { checkTool, READ_ONLY_TOOLS } from './guard.ts';
+import { memoryContext, memoryServer } from './memory.ts';
 
 /** Harv's own working folder; Claude starts here rather than in any project. */
 export const WORKSPACE = join(HARV_HOME, 'workspace');
@@ -19,15 +21,24 @@ function subscriptionEnv(): Record<string, string | undefined> {
   return env;
 }
 
+/** Harv's shared rulebook (repo root `harv/persona.md`); dev sessions follow the same file. */
+const PERSONA_PATH = fileURLToPath(new URL('../../../../harv/persona.md', import.meta.url));
+
+/** Built fresh for each new session, so persona edits and new memories apply to the next chat. */
 function systemPrompt(): string {
+  const persona = existsSync(PERSONA_PATH) ? readFileSync(PERSONA_PATH, 'utf8').trim() : 'You are Harv, a personal assistant.';
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   return [
-    'You are Harv, a personal assistant living in a dashboard on the user’s Windows 11 PC (Ryzen 7 5700X3D, RTX 3060 Ti, 32 GB RAM).',
-    'Be direct and concise. Use light Markdown only when it helps (short lists, code blocks).',
-    `You can currently read files, search files, and search or fetch the web. You cannot run commands, edit files or control the PC yet; those arrive with Harv’s safety gate. If asked, say so plainly.`,
-    'Never read or reveal credentials, tokens, keys or password files.',
-    `Today is ${today}.`,
-  ].join('\n');
+    persona,
+    '## Right now',
+    [
+      "- You're running inside Harv's dashboard on the user's Windows PC. Replies render as Markdown in a log-style chat, so keep formatting light.",
+      "- Your tools: read and search files, search and fetch the web, and remember/forget for your memory. You can't run commands, edit files or control the PC yet; that arrives with Harv's safety gate. If asked, say so plainly and offer what you can do.",
+      `- Today is ${today}.`,
+    ].join('\n'),
+    '## Your memory',
+    memoryContext(),
+  ].join('\n\n');
 }
 
 /** Every tool call passes this hook, even ones Claude Code would auto-approve. */
@@ -38,17 +49,19 @@ const guardHook: HookCallback = async (input) => {
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: verdict.reason } };
 };
 
-export function buildOptions(model: string, effort: EffortLevel, abortController: AbortController): Options {
+export function buildOptions(model: string, effort: EffortLevel, abortController: AbortController, resume?: string): Options {
   mkdirSync(WORKSPACE, { recursive: true });
   return {
     model,
     effort,
     abortController,
+    resume,
     env: subscriptionEnv(),
     cwd: WORKSPACE,
     // Isolation: don't load the user's Claude Code settings, CLAUDE.md files or MCP servers.
     settingSources: [],
     strictMcpConfig: true,
+    mcpServers: { harv: memoryServer },
     systemPrompt: systemPrompt(),
     tools: READ_ONLY_TOOLS,
     permissionMode: 'default',

@@ -2,8 +2,11 @@
 // search. Anything that runs commands or changes files is denied, and so is
 // reading credentials or secrets, which Harv must never touch.
 
-/** Tools available before the safety gate exists. */
+/** Built-in tools available before the safety gate exists. */
 export const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
+
+/** Harv's own memory tools (they can only write inside ~/.harv/memory). */
+export const MEMORY_TOOLS = ['mcp__harv__remember', 'mcp__harv__forget'];
 
 const SENSITIVE_PATHS: RegExp[] = [
   /(^|[\\/])\.claude([\\/]|$)/i, // Claude Code login and settings
@@ -23,7 +26,7 @@ function pathsOf(input: Record<string, unknown>): string[] {
 }
 
 export function checkTool(name: string, input: Record<string, unknown>): GuardVerdict {
-  if (!READ_ONLY_TOOLS.includes(name)) {
+  if (!READ_ONLY_TOOLS.includes(name) && !MEMORY_TOOLS.includes(name)) {
     return {
       allow: false,
       reason: `${name} isn't enabled yet. Until the safety gate is built, Harv can only read files and search; tell the user this action will be possible later.`,
@@ -49,6 +52,9 @@ export function describeTool(name: string, input: Record<string, unknown>): stri
       return pick('query');
     case 'WebFetch':
       return pick('url');
+    case 'mcp__harv__remember':
+    case 'mcp__harv__forget':
+      return pick('name');
     default:
       return '';
   }

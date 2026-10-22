@@ -1,4 +1,5 @@
 import { createReadStream } from 'node:fs';
+import { join } from 'node:path';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import { HARV_VERSION, SERVER_PORT, type ClientMessage, type ServerMessage } from '@harv/shared';
@@ -9,6 +10,7 @@ import { MetricsCollector } from './metrics/collector.ts';
 import { ensureLhmRunning } from './metrics/lhmLauncher.ts';
 import { stripBilledCredentials } from './env.ts';
 import { ensureHarvHome, HARV_HOME } from './paths.ts';
+import { ChatStore } from './store/chats.ts';
 
 const removed = stripBilledCredentials();
 ensureHarvHome();
@@ -25,7 +27,8 @@ const clients = new Set<(msg: ServerMessage) => void>();
 const broadcast = (msg: ServerMessage) => clients.forEach((send) => send(msg));
 
 const metrics = new MetricsCollector();
-const chats = new ChatManager(broadcast, (status) => broadcast({ type: 'harv.status', status }));
+const store = new ChatStore(join(HARV_HOME, 'harv.db'));
+const chats = new ChatManager(store, broadcast, (status) => broadcast({ type: 'harv.status', status }));
 
 app.get('/api/health', async () => ({ ok: true, version: HARV_VERSION, status: chats.status, home: HARV_HOME }));
 
@@ -41,7 +44,15 @@ app.post('/api/sensors/start', async () => ({ result: await ensureLhmRunning() }
 app.get('/ws', { websocket: true }, (socket) => {
   const send = (msg: ServerMessage) => socket.send(JSON.stringify(msg));
   clients.add(send);
-  send({ type: 'hello', version: HARV_VERSION, status: chats.status, metrics: metrics.latest, catalog: chats.catalog });
+  send({
+    type: 'hello',
+    version: HARV_VERSION,
+    status: chats.status,
+    metrics: metrics.latest,
+    catalog: chats.catalog,
+    chats: chats.openChats(),
+    history: chats.history(),
+  });
 
   const unsubscribe = metrics.onSnapshot((snapshot) => send({ type: 'metrics.tick', metrics: snapshot }));
   socket.on('close', () => {
@@ -69,6 +80,15 @@ app.get('/ws', { websocket: true }, (socket) => {
       case 'chat.close':
         chats.close(msg.tabId);
         break;
+      case 'chat.open':
+        chats.open(msg.tabId);
+        break;
+      case 'chat.delete':
+        chats.delete(msg.tabId);
+        break;
+      case 'history.search':
+        send({ type: 'history', items: chats.history(msg.query), query: msg.query });
+        break;
     }
   });
 });
@@ -76,6 +96,7 @@ app.get('/ws', { websocket: true }, (socket) => {
 app.addHook('onClose', async () => {
   metrics.stop();
   chats.closeAll();
+  store.close();
 });
 
 // Claude Code subprocesses would otherwise keep the process alive on restart (tsx watch hangs).
