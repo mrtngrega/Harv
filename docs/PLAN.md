@@ -27,7 +27,7 @@ What Anthropic's docs say ([Legal and compliance](https://code.claude.com/docs/e
 
 | Need | Finding |
 |---|---|
-| Claude engine | `@anthropic-ai/claude-agent-sdk` (TypeScript), v0.3.308 at research time, Node >= 18. Claude Code 2.1.308 is installed. |
+| Claude engine | `@anthropic-ai/claude-agent-sdk` (TypeScript), v0.3.309 (updated 2026-10-23), Node >= 18. Claude Code 2.1.309 is installed. |
 | Model per chat | `model` option. Mid-session: `query.setModel()` (streaming input mode). |
 | Effort | `effort` option: `low`, `medium`, `high`, `xhigh`, `max`. **Verified in M2:** mid-session changes work through `query.applyFlagSettings({ effortLevel })`, and context is kept. |
 | Live streaming | `includePartialMessages: true` |
