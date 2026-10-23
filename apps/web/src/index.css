@@ -67,6 +67,14 @@
   }
 }
 
+/* The motion toggle in settings (off = still). */
+.still *,
+.still *::before,
+.still *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -26,6 +26,8 @@ export class Router {
     private classify: Classify = haikuClassify,
     /** Weekly plan usage in %, once M7 can read it. */
     private weeklyUsed: () => number | undefined = () => undefined,
+    /** The "allow Fable in AUTO" setting. */
+    private allowFable: () => boolean = () => false,
   ) {}
 
   private state(tabId: string): TabState {
@@ -65,7 +67,7 @@ export class Router {
     if (rule?.kind === 'decide') return { pick: rule.pick, source: 'rule', why: rule.why };
 
     if (!rule && s.task && isFollowUp(text, files, s.task.at)) {
-      const up = s.failed ? stepUp(s.task.pick) : null;
+      const up = s.failed ? stepUp(s.task.pick, this.allowFable()) : null;
       if (up) return { pick: up, source: 'followup', why: `stepped up after the last turn failed (${s.task.why})` };
       return { pick: s.task.pick, source: 'followup', why: `same task (${s.task.why})` };
     }
@@ -75,7 +77,7 @@ export class Router {
       const pick = rule ? atLeast(AUTO_FALLBACK, rule.pick) : AUTO_FALLBACK;
       return { pick, source: 'fallback', why: 'the classifier didn’t answer, so the default' };
     }
-    const table = pickFor(c, this.weeklyUsed());
+    const table = pickFor(c, this.weeklyUsed(), this.allowFable());
     if (rule && atLeast(table.pick, rule.pick) !== table.pick) {
       return { pick: rule.pick, source: 'rule', why: `${table.why}; at least ${tag(rule.pick)} for ${rule.why}`, c };
     }
@@ -84,7 +86,7 @@ export class Router {
 
   /** "Try harder": one step up from what the last turn ran at. Null when that was already the top. */
   harder(tabId: string, from: Pick): RouteDecision | null {
-    const up = stepUp(from);
+    const up = stepUp(from, this.allowFable());
     if (!up) return null;
     this.log.markLast(tabId, 'harder');
     const s = this.state(tabId);

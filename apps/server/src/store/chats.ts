@@ -9,6 +9,7 @@ const SCHEMA = `
     title      TEXT NOT NULL,
     session_id TEXT,
     open       INTEGER NOT NULL DEFAULT 1,
+    context    INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
@@ -51,6 +52,8 @@ export class ChatStore {
     if (!columns.some((c) => c.name === 'files')) this.db.exec('ALTER TABLE lines ADD COLUMN files TEXT');
     if (!columns.some((c) => c.name === 'ref')) this.db.exec('ALTER TABLE lines ADD COLUMN ref TEXT');
     if (!columns.some((c) => c.name === 'reason')) this.db.exec('ALTER TABLE lines ADD COLUMN reason TEXT');
+    const chatColumns = this.db.prepare('PRAGMA table_info(chats)').all() as { name: string }[];
+    if (!chatColumns.some((c) => c.name === 'context')) this.db.exec('ALTER TABLE chats ADD COLUMN context INTEGER');
   }
 
   close(): void {
@@ -83,6 +86,11 @@ export class ChatStore {
     return row?.session_id ?? null;
   }
 
+  /** The tokens a chat's last turn sent, shown as its context size. */
+  setContext(id: string, tokens: number): void {
+    this.db.prepare('UPDATE chats SET context = ? WHERE id = ?').run(tokens, id);
+  }
+
   exists(id: string): boolean {
     return this.db.prepare('SELECT 1 FROM chats WHERE id = ?').get(id) !== undefined;
   }
@@ -96,11 +104,14 @@ export class ChatStore {
   }
 
   snapshot(id: string): ChatSnapshot | null {
-    const chat = this.db.prepare('SELECT id, title FROM chats WHERE id = ?').get(id) as { id: string; title: string } | undefined;
-    if (!chat) return null;
+    const row = this.db.prepare('SELECT id, title, context FROM chats WHERE id = ?').get(id) as
+      | { id: string; title: string; context: number | null }
+      | undefined;
+    if (!row) return null;
+    const chat = { id: row.id, title: row.title, ...(row.context ? { context: row.context } : {}) };
     const rows = this.db
-      .prepare('SELECT kind, text, tag, reason, files, ref FROM (SELECT * FROM lines WHERE chat_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id')
-      .all(id, RESTORE_LINES) as { kind: LineKind; text: string; tag: string | null; reason: string | null; files: string | null; ref: string | null }[];
+      .prepare('SELECT kind, text, tag, reason, files, ref, created_at FROM (SELECT * FROM lines WHERE chat_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id')
+      .all(id, RESTORE_LINES) as { kind: LineKind; text: string; tag: string | null; reason: string | null; files: string | null; ref: string | null; created_at: number }[];
     return {
       ...chat,
       lines: rows.map((r) => ({
@@ -110,6 +121,7 @@ export class ChatStore {
         ...(r.reason ? { reason: r.reason } : {}),
         ...(r.files ? { files: JSON.parse(r.files) as string[] } : {}),
         ...(r.ref ? { ref: r.ref } : {}),
+        at: r.created_at,
       })),
     };
   }

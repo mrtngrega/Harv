@@ -33,6 +33,11 @@ describe('table', () => {
     expect(tag(pickFor(c(3, { category: 'code' })).pick)).toBe('sonnet·high');
   });
 
+  it('uses Fable for difficulty 5 only when allowed', () => {
+    expect(tag(pickFor(c(5), undefined, true).pick)).toBe('fable·high');
+    expect(tag(pickFor(c(4), undefined, true).pick)).toBe('opus·high');
+  });
+
   it('pushes high stakes one step up', () => {
     expect(tag(pickFor(c(2, { stakes: 'high' })).pick)).toBe('sonnet·medium');
   });
@@ -47,8 +52,10 @@ describe('table', () => {
     expect(tag(stepUp({ model: 'sonnet', effort: 'medium' })!)).toBe('sonnet·high');
     expect(tag(stepUp({ model: 'sonnet', effort: 'low' })!)).toBe('sonnet·medium');
     expect(tag(stepUp({ model: 'haiku', effort: 'max' })!)).toBe('sonnet·medium');
-    expect(tag(stepUp({ model: 'fable', effort: 'high' })!)).toBe('opus·xhigh');
+    expect(stepUp({ model: 'fable', effort: 'high' })).toBeNull();
     expect(stepUp({ model: 'opus', effort: 'max' })).toBeNull();
+    expect(tag(stepUp({ model: 'opus', effort: 'max' }, true)!)).toBe('fable·high');
+    expect(tag(stepUp({ model: 'fable', effort: 'high' }, true)!)).toBe('fable·max');
   });
 });
 

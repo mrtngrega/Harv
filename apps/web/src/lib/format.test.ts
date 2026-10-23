@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countDuplicates, duration, rate, resetTime, sizePair, tokens } from './format.ts';
+import { countDuplicates, duration, lineTime, pace, rate, resetTime, sizePair, tokens, until } from './format.ts';
 
 describe('format', () => {
   it('formats throughput', () => {
@@ -34,5 +34,27 @@ describe('plan usage format', () => {
 
   it('shortens token counts', () => {
     expect([tokens(820), tokens(12_400), tokens(1_300_000), tokens(4200)]).toEqual(['820', '12k', '1.3M', '4.2k']);
+  });
+});
+
+describe('plan meter details', () => {
+  const now = new Date(2026, 9, 23, 20, 0).getTime();
+  it('counts down to a reset', () => {
+    expect(until(now + (2 * 60 + 14) * 60_000, now)).toBe('2h 14m');
+    expect(until(now + 36 * 60_000, now)).toBe('36m');
+  });
+
+  it('compares usage with time gone in the window', () => {
+    const week = 7 * 24 * 60 * 60 * 1000;
+    // Halfway through the week.
+    expect(pace({ kind: 'weekly_all', percent: 40, resetsAt: now + week / 2 }, now)).toBe('on track');
+    expect(pace({ kind: 'weekly_all', percent: 80, resetsAt: now + week / 2 }, now)).toBe('running hot');
+    expect(pace({ kind: 'session', percent: 100, resetsAt: now + 60_000 }, now)).toBe('limit reached');
+  });
+
+  it('shows line times relative to today', () => {
+    expect(lineTime(new Date(2026, 9, 23, 9, 5).getTime(), now)).toBe('09:05');
+    expect(lineTime(new Date(2026, 9, 20, 9, 5).getTime(), now)).toBe('Tue');
+    expect(lineTime(new Date(2026, 8, 1, 9, 5).getTime(), now)).toBe('1 Sept');
   });
 });

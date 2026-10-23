@@ -46,6 +46,8 @@ export class ChatSession {
   private usedMemoryTool = false;
   busy = false;
   toolRunning = false;
+  /** The tool running now, for the status pill ("working · Read"). */
+  toolName: string | undefined;
 
   constructor(
     readonly tabId: string,
@@ -100,6 +102,7 @@ export class ChatSession {
   private setBusy(busy: boolean, toolRunning = false) {
     this.busy = busy;
     this.toolRunning = toolRunning;
+    if (!toolRunning) this.toolName = undefined;
     this.hooks.onStateChange();
   }
 
@@ -160,6 +163,7 @@ export class ChatSession {
           if (block.type === 'tool_use') {
             usedTool = true;
             if (MEMORY_TOOLS.includes(block.name)) this.usedMemoryTool = true;
+            this.toolName = block.name.replace(/^mcp__harv__/, '');
             if (text) {
               this.emit({ type: 'chat.assistant', tabId, text });
               text = '';

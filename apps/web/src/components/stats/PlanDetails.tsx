@@ -1,16 +1,37 @@
-import type { PlanUsage } from '@harv/shared';
-import { pct, resetTime, tokens } from '../../lib/format.ts';
-import { Bar, barColor, Card } from './parts.tsx';
+import type { PlanMeter, PlanUsage } from '@harv/shared';
+import { useChat } from '../../lib/chatStore.ts';
+import { lineTime, pace, pct, PLAN_WINDOW_MS, resetTime, tokens, until } from '../../lib/format.ts';
+import { BarList, Card, Rows } from './parts.tsx';
 
-const ago = (at: number) => {
-  const min = Math.round((Date.now() - at) / 60_000);
-  return min < 1 ? 'just now' : `${min} min ago`;
-};
+function MeterCard({ m }: { m: PlanMeter }) {
+  const session = m.kind === 'session';
+  const sub = session ? 'current 5-hour window' : m.kind === 'weekly_all' ? 'all models' : m.label.replace(/^Weekly · /, '');
+  const rows: [string, string | undefined][] = session
+    ? [
+        ['Resets in', until(m.resetsAt)],
+        ['Started', m.resetsAt ? lineTime(m.resetsAt - PLAN_WINDOW_MS.session) : undefined],
+      ]
+    : [
+        ['Resets', resetTime(m.resetsAt)],
+        ['Pace', pace(m)],
+      ];
+  return (
+    <Card title={session ? 'Session' : 'Weekly'} sub={sub} value={pct(m.percent)} load={m.percent}>
+      <Rows rows={rows} />
+    </Card>
+  );
+}
 
-/** Claude plan meters (from `/usage`) and Harv's own tracking. */
+/** Claude plan meters (from `/usage`) and Harv's own tracking, laid out like the mockup. */
 export function PlanDetails({ usage }: { usage: PlanUsage | null }) {
+  const { tabs, activeId } = useChat();
+  const context = tabs.find((t) => t.id === activeId)?.context;
   const harv = usage?.harv;
-  const total = harv?.split.reduce((sum, r) => sum + r.turns, 0) ?? 0;
+  const byModel = new Map<string, number>();
+  for (const r of harv?.split ?? []) byModel.set(r.model, (byModel.get(r.model) ?? 0) + r.turns);
+  const total = [...byModel.values()].reduce((a, b) => a + b, 0);
+  const harder = harv?.split.reduce((sum, r) => sum + r.harder, 0) ?? 0;
+  const name = (model: string) => model.charAt(0).toUpperCase() + model.slice(1);
 
   return (
     <>
@@ -29,48 +50,33 @@ export function PlanDetails({ usage }: { usage: PlanUsage | null }) {
         </div>
       )}
 
-      <Card title="Usage" sub={usage?.fetchedAt ? `from /usage · ${ago(usage.fetchedAt)}` : 'session · weekly'}>
-        {!usage || usage.meters.length === 0 ? (
+      {!usage || usage.meters.length === 0 ? (
+        <Card title="Usage" sub="session · weekly">
           <p className="m-0 text-xs text-muted">Waiting for Claude to report usage…</p>
-        ) : (
-          <ul className="m-0 flex list-none flex-col gap-2.5 p-0 text-xs">
-            {usage.meters.map((m) => (
-              <li key={`${m.kind}-${m.label}`} className="flex flex-col gap-1">
-                <div className="flex items-baseline gap-2">
-                  <span className="min-w-0 flex-1 truncate">{m.label}</span>
-                  <span className="text-[11px] text-faint">resets {resetTime(m.resetsAt)}</span>
-                  <span className="w-10 text-right font-semibold tabular-nums" style={{ color: barColor(m.percent) }}>
-                    {pct(m.percent)}
-                  </span>
-                </div>
-                <Bar value={m.percent} height={4} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
+        </Card>
+      ) : (
+        usage.meters.map((m) => <MeterCard key={`${m.kind}-${m.label}`} m={m} />)
+      )}
 
       {harv && (
-        <Card title="Harv" sub="its own tracking" value={`${harv.turnsToday} today`}>
-          <p className="m-0 text-xs text-muted">
-            {tokens(harv.inputTokensToday)} in · {tokens(harv.outputTokensToday)} out today
-          </p>
-          {total > 0 && (
-            <ul className="m-0 flex list-none flex-col gap-1.5 p-0 text-xs" aria-label="Routing split, last 7 days">
-              {harv.split.map((r) => (
-                <li key={`${r.model}-${r.effort}`} className="flex flex-col gap-1">
-                  <div className="flex gap-2">
-                    <span className="flex-1">
-                      {r.model}·{r.effort}
-                    </span>
-                    {r.harder > 0 && <span className="text-[11px] text-faint">{r.harder}× harder</span>}
-                    <span className="w-14 text-right tabular-nums">{r.turns} turns</span>
-                  </div>
-                  <Bar value={(r.turns / total) * 100} />
-                </li>
-              ))}
-            </ul>
-          )}
+        <Card title="Harv today" sub="tracked by Harv" value={`${harv.turnsToday} msgs`}>
+          <Rows
+            rows={[
+              ['Tokens in', tokens(harv.inputTokensToday)],
+              ['Tokens out', tokens(harv.outputTokensToday)],
+              ['Open tabs', String(tabs.length)],
+              ['Context', context ? `${tokens(context)} tokens` : undefined],
+              ['Try harder', harder ? `${harder}× this week` : undefined],
+            ]}
+          />
+          <BarList
+            title="Routing · last 7 days"
+            items={[...byModel].map(([model, turns]) => ({
+              name: name(model),
+              value: `${turns} · ${Math.round((turns / total) * 100)}%`,
+              share: (turns / total) * 100,
+            }))}
+          />
         </Card>
       )}
     </>

@@ -70,6 +70,11 @@ export class ChatManager {
     return 'idle';
   }
 
+  /** The running tool's name while Harv is working. */
+  get statusDetail(): string | undefined {
+    return [...this.sessions.values()].find((s) => s.toolRunning)?.toolName;
+  }
+
   history(query = '') {
     return this.store.history(query);
   }
@@ -107,6 +112,7 @@ export class ChatManager {
         break;
       case 'chat.done':
         this.router.finished(msg.tabId, msg.ok, msg.stopped, msg.usage);
+        if (msg.usage?.inputTokens) this.store.setContext(msg.tabId, msg.usage.inputTokens);
         this.meter.turnFinished();
         if (msg.stopped) save({ kind: 'notice', text: 'Stopped.' });
         if (msg.error) save({ kind: 'error', text: msg.error });
@@ -272,7 +278,7 @@ export class ChatManager {
     }
     const decision = this.router.harder(tabId, from);
     if (!decision) {
-      this.emit({ type: 'chat.notice', tabId, message: 'Already at the top (opus·max), so there’s no harder to try.' });
+      this.emit({ type: 'chat.notice', tabId, message: 'Already at the top of the ladder, so there’s no harder to try.' });
       this.broadcast({ type: 'chat.done', tabId, ok: true, stopped: false });
       return;
     }

@@ -3,9 +3,10 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Attachment } from '@harv/shared';
 import { formatSize, uploadAttachment } from '../lib/attachments.ts';
-import { resetTime } from '../lib/format.ts';
+import { lineTime, resetTime, tokens } from '../lib/format.ts';
+import { HELP, parseCommand } from '../lib/commands.ts';
 import { useUsage } from '../lib/useHarvSocket.ts';
-import { chat, useChat, type Line } from '../lib/chatStore.ts';
+import { chat, getChatState, useChat, type Line } from '../lib/chatStore.ts';
 import { useSafety } from '../lib/safetyStore.ts';
 import { ActionBadge, ApprovalCard } from './ApprovalCard.tsx';
 
@@ -50,11 +51,20 @@ function Thinking() {
   );
 }
 
+function Time({ at }: { at: number }) {
+  return (
+    <time dateTime={new Date(at).toISOString()} className="mr-2 text-faint tabular-nums">
+      {lineTime(at)}
+    </time>
+  );
+}
+
 function ChatLine({ line, onHarder }: { line: Line; onHarder?: () => void }) {
   switch (line.kind) {
     case 'you':
       return (
         <div className="animate-fade-in whitespace-pre-wrap">
+          <Time at={line.at} />
           <span className="text-accent">you ›</span> {line.text}
           {line.files && (
             <div className="mt-1 flex flex-wrap gap-1.5">
@@ -69,7 +79,8 @@ function ChatLine({ line, onHarder }: { line: Line; onHarder?: () => void }) {
       return (
         <div className="animate-fade-in">
           <div className="flex items-baseline gap-2">
-            <span className="text-ok">harv ›</span>
+            <Time at={line.at} />
+            <span className="-ml-2 text-ok">harv ›</span>
             {line.tag && (
               <span title={line.reason} className="cursor-help text-[11px] text-faint">
                 [{line.tag}]
@@ -97,9 +108,17 @@ function ChatLine({ line, onHarder }: { line: Line; onHarder?: () => void }) {
     case 'tool':
       return <ToolLine line={line} />;
     case 'notice':
-      return <div className="animate-fade-in text-muted">— {line.text}</div>;
+      return (
+        <div className="animate-fade-in text-muted">
+          <Time at={line.at} />— {line.text}
+        </div>
+      );
     case 'error':
-      return <div className="animate-fade-in text-warn">! {line.text}</div>;
+      return (
+        <div className="animate-fade-in text-warn">
+          <Time at={line.at} />! {line.text}
+        </div>
+      );
   }
 }
 
@@ -109,7 +128,10 @@ function ToolLine({ line }: { line: Line }) {
   const action = line.ref ? actions[line.ref] : undefined;
   return (
     <div className="animate-fade-in flex items-center gap-3 text-faint">
-      <span className="min-w-0 truncate">&nbsp;&nbsp;▸ {line.text}</span>
+      <span className="min-w-0 truncate">
+        <Time at={line.at} />
+        &nbsp;&nbsp;▸ {line.text}
+      </span>
       {action && action.tier !== 'green' && <ActionBadge action={action} />}
     </div>
   );
@@ -175,6 +197,21 @@ export function ChatPanel() {
     e.preventDefault();
     const text = draft.trim();
     const ready = pending.flatMap((p) => (p.file ? [p.file] : []));
+    const command = ready.length === 0 ? parseCommand(text) : null;
+    if (command) {
+      setDraft('');
+      if (command.kind === 'attach') fileInputRef.current?.click();
+      else if (command.kind === 'new') chat.newTab();
+      else if (command.kind === 'help') chat.localNotice(HELP);
+      else if (command.kind === 'error') chat.localNotice(command.message, 'error');
+      else {
+        if (command.model) chat.setModel(command.model);
+        if (command.effort) chat.setEffort(command.effort);
+        const { model, effort } = getChatState();
+        chat.localNotice(model === 'auto' ? 'Model: AUTO (Harv picks model and effort).' : `Model: ${model} · ${effort}.`);
+      }
+      return;
+    }
     if ((!text && ready.length === 0) || active?.busy || uploading) return;
     chat.send(text, ready);
     setDraft('');
@@ -229,6 +266,12 @@ export function ChatPanel() {
         <button type="button" onClick={chat.newTab} aria-label="New chat" className="size-9 cursor-pointer text-base hover:text-accent">
           +
         </button>
+        <div className="flex-1" />
+        {active?.context && (
+          <div className="px-2 pb-2.5 text-[11px] whitespace-nowrap text-muted" title="Tokens Harv sent with the last message in this chat">
+            context · {tokens(active.context)} tokens
+          </div>
+        )}
       </div>
 
       <div ref={logRef} className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-4 leading-relaxed">
@@ -236,11 +279,7 @@ export function ChatPanel() {
           <p className="m-auto text-center text-muted">{active ? 'New chat. Ask Harv anything.' : 'No chat open. Press + to start one.'}</p>
         ) : (
           active.lines.map((l) => (
-            <ChatLine
-              key={l.id}
-              line={l}
-              onHarder={!active.busy && l.id === lastReplyId ? () => chat.harder(active.id) : undefined}
-            />
+            <ChatLine key={l.id} line={l} onHarder={!active.busy && l.id === lastReplyId ? () => chat.harder(active.id) : undefined} />
           ))
         )}
         {waiting.map((a) => (
@@ -301,7 +340,7 @@ export function ChatPanel() {
             e.preventDefault();
             attach(e.clipboardData.files);
           }}
-          placeholder="ask anything · read a file · search the web"
+          placeholder="type a command or ask anything · /model · /attach"
           className="min-h-11 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
         />
         <input

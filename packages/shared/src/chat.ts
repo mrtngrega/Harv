@@ -55,6 +55,8 @@ export interface StoredLine {
   files?: string[];
   /** On tool lines: the tool_use id, which is also the action log id. */
   ref?: string;
+  /** When the line was written (epoch ms); filled in from the database. */
+  at?: number;
 }
 
 /** A file uploaded with POST /api/attachments, waiting to be sent with a message. */
@@ -73,6 +75,8 @@ export interface ChatSnapshot {
   id: string;
   title: string;
   lines: StoredLine[];
+  /** Tokens the last turn sent (the conversation's context size). */
+  context?: number;
 }
 
 export interface HistoryItem {

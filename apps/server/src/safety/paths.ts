@@ -1,4 +1,3 @@
-import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve, win32 } from 'node:path';
 import { HARV_HOME } from '../paths.ts';
@@ -6,7 +5,6 @@ import { HARV_HOME } from '../paths.ts';
 /** Harv's own working folder, the only place it may create and change files freely. */
 export const WORKSPACE = join(HARV_HOME, 'workspace');
 export const BACKUPS_DIR = join(HARV_HOME, 'backups');
-const SETTINGS_PATH = join(HARV_HOME, 'settings.json');
 
 /**
  * An absolute Windows path for comparisons. Accepts Git Bash paths (/c/Users),
@@ -38,18 +36,5 @@ export const isProgramDir = (p: string) => PROGRAM_DIRS.some((d) => isInside(p, 
 /** Harv's database, backups and memory: only Harv's own code changes them, never a tool call. */
 export const isHarvData = (p: string) => isInside(p, HARV_HOME) && !isInside(p, WORKSPACE);
 
-export interface HarvSettings {
-  /** Folders Harv may read but never change (the user's read-only list). */
-  protectedPaths: string[];
-}
-
-/** Read on every check, so edits to ~/.harv/settings.json apply at once. */
-export function loadSettings(): HarvSettings {
-  try {
-    if (!existsSync(SETTINGS_PATH)) return { protectedPaths: [] };
-    const raw = JSON.parse(readFileSync(SETTINGS_PATH, 'utf8')) as Partial<HarvSettings>;
-    return { protectedPaths: Array.isArray(raw.protectedPaths) ? raw.protectedPaths.filter((p) => typeof p === 'string') : [] };
-  } catch {
-    return { protectedPaths: [] };
-  }
-}
+/** Settings (protectedPaths and the rest) live in ../settings.ts; re-exported for the gate. */
+export { loadSettings } from '../settings.ts';

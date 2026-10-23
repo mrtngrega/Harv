@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { HarvConnection } from '../lib/useHarvSocket.ts';
 import { ModelSwitcher } from './ModelSwitcher.tsx';
+import { SettingsPanel } from './SettingsPanel.tsx';
 import { StatusPill } from './StatusPill.tsx';
 
 function useClock(): string {
@@ -15,6 +16,7 @@ function useClock(): string {
 
 export function Header({ conn }: { conn: HarvConnection }) {
   const clock = useClock();
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
     <header className="glass flex flex-wrap items-center gap-4 rounded-2xl px-4 py-2.5">
@@ -23,6 +25,17 @@ export function Header({ conn }: { conn: HarvConnection }) {
       <div className="flex-1" />
       <ModelSwitcher />
       <div className="text-muted tabular-nums">{clock}</div>
+      <button
+        type="button"
+        onClick={() => setSettingsOpen(true)}
+        aria-label="Settings"
+        aria-expanded={settingsOpen}
+        title="Settings"
+        className="size-9 cursor-pointer rounded-lg text-[15px] text-muted hover:bg-white/5 hover:text-ink"
+      >
+        ⚙
+      </button>
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </header>
   );
 }

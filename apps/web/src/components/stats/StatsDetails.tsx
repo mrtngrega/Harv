@@ -164,7 +164,6 @@ export function StatsDetails({ m }: { m: MetricsSnapshot }) {
 
       <div className="mt-1 border-t border-line px-1 pt-2.5 text-[11px] tracking-[2px] text-muted">HARV</div>
       <ActionLog />
-
     </>
   );
 }

@@ -1,10 +1,12 @@
-import type { Catalog, HarvStatus, MetricsSnapshot, PlanUsage } from '@harv/shared';
+import { DEFAULT_SETTINGS, type Catalog, type HarvSettings, type HarvStatus, type MetricsSnapshot, type PlanUsage } from '@harv/shared';
 import { createStore } from './createStore.ts';
-import { onConnectionChange, onServerMessage } from './socket.ts';
+import { onConnectionChange, onServerMessage, sendMessage } from './socket.ts';
 
 export interface HarvConnection {
   connected: boolean;
   status: HarvStatus;
+  /** The running tool while working. */
+  detail?: string;
   version: string | null;
 }
 
@@ -13,6 +15,9 @@ const connection = createStore<HarvConnection>({ connected: false, status: 'idle
 const metrics = createStore<MetricsSnapshot | null>(null);
 const catalog = createStore<Catalog | null>(null);
 const usage = createStore<PlanUsage | null>(null);
+const settings = createStore<HarvSettings>(DEFAULT_SETTINGS);
+/** Background photo version for cache-busting; null = none set, undefined = not known yet. */
+const background = createStore<{ version: number | null | undefined }>({ version: undefined });
 
 onConnectionChange((connected) => connection.set((c) => ({ ...c, connected })));
 
@@ -23,9 +28,11 @@ onServerMessage((msg) => {
       if (msg.metrics) metrics.set(msg.metrics);
       if (msg.catalog) catalog.set(msg.catalog);
       usage.set(msg.usage);
+      settings.set(msg.settings);
+      background.set({ version: msg.background });
       break;
     case 'harv.status':
-      connection.set((c) => ({ ...c, status: msg.status }));
+      connection.set((c) => ({ ...c, status: msg.status, detail: msg.detail }));
       break;
     case 'metrics.tick':
       metrics.set(msg.metrics);
@@ -36,6 +43,12 @@ onServerMessage((msg) => {
     case 'usage.update':
       usage.set(msg.usage);
       break;
+    case 'settings':
+      settings.set(msg.settings);
+      break;
+    case 'background':
+      background.set({ version: msg.version });
+      break;
   }
 });
 
@@ -43,3 +56,11 @@ export const useConnection = connection.use;
 export const useMetrics = metrics.use;
 export const useCatalog = catalog.use;
 export const useUsage = usage.use;
+export const useSettings = settings.use;
+export const useBackground = background.use;
+
+/** Saves a settings change on the server, which echoes it to every window. */
+export function updateSettings(patch: Partial<HarvSettings>): void {
+  settings.set((s) => ({ ...s, ...patch }));
+  sendMessage({ type: 'settings.update', patch });
+}

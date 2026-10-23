@@ -27,8 +27,14 @@ export const LADDER: readonly Pick[] = [
   { model: 'opus', effort: 'max' },
 ];
 
-// Fable is a manual pick only, so it ranks with Opus here.
-const MODEL_RANK: Record<string, number> = { haiku: 0, sonnet: 1, opus: 2, fable: 2 };
+/** Above opus·max when the user allows Fable in AUTO (settings). */
+export const FABLE_STEPS: readonly Pick[] = [
+  { model: 'fable', effort: 'high' },
+  { model: 'fable', effort: 'max' },
+];
+
+// Fable is for the toughest work, so it ranks above Opus.
+const MODEL_RANK: Record<string, number> = { haiku: 0, sonnet: 1, opus: 2, fable: 3 };
 
 /** Orders any model·effort, including manual picks that aren't on the ladder. */
 const score = (p: Pick) => (MODEL_RANK[p.model] ?? 1) * 10 + EFFORT_LEVELS.indexOf(p.effort);
@@ -36,8 +42,9 @@ const score = (p: Pick) => (MODEL_RANK[p.model] ?? 1) * 10 + EFFORT_LEVELS.index
 export const tag = (p: Pick) => `${p.model}·${p.effort}`;
 
 /** The next ladder step above `p`, or null at the top. */
-export function stepUp(p: Pick): Pick | null {
-  return LADDER.find((step) => score(step) > score(p)) ?? null;
+export function stepUp(p: Pick, allowFable = false): Pick | null {
+  const ladder = allowFable ? [...LADDER, ...FABLE_STEPS] : LADDER;
+  return ladder.find((step) => score(step) > score(p)) ?? null;
 }
 
 /** The higher of two picks. */
@@ -47,7 +54,7 @@ export const atLeast = (p: Pick, floor: Pick): Pick => (score(p) >= score(floor)
 export const TRIM_FROM_PERCENT = 70;
 
 /** The table: difficulty → model·effort. High stakes push one step up. */
-export function pickFor(c: Classification, weeklyUsed?: number): { pick: Pick; why: string } {
+export function pickFor(c: Classification, weeklyUsed?: number, allowFable = false): { pick: Pick; why: string } {
   const code = /code|program|debug/i.test(c.category);
   let pick: Pick;
   switch (c.difficulty) {
@@ -64,10 +71,11 @@ export function pickFor(c: Classification, weeklyUsed?: number): { pick: Pick; w
       pick = LADDER[4]!;
       break;
     case 5:
-      pick = LADDER[6]!;
+      pick = allowFable ? FABLE_STEPS[0]! : LADDER[6]!;
       break;
   }
   const parts = [`${c.category}, difficulty ${c.difficulty}`];
+  if (allowFable && c.difficulty === 5) parts.push('Fable allowed');
   if (c.stakes === 'high' && c.difficulty < 5) {
     pick = stepUp(pick) ?? pick;
     parts.push('high stakes');

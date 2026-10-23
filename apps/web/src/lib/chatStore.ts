@@ -1,4 +1,13 @@
-import type { Attachment, ChatServerMessage, ClientMessage, ChatSnapshot, EffortLevel, HistoryItem, LineKind, ModelChoice } from '@harv/shared';
+import type {
+  Attachment,
+  ChatServerMessage,
+  ClientMessage,
+  ChatSnapshot,
+  EffortLevel,
+  HistoryItem,
+  LineKind,
+  ModelChoice,
+} from '@harv/shared';
 import { createStore } from './createStore.ts';
 import { onServerMessage, sendMessage } from './socket.ts';
 
@@ -16,6 +25,8 @@ export interface Line {
   files?: string[];
   /** On tool lines: the action log id. */
   ref?: string;
+  /** When it was written (epoch ms). */
+  at: number;
   streaming?: boolean;
 }
 
@@ -28,6 +39,8 @@ export interface Tab {
   currentId: string | null;
   tag?: string;
   reason?: string;
+  /** Tokens the last turn sent: the conversation's context size. */
+  context?: number;
 }
 
 export interface ChatState {
@@ -80,8 +93,10 @@ const fromSnapshot = (chat: ChatSnapshot): Tab => ({
   title: chat.title,
   busy: false,
   currentId: null,
+  ...(chat.context ? { context: chat.context } : {}),
   lines: chat.lines.map((l) => ({
     id: newId(),
+    at: l.at ?? Date.now(),
     kind: l.kind,
     text: l.text,
     ...(l.tag ? { tag: l.tag } : {}),
@@ -108,7 +123,7 @@ function updateTab(id: string, fn: (tab: Tab) => Tab) {
   store.set((s) => ({ ...s, tabs: s.tabs.map((t) => (t.id === id ? fn(t) : t)) }));
 }
 
-const line = (kind: LineKind, text: string, extra: Partial<Line> = {}): Line => ({ id: newId(), kind, text, ...extra });
+const line = (kind: LineKind, text: string, extra: Partial<Line> = {}): Line => ({ id: newId(), kind, text, at: Date.now(), ...extra });
 
 /** Marks the streaming line finished, dropping it if nothing arrived. */
 function finishCurrent(tab: Tab): Tab {
@@ -164,7 +179,8 @@ export function applyChatEvent(msg: ChatServerMessage): void {
         const extra: Line[] = [];
         if (msg.stopped) extra.push(line('notice', 'Stopped.'));
         if (msg.error) extra.push(line('error', msg.error));
-        return { ...done, busy: false, lines: [...done.lines, ...extra] };
+        const context = msg.usage?.inputTokens || done.context;
+        return { ...done, busy: false, ...(context ? { context } : {}), lines: [...done.lines, ...extra] };
       });
       break;
     case 'chat.notice':
@@ -260,6 +276,12 @@ export const chat = {
     }
     const pending = line('harv', '', { streaming: true });
     updateTab(tabId, (t) => ({ ...t, busy: true, lines: [...t.lines, pending], currentId: pending.id }));
+  },
+
+  /** A line from the dashboard itself (command help, errors); not saved. */
+  localNotice(text: string, kind: 'notice' | 'error' = 'notice') {
+    const tabId = chat.ensureTab();
+    updateTab(tabId, (t) => ({ ...t, lines: [...t.lines, line(kind, text)] }));
   },
 
   stop(tabId: string) {

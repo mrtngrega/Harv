@@ -1,3 +1,5 @@
+import type { PlanMeter } from '@harv/shared';
+
 const GB = 1024 ** 3;
 
 export const pct = (n: number | undefined) => (n === undefined ? '—' : `${Math.round(n)}%`);
@@ -62,4 +64,32 @@ export function tokens(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
   return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+/** A chat line's time: "21:45" today, "Tue" this week, "12 Oct" before that. */
+export function lineTime(at: number, now = Date.now()): string {
+  const d = new Date(at);
+  const today = new Date(now);
+  if (d.toDateString() === today.toDateString()) return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  if (now - at < 6 * 24 * 60 * 60 * 1000) return d.toLocaleDateString('en-GB', { weekday: 'short' });
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+const HOUR = 60 * 60 * 1000;
+export const PLAN_WINDOW_MS = { session: 5 * HOUR, weekly: 7 * 24 * HOUR };
+
+/** "2h 14m", "36m". */
+export function until(at: number | null, now = Date.now()): string | undefined {
+  if (at === null) return undefined;
+  const min = Math.max(0, Math.round((at - now) / 60_000));
+  return min >= 60 ? `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m` : `${min}m`;
+}
+
+/** Usage against time elapsed in the window: on track, or using it faster than it refills. */
+export function pace(m: Pick<PlanMeter, 'kind' | 'percent' | 'resetsAt'>, now = Date.now()): string | undefined {
+  const length = m.kind === 'session' ? PLAN_WINDOW_MS.session : PLAN_WINDOW_MS.weekly;
+  if (m.resetsAt === null) return undefined;
+  const elapsed = Math.min(1, Math.max(0, 1 - (m.resetsAt - now) / length)) * 100;
+  if (m.percent >= 100) return 'limit reached';
+  return m.percent <= elapsed + 5 ? 'on track' : 'running hot';
 }

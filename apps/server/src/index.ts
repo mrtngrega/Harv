@@ -6,7 +6,7 @@ import { HARV_VERSION, MAX_ATTACHMENT_BYTES, SERVER_PORT, type ClientMessage, ty
 import { isValidTab, saveAttachment } from './agent/attachments.ts';
 import { loadCatalog } from './agent/catalog.ts';
 import { ChatManager } from './agent/manager.ts';
-import { findBackground } from './background.ts';
+import { backgroundVersion, findBackground, MAX_BACKGROUND_BYTES, removeBackground, saveBackground } from './background.ts';
 import { MetricsCollector } from './metrics/collector.ts';
 import { ensureLhmRunning } from './metrics/lhmLauncher.ts';
 import { stripBilledCredentials } from './env.ts';
@@ -17,6 +17,7 @@ import { ActionStore } from './store/actions.ts';
 import { ChatStore } from './store/chats.ts';
 import { RouteStore } from './store/routes.ts';
 import { UsageMeter } from './usage/meter.ts';
+import { loadSettings, updateSettings } from './settings.ts';
 
 const removed = stripBilledCredentials();
 ensureHarvHome();
@@ -65,8 +66,15 @@ const meter = new UsageMeter(
   },
   () => routes.summary(),
 );
-const router = new Router(routes, undefined, () => meter.weeklyPercent());
-const chats = new ChatManager(store, gate, router, meter, broadcast, (status) => broadcast({ type: 'harv.status', status }));
+const router = new Router(
+  routes,
+  undefined,
+  () => meter.weeklyPercent(),
+  () => loadSettings().allowFable,
+);
+const chats = new ChatManager(store, gate, router, meter, broadcast, (status) =>
+  broadcast({ type: 'harv.status', status, detail: chats.statusDetail }),
+);
 
 app.get('/api/health', async () => ({ ok: true, version: HARV_VERSION, status: chats.status, home: HARV_HOME }));
 
@@ -87,6 +95,21 @@ app.post<{ Querystring: { tab?: string; name?: string } }>('/api/attachments', a
   return saveAttachment(tab, name, req.body);
 });
 
+// The background picker: the raw image as the body. Saved to ~/.harv, never the repo.
+app.post('/api/background', async (req, reply) => {
+  if (!Buffer.isBuffer(req.body) || req.body.length > MAX_BACKGROUND_BYTES) {
+    return reply.code(400).send({ error: 'Expected an image up to 20 MB' });
+  }
+  if (!saveBackground(req.body)) return reply.code(415).send({ error: 'Use a JPEG, PNG or WebP image' });
+  broadcast({ type: 'background', version: backgroundVersion() });
+  return { ok: true };
+});
+app.delete('/api/background', async () => {
+  removeBackground();
+  broadcast({ type: 'background', version: null });
+  return { ok: true };
+});
+
 // Lets the dashboard retry starting the sensors (e.g. after the UAC prompt was declined).
 app.post('/api/sensors/start', async () => ({ result: await ensureLhmRunning() }));
 
@@ -104,6 +127,8 @@ app.get('/ws', { websocket: true }, (socket) => {
     approvals: gate.approvals(),
     actions: actions.recent(30),
     usage: meter.snapshot(),
+    settings: loadSettings(),
+    background: backgroundVersion(),
   });
 
   const unsubscribe = metrics.onSnapshot((snapshot) => send({ type: 'metrics.tick', metrics: snapshot }));
@@ -121,7 +146,7 @@ app.get('/ws', { websocket: true }, (socket) => {
     }
     switch (msg.type) {
       case 'ping':
-        send({ type: 'harv.status', status: chats.status });
+        send({ type: 'harv.status', status: chats.status, detail: chats.statusDetail });
         break;
       case 'chat.send':
         void chats.send(msg.tabId, msg.text, msg.model, msg.effort, msg.attachments);
@@ -146,6 +171,9 @@ app.get('/ws', { websocket: true }, (socket) => {
         break;
       case 'action.undo':
         gate.undo(msg.id);
+        break;
+      case 'settings.update':
+        broadcast({ type: 'settings', settings: updateSettings(msg.patch) });
         break;
       case 'history.search':
         send({ type: 'history', items: chats.history(msg.query), query: msg.query });

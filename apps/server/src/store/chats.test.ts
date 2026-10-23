@@ -26,11 +26,21 @@ describe('ChatStore', () => {
         id: 'a',
         title: 'Weather',
         lines: [
-          { kind: 'you', text: 'rain tomorrow?' },
-          { kind: 'harv', text: 'Light rain after 3pm.', tag: 'haiku·low' },
+          { kind: 'you', text: 'rain tomorrow?', at: expect.any(Number) },
+          { kind: 'harv', text: 'Light rain after 3pm.', tag: 'haiku·low', at: expect.any(Number) },
         ],
       },
     ]);
+  });
+
+  it('keeps the context size and routing reason', () => {
+    const s = fresh();
+    s.ensureChat('a', 'Ctx');
+    s.addLine('a', { kind: 'harv', text: 'ok', tag: 'sonnet·medium', reason: 'question, difficulty 3' });
+    s.setContext('a', 4600);
+    const snap = s.snapshot('a')!;
+    expect(snap.context).toBe(4600);
+    expect(snap.lines[0]).toMatchObject({ tag: 'sonnet·medium', reason: 'question, difficulty 3' });
   });
 
   it('keeps the first title when a chat is ensured again', () => {
@@ -90,6 +100,6 @@ describe('snippetAround', () => {
     const s = fresh();
     s.ensureChat('a', 'Files');
     s.addLine('a', { kind: 'you', text: 'look', files: ['shot.png', 'report.pdf'] });
-    expect(s.snapshot('a')!.lines).toEqual([{ kind: 'you', text: 'look', files: ['shot.png', 'report.pdf'] }]);
+    expect(s.snapshot('a')!.lines).toEqual([{ kind: 'you', text: 'look', files: ['shot.png', 'report.pdf'], at: expect.any(Number) }]);
   });
 });
