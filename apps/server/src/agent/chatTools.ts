@@ -54,8 +54,21 @@ export function recentChatsContext(store: ChatStore, currentId: string, limit = 
   return others.length ? chatList(others, currentId) : 'No other chats yet.';
 }
 
-/** Harv's own MCP server for one chat tab: memory tools plus tools to look at the other chats. */
-export function harvServer(store: ChatStore, tabId: string) {
+/** A task one chat hands to another (the `hand_off` tool). */
+export interface HandOff {
+  /** The chat to give it to; a new tab when left out. */
+  to?: string;
+  title?: string;
+  message: string;
+  /** Wait for the other chat's answer (default true). */
+  wait: boolean;
+}
+
+/** Runs a hand-off from this chat and returns what to tell the model. */
+export type Delegate = (req: HandOff, signal?: AbortSignal) => Promise<string>;
+
+/** Harv's own MCP server for one chat tab: memory tools, tools to look at the other chats, and handing work to them. */
+export function harvServer(store: ChatStore, tabId: string, delegate?: Delegate) {
   return createSdkMcpServer({
     name: 'harv',
     version: '1.0.0',
@@ -89,6 +102,30 @@ export function harvServer(store: ChatStore, tabId: string) {
           return text(`${header}\n\n${formatTranscript(chat.lines) || '(no messages yet)'}`);
         },
       ),
+      ...(delegate
+        ? [
+            tool(
+              'hand_off',
+              "Give a task to another chat tab: an existing chat (by id) or a new tab. That chat works on it as its own conversation, with the same rules and safety checks, and by default you get its answer back here. It runs a second session, so it uses about as much of the user's plan again: only hand off when the user asks you to involve another tab or chat, or to run something separately.",
+              {
+                to: z
+                  .string()
+                  .optional()
+                  .describe('Id of the chat to give it to (from list_chats or your instructions); leave out to open a new tab'),
+                title: z.string().optional().describe('Short title for a new tab'),
+                message: z
+                  .string()
+                  .min(1)
+                  .describe('The full request for the other chat, with everything it needs (it can’t see this conversation)'),
+                wait: z.boolean().optional().describe('Wait for its answer and get it back here (default true)'),
+              },
+              async ({ to, title, message, wait }, extra) => {
+                const signal = (extra as { signal?: AbortSignal } | undefined)?.signal;
+                return text(await delegate({ to, title, message, wait: wait ?? true }, signal));
+              },
+            ),
+          ]
+        : []),
     ],
   });
 }

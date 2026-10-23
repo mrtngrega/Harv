@@ -7,7 +7,7 @@ import { ENABLED_TOOLS } from '../safety/classify.ts';
 import type { SafetyGate } from '../safety/gate.ts';
 import { WORKSPACE } from '../safety/paths.ts';
 import type { ChatStore } from '../store/chats.ts';
-import { harvServer, recentChatsContext } from './chatTools.ts';
+import { harvServer, recentChatsContext, type Delegate } from './chatTools.ts';
 import { memoryContext } from './memory.ts';
 
 /** Login sources that mean the user's subscription (never per-token API billing). */
@@ -34,6 +34,8 @@ export interface ChatContext {
   store: ChatStore;
   tabId: string;
   gate: SafetyGate;
+  /** Hands a task to another chat (the hand_off tool). */
+  delegate?: Delegate;
 }
 
 /** Built fresh for each new session, so persona edits and new memories apply to the next chat. */
@@ -45,7 +47,7 @@ function systemPrompt(chat?: ChatContext): string {
     '## Right now',
     [
       "- You're running inside Harv's dashboard on the user's Windows PC. Replies render as Markdown in a log-style chat, so keep formatting light.",
-      '- Your tools: read and search files, search and fetch the web, create and edit files, run PowerShell and Bash commands (prefer PowerShell for Windows tasks), remember/forget for your memory, and list_chats/read_chat for your other chats.',
+      '- Your tools: read and search files, search and fetch the web, create and edit files, run PowerShell and Bash commands (prefer PowerShell for Windows tasks), remember/forget for your memory, list_chats/read_chat for your other chats, and hand_off to give a task to another chat tab.',
       `- Harv's safety gate checks every action. Reading is free, and so is creating files in your workspace (${WORKSPACE}). Editing or creating the user's files is backed up first and they can Undo it. Riskier things (deleting, installing, stopping programs, scripts, the registry, system settings, sending data, git push) show the user an approval card with the exact command, and you wait for their answer. Formatting drives, touching the Windows folder, turning off antivirus or the firewall, and reading stored credentials are always blocked.`,
       "- So: pick the least risky way to do what's asked, say in a sentence what you're about to do before a risky step, and keep commands simple and readable (the user approves exactly what they see). If something is denied or blocked, don't retry it or work around it; ask what they'd like instead.",
       "- One plain command per step. Simple commands pass without bothering the user, but anything with variables, if/else, loops or several steps chained together always needs their approval. For example, check with `Test-Path '<path>'` first, then create a folder with just `New-Item -ItemType Directory -Path '<full path>'` (new folders don't need approval), and open a file with `Start-Process '<path>'`.",
@@ -60,6 +62,7 @@ function systemPrompt(chat?: ChatContext): string {
           [
             "Each chat tab is a separate conversation, but they're all you: the same rules, the same memory, one shared history. If another chat saves or forgets a memory, you'll get a note about it with the user's next message.",
             "When the user refers to another tab or something you discussed before that isn't in this conversation, use list_chats to find it and read_chat to read it. Don't read other chats unprompted; it uses the user's plan.",
+            "When the user asks another tab (or a new one) to do something, use hand_off with a complete request: the other chat can't see this conversation. By default you wait and get its answer; pass wait: false for long jobs the user wants running on their own. A message that starts with [Handed over from …] came from another of your chats, not straight from the user: do it like a normal request, and your reply goes back to that chat.",
             'Recent chats:',
             recentChatsContext(chat.store, chat.tabId),
           ].join('\n'),
@@ -129,7 +132,7 @@ export function buildOptions(
     // Isolation: don't load the user's Claude Code settings, CLAUDE.md files or MCP servers.
     settingSources: [],
     strictMcpConfig: true,
-    mcpServers: chat ? { harv: harvServer(chat.store, chat.tabId) } : {},
+    mcpServers: chat ? { harv: harvServer(chat.store, chat.tabId, chat.delegate) } : {},
     systemPrompt: systemPrompt(chat),
     tools: ENABLED_TOOLS,
     permissionMode: 'default',

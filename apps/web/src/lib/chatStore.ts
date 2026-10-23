@@ -54,6 +54,8 @@ export interface ChatState {
 }
 
 const newId = () => crypto.randomUUID();
+/** One-message overrides at the start ("/opus /max …") don't belong in a tab title. */
+const OVERRIDE_WORDS = /^(\s*\/(opus|sonnet|haiku|fable|low|med|medium|high|xhigh|max)\b)+\s*/i;
 const blankTab = (): Tab => ({ id: newId(), title: 'New chat', lines: [], busy: false, currentId: null });
 
 // The model/effort choice survives reloads (per browser; storage can be unavailable).
@@ -186,6 +188,11 @@ export function applyChatEvent(msg: ChatServerMessage): void {
     case 'chat.notice':
       updateTab(msg.tabId, (t) => ({ ...t, lines: [...t.lines, line('notice', msg.message)] }));
       break;
+    case 'chat.line': {
+      const { kind, text, ...rest } = msg.line;
+      updateTab(msg.tabId, (t) => ({ ...t, lines: [...t.lines, line(kind, text, rest)] }));
+      break;
+    }
     case 'chat.error':
       updateTab(msg.tabId, (t) => ({ ...t, lines: [...t.lines, line('error', msg.message)] }));
       break;
@@ -193,7 +200,7 @@ export function applyChatEvent(msg: ChatServerMessage): void {
       store.set((s) => ({
         ...s,
         tabs: s.tabs.some((t) => t.id === msg.chat.id) ? s.tabs : [...s.tabs, fromSnapshot(msg.chat)],
-        activeId: msg.chat.id,
+        activeId: msg.focus === false && s.activeId ? s.activeId : msg.chat.id,
       }));
       break;
     case 'chat.removed':
@@ -256,7 +263,7 @@ export const chat = {
     const files = attachments.map((a) => a.name);
     updateTab(tabId, (t) => ({
       ...t,
-      title: t.title === 'New chat' ? (text || files[0] || 'Attachment').slice(0, 24) : t.title,
+      title: t.title === 'New chat' ? (text.replace(OVERRIDE_WORDS, '') || text || files[0] || 'Attachment').slice(0, 24) : t.title,
       lines: [...t.lines, line('you', text, files.length ? { files } : {})],
     }));
     chat.dispatch(tabId, { type: 'chat.send', tabId, text, model, effort, ...(attachments.length ? { attachments } : {}) });

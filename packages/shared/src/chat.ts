@@ -109,7 +109,10 @@ export type ChatServerMessage =
   | { type: 'chat.done'; tabId: string; ok: boolean; stopped: boolean; error?: string; usage?: ChatUsage }
   | { type: 'chat.notice'; tabId: string; message: string }
   | { type: 'chat.error'; tabId: string; message: string }
-  | { type: 'chat.opened'; chat: ChatSnapshot }
+  /** A chat to show as a tab; `focus: false` opens it without switching to it (a hand-off). */
+  | { type: 'chat.opened'; chat: ChatSnapshot; focus?: boolean }
+  /** A finished line added by the server (a hand-off's request), appended as is. */
+  | { type: 'chat.line'; tabId: string; line: StoredLine }
   | { type: 'chat.removed'; tabId: string }
   /** The history list; `query` echoes the search it answers ("" = everything). */
   | { type: 'history'; items: HistoryItem[]; query: string };

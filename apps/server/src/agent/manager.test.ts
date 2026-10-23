@@ -32,6 +32,10 @@ class FakeSession {
     this.sent.push({ content, model, effort });
   }
 
+  reply(text: string) {
+    this.emit({ type: 'chat.assistant', tabId: this.tabId, text });
+  }
+
   finish(ok = true) {
     this.busy = false;
     this.emit({ type: 'chat.done', tabId: this.tabId, ok, stopped: false, usage: { inputTokens: 10, outputTokens: 5, durationMs: 1 } });
@@ -138,5 +142,45 @@ describe('limit handling', () => {
     FakeSession.all.get('e')!.finish();
     expect(routes.summary()).toMatchObject({ turnsToday: 1, inputTokensToday: 10, outputTokensToday: 5 });
     expect(routes.summary().split).toEqual([{ model: 'sonnet', effort: 'medium', turns: 1, harder: 0 }]);
+  });
+});
+
+describe('hand-off between chats', () => {
+  it('runs the task in a new tab and brings the answer back', async () => {
+    const { chats, store } = setup();
+    await chats.send('from', 'ask a new tab to check the weather', 'sonnet', 'medium');
+    const pending = chats.delegate('from', { title: 'Weather', message: 'What is the weather in Bratislava?', wait: true });
+    await settle();
+    await settle();
+    const target = [...FakeSession.all.values()].find((s) => s.tabId !== 'from' && String(s.sent[0]?.content).includes('Bratislava'))!;
+    expect(String(target.sent[0]!.content)).toMatch(/^\[Handed over from your other chat/);
+    expect(store.title(target.tabId)).toBe('Weather');
+    target.reply('Sunny, 18°C.');
+    target.finish();
+    expect(await pending).toContain('Sunny, 18°C.');
+    expect(store.snapshot(target.tabId)!.lines.map((l) => l.kind)).toEqual(['notice', 'you', 'harv']);
+  });
+
+  it('refuses to hand back to a chat that is waiting, and to a busy chat', async () => {
+    const { chats, store } = setup();
+    store.ensureChat('x', 'X');
+    store.ensureChat('y', 'Y');
+    const waiting = chats.delegate('x', { to: 'y', message: 'do a thing', wait: true });
+    await settle();
+    await settle();
+    expect(await chats.delegate('y', { to: 'x', message: 'and back', wait: true })).toMatch(/wait on each other/);
+    expect(await chats.delegate('z', { to: 'y', message: 'me too', wait: true })).toMatch(/busy/);
+    FakeSession.all.get('y')!.finish();
+    await waiting;
+  });
+
+  it('can start work without waiting', async () => {
+    const { chats, store } = setup();
+    store.ensureChat('p', 'P');
+    store.ensureChat('q', 'Q');
+    const result = await chats.delegate('p', { to: 'q', message: 'long job', wait: false });
+    expect(result).toMatch(/Started in the "Q" tab/);
+    expect(FakeSession.all.get('q')!.busy).toBe(true);
+    FakeSession.all.get('q')!.finish();
   });
 });

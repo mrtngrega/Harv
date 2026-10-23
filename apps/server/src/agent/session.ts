@@ -3,6 +3,7 @@ import type { ChatServerMessage, EffortLevel } from '@harv/shared';
 import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
 import type { ContentBlockParam } from './attachments.ts';
+import type { Delegate } from './chatTools.ts';
 import { describeTool, MEMORY_TOOLS } from './guard.ts';
 import { memoryChanges, memorySnapshot } from './memory.ts';
 import { buildOptions, SUBSCRIPTION_KEY_SOURCES } from './options.ts';
@@ -58,8 +59,12 @@ export class ChatSession {
     private store: ChatStore,
     gate: SafetyGate,
     private resume?: string,
+    delegate?: Delegate,
   ) {
-    this.q = query({ prompt: this.input, options: buildOptions(model, effort, this.abort, { resume, chat: { store, tabId, gate } }) });
+    this.q = query({
+      prompt: this.input,
+      options: buildOptions(model, effort, this.abort, { resume, chat: { store, tabId, gate, delegate } }),
+    });
     void this.consume();
   }
 

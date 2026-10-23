@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   type Attachment,
   type Catalog,
@@ -14,6 +15,7 @@ import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
 import type { UsageMeter } from '../usage/meter.ts';
 import { buildContent, deleteAttachments } from './attachments.ts';
+import type { HandOff } from './chatTools.ts';
 import { ChatSession } from './session.ts';
 
 const titleFrom = (text: string) => (text.length > 40 ? `${text.slice(0, 39)}…` : text);
@@ -27,6 +29,11 @@ const CONTINUE_PROMPT =
   'The Claude plan usage limit interrupted your last turn. It has reset now: continue where you left off and finish what the user asked.';
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+/** How long a waiting hand-off waits for the other chat before giving up on getting the answer back. */
+const HANDOFF_WAIT_MS = 15 * 60 * 1000;
+/** The longest answer a hand-off brings back into the waiting chat. */
+const HANDOFF_REPLY_CHARS = 12_000;
 
 /** A message waiting for a plan limit to reset. */
 type Queued =
@@ -50,6 +57,10 @@ export class ChatManager {
   private limited = new Set<string>();
   /** Resolvers waiting for a tab's turn to finish. */
   private waiters = new Map<string, (() => void)[]>();
+  /** Chats waiting on a hand-off (from → to), to refuse loops. */
+  private handoffs = new Map<string, string>();
+  /** What a tab replies while another chat waits for it. */
+  private replies = new Map<string, string[]>();
   catalog: Catalog | null = null;
 
   constructor(
@@ -100,6 +111,7 @@ export class ChatManager {
         break;
       case 'chat.assistant':
         save({ kind: 'harv', text: msg.text, ...this.tags.get(msg.tabId) });
+        this.replies.get(msg.tabId)?.push(msg.text);
         break;
       case 'chat.tool':
         save({ kind: 'tool', text: msg.detail ? `${msg.name} · ${msg.detail}` : msg.name, ref: msg.id });
@@ -109,6 +121,7 @@ export class ChatManager {
         break;
       case 'chat.error':
         save({ kind: 'error', text: msg.message });
+        this.replies.get(msg.tabId)?.push(`(error: ${msg.message})`);
         break;
       case 'chat.done':
         this.router.finished(msg.tabId, msg.ok, msg.stopped, msg.usage);
@@ -213,6 +226,7 @@ export class ChatManager {
       this.store,
       this.gate,
       this.store.getSession(tabId) ?? undefined,
+      (req, signal) => this.delegate(tabId, req, signal),
     );
     this.sessions.set(tabId, session);
     return session;
@@ -220,7 +234,8 @@ export class ChatManager {
 
   async send(tabId: string, message: string, choice: ModelChoice, effort: EffortLevel, files: Attachment[] = []): Promise<void> {
     const isNew = !this.store.exists(tabId);
-    this.store.ensureChat(tabId, titleFrom(message || (files[0]?.name ?? 'Attachment')));
+    // Leave `/opus`-style override words out of the title.
+    this.store.ensureChat(tabId, titleFrom(parseOverride(message).text.trim() || message || (files[0]?.name ?? 'Attachment')));
     this.store.setOpen(tabId, true);
     if (this.busy(tabId)) {
       this.broadcast({ type: 'chat.notice', tabId, message: 'Harv is still answering in this tab. Wait, or press Stop.' });
@@ -240,27 +255,98 @@ export class ChatManager {
     await this.start(tabId, message, choice, effort, files);
   }
 
-  /** Routes a message and runs it. */
-  private async start(tabId: string, message: string, choice: ModelChoice, effort: EffortLevel, files: Attachment[]) {
+  /** Adds a line the dashboard didn't write itself (it only shows the user's own messages as they're sent). */
+  private addLine(tabId: string, line: StoredLine) {
+    this.store.addLine(tabId, line);
+    this.broadcast({ type: 'chat.line', tabId, line: { ...line, at: Date.now() } });
+  }
+
+  /**
+   * The hand_off tool: `fromTab` gives a task to another chat (or a new tab). It runs
+   * there as a normal AUTO turn, through that chat's own safety gate. With `wait`, the
+   * answer comes back as the tool's result.
+   */
+  async delegate(fromTab: string, req: HandOff, signal?: AbortSignal): Promise<string> {
+    const fromTitle = this.store.title(fromTab) ?? 'another chat';
+    let to = req.to?.trim() || undefined;
+    if (to === fromTab) return 'That is this chat. Hand off to a different chat, or leave `to` out to open a new tab.';
+    if (to && !this.store.exists(to)) return `No chat with id ${to}. Use list_chats to find it, or leave \`to\` out to open a new tab.`;
+    for (let at = to; at; at = this.handoffs.get(at)) {
+      if (at === fromTab)
+        return 'That chat is waiting for this one, so handing work back would make them wait on each other. Answer here instead.';
+    }
+    if (to && this.busy(to)) return `"${this.store.title(to)}" is busy right now. Try again when it's done, or hand off to a new tab.`;
+    if (this.meter.paused) return `The Claude Pro limit is reached, so nothing can run until it resets (${this.resetText()}).`;
+
+    const isNew = !to;
+    to ??= randomUUID();
+    if (isNew) this.store.ensureChat(to, titleFrom(req.title?.trim() || req.message));
+    const wasOpen = !isNew && this.store.transcript(to, 1)?.open;
+    this.store.setOpen(to, true);
+    // Show the chat as a tab without pulling the user away from the one they're in.
+    if (!wasOpen) this.broadcast({ type: 'chat.opened', chat: this.store.snapshot(to)!, focus: false });
+    this.publishHistory();
+    const title = this.store.title(to)!;
+
+    this.addLine(to, { kind: 'notice', text: `Handed over from “${fromTitle}”${req.wait ? ', which is waiting for the answer' : ''}.` });
+    this.addLine(to, { kind: 'you', text: req.message });
+    const note = `[Handed over from your other chat "${fromTitle}" (id ${fromTab}). Do it as if the user asked. ${
+      req.wait ? 'Your reply goes back to that chat, so make it a complete answer.' : 'The user reads your reply here.'
+    }]\n\n`;
+
+    if (req.wait) {
+      this.handoffs.set(fromTab, to);
+      this.replies.set(to, []);
+    }
+    try {
+      await this.start(to, req.message, 'auto', 'medium', [], note);
+      if (!req.wait) return `Started in the "${title}" tab (id ${to}). Its answer will appear there; read_chat can fetch it later.`;
+
+      const outcome = await new Promise<'done' | 'timeout' | 'stopped'>((resolve) => {
+        const timer = setTimeout(() => resolve('timeout'), HANDOFF_WAIT_MS);
+        signal?.addEventListener('abort', () => resolve('stopped'), { once: true });
+        void this.turnDone(to).then(() => {
+          clearTimeout(timer);
+          resolve('done');
+        });
+      });
+      const reply = (this.replies.get(to) ?? []).join('\n\n').trim();
+      const capped = reply.length > HANDOFF_REPLY_CHARS ? `${reply.slice(0, HANDOFF_REPLY_CHARS)}…` : reply;
+      if (outcome === 'stopped') return `Stopped waiting. "${title}" may still be working; its answer will appear in that tab.`;
+      if (outcome === 'timeout')
+        return `"${title}" is still working after 15 minutes. Its answer will appear in that tab; read_chat can fetch it later.`;
+      return capped ? `Answer from "${title}" (id ${to}):\n\n${capped}` : `"${title}" finished without a written answer.`;
+    } finally {
+      if (req.wait) {
+        this.handoffs.delete(fromTab);
+        this.replies.delete(to);
+      }
+    }
+  }
+
+  /** Routes a message and runs it. `note` goes in front of what Claude sees (not the chat log or the router). */
+  private async start(tabId: string, message: string, choice: ModelChoice, effort: EffortLevel, files: Attachment[], note = '') {
     let decision: RouteDecision;
     let text: string;
-    if (choice === 'auto') {
-      this.setRouting(tabId, true);
-      try {
+    // "thinking" from routing until the session has the message, so the status pill doesn't blink idle in between.
+    this.setRouting(tabId, true);
+    try {
+      if (choice === 'auto') {
         ({ decision, text } = await this.router.route(tabId, message, files));
-      } finally {
-        this.setRouting(tabId, false);
+      } else {
+        // `/opus`-style words work in manual mode too, for one message.
+        const override = parseOverride(message);
+        text = override.text;
+        decision =
+          override.model || override.effort
+            ? { model: override.model ?? choice, effort: override.effort ?? effort, source: 'override', reason: 'you asked for it' }
+            : { model: choice, effort, source: 'manual', reason: 'your pick' };
+        this.router.manual(tabId, decision);
       }
-    } else {
-      // `/opus`-style words work in manual mode too, for one message.
-      const override = parseOverride(message);
-      text = override.text;
-      decision = override.model || override.effort
-        ? { model: override.model ?? choice, effort: override.effort ?? effort, source: 'override', reason: 'you asked for it' }
-        : { model: choice, effort, source: 'manual', reason: 'your pick' };
-      this.router.manual(tabId, decision);
+      await this.run(tabId, decision, choice === 'auto', files.length ? buildContent(tabId, note + text, files) : note + text);
+    } finally {
+      this.setRouting(tabId, false);
     }
-    await this.run(tabId, decision, choice === 'auto', files.length ? buildContent(tabId, text, files) : text);
   }
 
   /** "Try harder": the last message again, one step up the ladder. */
@@ -320,7 +406,8 @@ export class ChatManager {
 
   async stop(tabId: string): Promise<void> {
     const dropped = this.dequeueTab(tabId);
-    if (dropped) this.emit({ type: 'chat.notice', tabId, message: `Removed ${dropped === 1 ? 'the queued message' : `${dropped} queued messages`}.` });
+    if (dropped)
+      this.emit({ type: 'chat.notice', tabId, message: `Removed ${dropped === 1 ? 'the queued message' : `${dropped} queued messages`}.` });
     this.gate.cancel(tabId);
     await this.sessions.get(tabId)?.stop();
   }

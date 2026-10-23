@@ -31,6 +31,15 @@ export function describeTool(name: string, input: Record<string, unknown>, chatT
       const title = chatTitle?.(pick('id'));
       return title ? `"${title}"` : pick('id').slice(0, 8);
     }
+    case 'mcp__harv__hand_off': {
+      const to = pick('to');
+      const target = to
+        ? chatTitle?.(to)
+          ? `"${chatTitle(to)}"`
+          : to.slice(0, 8)
+        : `new tab${pick('title') ? ` "${pick('title')}"` : ''}`;
+      return `→ ${target}${input.wait === false ? ' (not waiting)' : ''}`;
+    }
     default:
       return '';
   }

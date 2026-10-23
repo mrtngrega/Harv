@@ -22,7 +22,14 @@ export interface Verdict {
 export const SHELL_TOOLS = ['Bash', 'PowerShell'];
 export const FILE_WRITE_TOOLS = ['Write', 'Edit'];
 export const READ_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
-export const HARV_TOOLS = ['mcp__harv__remember', 'mcp__harv__forget', 'mcp__harv__list_chats', 'mcp__harv__read_chat'];
+// hand_off only starts a turn in another chat; everything that chat does passes the gate itself.
+export const HARV_TOOLS = [
+  'mcp__harv__remember',
+  'mcp__harv__forget',
+  'mcp__harv__list_chats',
+  'mcp__harv__read_chat',
+  'mcp__harv__hand_off',
+];
 export const ENABLED_TOOLS = [...READ_TOOLS, ...FILE_WRITE_TOOLS, ...SHELL_TOOLS];
 
 const SENSITIVE_PATHS: RegExp[] = [
