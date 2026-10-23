@@ -5,8 +5,9 @@
 /** Built-in tools available before the safety gate exists. */
 export const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
 
-/** Harv's own memory tools (they can only write inside ~/.harv/memory). */
+/** Harv's own tools: memory (writes only inside ~/.harv/memory) and reading its other chats. */
 export const MEMORY_TOOLS = ['mcp__harv__remember', 'mcp__harv__forget'];
+export const HARV_TOOLS = [...MEMORY_TOOLS, 'mcp__harv__list_chats', 'mcp__harv__read_chat'];
 
 const SENSITIVE_PATHS: RegExp[] = [
   /(^|[\\/])\.claude([\\/]|$)/i, // Claude Code login and settings
@@ -26,7 +27,7 @@ function pathsOf(input: Record<string, unknown>): string[] {
 }
 
 export function checkTool(name: string, input: Record<string, unknown>): GuardVerdict {
-  if (!READ_ONLY_TOOLS.includes(name) && !MEMORY_TOOLS.includes(name)) {
+  if (!READ_ONLY_TOOLS.includes(name) && !HARV_TOOLS.includes(name)) {
     return {
       allow: false,
       reason: `${name} isn't enabled yet. Until the safety gate is built, Harv can only read files and search; tell the user this action will be possible later.`,
@@ -55,6 +56,10 @@ export function describeTool(name: string, input: Record<string, unknown>): stri
     case 'mcp__harv__remember':
     case 'mcp__harv__forget':
       return pick('name');
+    case 'mcp__harv__list_chats':
+      return pick('query') || (input.open_only ? 'open tabs' : 'recent');
+    case 'mcp__harv__read_chat':
+      return pick('id').slice(0, 8);
     default:
       return '';
   }

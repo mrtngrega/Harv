@@ -1,7 +1,9 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ChatServerMessage, EffortLevel } from '@harv/shared';
+import type { ChatStore } from '../store/chats.ts';
 import type { ContentBlockParam } from './attachments.ts';
-import { describeTool } from './guard.ts';
+import { describeTool, MEMORY_TOOLS } from './guard.ts';
+import { memoryChanges, memorySnapshot } from './memory.ts';
 import { buildOptions, SUBSCRIPTION_KEY_SOURCES } from './options.ts';
 import { AsyncQueue } from './queue.ts';
 
@@ -36,6 +38,9 @@ export class ChatSession {
   private stopping = false;
   private closed = false;
   private started = false;
+  /** The memories this session knows about (its system prompt, plus notes since). */
+  private memory = memorySnapshot();
+  private usedMemoryTool = false;
   busy = false;
   toolRunning = false;
 
@@ -45,9 +50,10 @@ export class ChatSession {
     private effort: EffortLevel,
     private emit: Emit,
     private hooks: SessionHooks,
+    store: ChatStore,
     private resume?: string,
   ) {
-    this.q = query({ prompt: this.input, options: buildOptions(model, effort, this.abort, resume) });
+    this.q = query({ prompt: this.input, options: buildOptions(model, effort, this.abort, { resume, chat: { store, tabId } }) });
     void this.consume();
   }
 
@@ -62,7 +68,17 @@ export class ChatSession {
     }
     this.stopping = false;
     this.setBusy(true);
-    this.input.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });
+    this.input.push({ type: 'user', message: { role: 'user', content: this.withMemoryNote(content) }, parent_tool_use_id: null });
+  }
+
+  /** Tells Claude about memories other chats saved or forgot since this one last knew. */
+  private withMemoryNote(content: string | ContentBlockParam[]): string | ContentBlockParam[] {
+    const now = memorySnapshot();
+    const changes = memoryChanges(this.memory, now);
+    this.memory = now;
+    if (!changes) return content;
+    const note = `[Your memory changed since this chat last saw it (another chat, or the user, edited it):\n${changes}]`;
+    return typeof content === 'string' ? `${note}\n\n${content}` : [{ type: 'text', text: note }, ...content];
   }
 
   async stop(): Promise<void> {
@@ -138,6 +154,7 @@ export class ChatSession {
           if (block.type === 'text') text += block.text;
           if (block.type === 'tool_use') {
             usedTool = true;
+            if (MEMORY_TOOLS.includes(block.name)) this.usedMemoryTool = true;
             if (text) {
               this.emit({ type: 'chat.assistant', tabId, text });
               text = '';
@@ -152,6 +169,9 @@ export class ChatSession {
       }
 
       case 'result': {
+        // This chat's own memory edits are already in its context; don't report them back to it.
+        if (this.usedMemoryTool) this.memory = memorySnapshot();
+        this.usedMemoryTool = false;
         const ok = msg.subtype === 'success' && !msg.is_error;
         let error: string | undefined;
         if (!ok && !this.stopping) error = msg.subtype === 'success' ? msg.result : msg.errors.join('; ') || msg.subtype;

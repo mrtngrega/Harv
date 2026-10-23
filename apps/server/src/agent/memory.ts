@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
+import { tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { HARV_HOME } from '../paths.ts';
 
@@ -65,26 +65,37 @@ export function forget(name: string, dir = MEMORY_DIR): boolean {
   return true;
 }
 
-const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
+/** Every memory's content by name, to notice changes made by other chats (or by hand). */
+export function memorySnapshot(dir = MEMORY_DIR): Map<string, string> {
+  return new Map(listMemories(dir).map((m) => [m.name, m.content]));
+}
 
-export const memoryServer = createSdkMcpServer({
-  name: 'harv',
-  version: '1.0.0',
-  tools: [
-    tool(
-      'remember',
-      'Save or update one of your long-term memories about the user (preferences, decisions, facts about their setup, rules they taught you). Use a short kebab-case name; saving an existing name replaces it. Never store secrets.',
-      { name: z.string().describe('Short name, e.g. "coding-preferences"'), content: z.string().describe('The memory, short and factual') },
-      async ({ name, content }) => {
-        try {
-          return text(`Saved memory "${remember(name, content)}".`);
-        } catch (err) {
-          return { ...text((err as Error).message), isError: true };
-        }
-      },
-    ),
-    tool('forget', 'Delete one of your memories that is wrong or no longer true.', { name: z.string() }, async ({ name }) =>
-      forget(name) ? text(`Forgot "${toSlug(name)}".`) : { ...text(`No memory named "${name}".`), isError: true },
-    ),
-  ],
-});
+/** What changed between two snapshots, as a note for Claude; null when nothing did. */
+export function memoryChanges(before: Map<string, string>, after: Map<string, string>): string | null {
+  const lines: string[] = [];
+  for (const [name, content] of after) {
+    if (before.get(name) !== content) lines.push(`- ${before.has(name) ? 'updated' : 'saved'} "${name}": ${content}`);
+  }
+  for (const name of before.keys()) if (!after.has(name)) lines.push(`- forgot "${name}"`);
+  return lines.length ? lines.join('\n') : null;
+}
+
+export const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
+
+export const memoryTools = [
+  tool(
+    'remember',
+    'Save or update one of your long-term memories about the user (preferences, decisions, facts about their setup, rules they taught you). Use a short kebab-case name; saving an existing name replaces it. Never store secrets.',
+    { name: z.string().describe('Short name, e.g. "coding-preferences"'), content: z.string().describe('The memory, short and factual') },
+    async ({ name, content }) => {
+      try {
+        return text(`Saved memory "${remember(name, content)}".`);
+      } catch (err) {
+        return { ...text((err as Error).message), isError: true };
+      }
+    },
+  ),
+  tool('forget', 'Delete one of your memories that is wrong or no longer true.', { name: z.string() }, async ({ name }) =>
+    forget(name) ? text(`Forgot "${toSlug(name)}".`) : { ...text(`No memory named "${name}".`), isError: true },
+  ),
+];

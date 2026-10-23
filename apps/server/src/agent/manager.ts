@@ -102,6 +102,7 @@ export class ChatManager {
           });
         },
       },
+      this.store,
       this.store.getSession(tabId) ?? undefined,
     );
     this.sessions.set(tabId, session);

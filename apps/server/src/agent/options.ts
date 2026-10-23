@@ -4,8 +4,10 @@ import { fileURLToPath } from 'node:url';
 import type { HookCallback, Options } from '@anthropic-ai/claude-agent-sdk';
 import { HARV_VERSION, type EffortLevel } from '@harv/shared';
 import { HARV_HOME } from '../paths.ts';
+import type { ChatStore } from '../store/chats.ts';
+import { harvServer, recentChatsContext } from './chatTools.ts';
 import { checkTool, READ_ONLY_TOOLS } from './guard.ts';
-import { memoryContext, memoryServer } from './memory.ts';
+import { memoryContext } from './memory.ts';
 
 /** Harv's own working folder; Claude starts here rather than in any project. */
 export const WORKSPACE = join(HARV_HOME, 'workspace');
@@ -24,8 +26,14 @@ function subscriptionEnv(): Record<string, string | undefined> {
 /** Harv's shared rulebook (repo root `harv/persona.md`); dev sessions follow the same file. */
 const PERSONA_PATH = fileURLToPath(new URL('../../../../harv/persona.md', import.meta.url));
 
+/** The chat tab a session belongs to; gives it the tools to see the other chats. */
+export interface ChatContext {
+  store: ChatStore;
+  tabId: string;
+}
+
 /** Built fresh for each new session, so persona edits and new memories apply to the next chat. */
-function systemPrompt(): string {
+function systemPrompt(chat?: ChatContext): string {
   const persona = existsSync(PERSONA_PATH) ? readFileSync(PERSONA_PATH, 'utf8').trim() : 'You are Harv, a personal assistant.';
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   return [
@@ -33,11 +41,22 @@ function systemPrompt(): string {
     '## Right now',
     [
       "- You're running inside Harv's dashboard on the user's Windows PC. Replies render as Markdown in a log-style chat, so keep formatting light.",
-      "- Your tools: read and search files, search and fetch the web, and remember/forget for your memory. You can't run commands, edit files or control the PC yet; that arrives with Harv's safety gate. If asked, say so plainly and offer what you can do.",
+      "- Your tools: read and search files, search and fetch the web, remember/forget for your memory, and list_chats/read_chat for your other chats. You can't run commands, edit files or control the PC yet; that arrives with Harv's safety gate. If asked, say so plainly and offer what you can do.",
       `- Today is ${today}.`,
     ].join('\n'),
     '## Your memory',
     memoryContext(),
+    ...(chat
+      ? [
+          '## Your other chats',
+          [
+            "Each chat tab is a separate conversation, but they're all you: the same rules, the same memory, one shared history. If another chat saves or forgets a memory, you'll get a note about it with the user's next message.",
+            "When the user refers to another tab or something you discussed before that isn't in this conversation, use list_chats to find it and read_chat to read it. Don't read other chats unprompted; it uses the user's plan.",
+            'Recent chats:',
+            recentChatsContext(chat.store, chat.tabId),
+          ].join('\n'),
+        ]
+      : []),
   ].join('\n\n');
 }
 
@@ -49,7 +68,12 @@ const guardHook: HookCallback = async (input) => {
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: verdict.reason } };
 };
 
-export function buildOptions(model: string, effort: EffortLevel, abortController: AbortController, resume?: string): Options {
+export function buildOptions(
+  model: string,
+  effort: EffortLevel,
+  abortController: AbortController,
+  { resume, chat }: { resume?: string; chat?: ChatContext } = {},
+): Options {
   mkdirSync(WORKSPACE, { recursive: true });
   return {
     model,
@@ -61,8 +85,8 @@ export function buildOptions(model: string, effort: EffortLevel, abortController
     // Isolation: don't load the user's Claude Code settings, CLAUDE.md files or MCP servers.
     settingSources: [],
     strictMcpConfig: true,
-    mcpServers: { harv: memoryServer },
-    systemPrompt: systemPrompt(),
+    mcpServers: chat ? { harv: harvServer(chat.store, chat.tabId) } : {},
+    systemPrompt: systemPrompt(chat),
     tools: READ_ONLY_TOOLS,
     permissionMode: 'default',
     canUseTool: async (name, input) => {

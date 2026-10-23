@@ -39,5 +39,11 @@ describe('describeTool', () => {
     expect(describeTool('Read', { file_path: 'a.txt' })).toBe('a.txt');
     expect(describeTool('Grep', { pattern: 'todo', path: 'src' })).toBe('todo in src');
     expect(describeTool('WebFetch', { url: 'https://example.com' })).toBe('https://example.com');
+    expect(describeTool('mcp__harv__list_chats', { query: 'gpu' })).toBe('gpu');
+  });
+
+  it('allows the chat tools', () => {
+    expect(checkTool('mcp__harv__read_chat', { id: 'x' })).toEqual({ allow: true });
+    expect(checkTool('mcp__harv__list_chats', {})).toEqual({ allow: true });
   });
 });

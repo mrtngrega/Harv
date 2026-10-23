@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { forget, listMemories, memoryContext, remember, toSlug } from './memory.ts';
+import { forget, listMemories, memoryChanges, memoryContext, memorySnapshot, remember, toSlug } from './memory.ts';
 
 const dirs: string[] = [];
 const tempDir = () => {
@@ -44,5 +44,18 @@ describe('memory', () => {
     expect(memoryContext(dir)).toBe('You have no saved memories yet.');
     remember('pc', 'Ryzen, RTX card.', dir);
     expect(memoryContext(dir)).toBe('### pc\nRyzen, RTX card.');
+  });
+
+  it('reports what other chats saved, updated or forgot', () => {
+    const dir = tempDir();
+    remember('pc', 'Ryzen.', dir);
+    remember('old', 'Stale fact.', dir);
+    const before = memorySnapshot(dir);
+    expect(memoryChanges(before, memorySnapshot(dir))).toBeNull();
+
+    remember('pc', 'Ryzen 7 5700X3D.', dir);
+    remember('car', 'Golf 7.', dir);
+    forget('old', dir);
+    expect(memoryChanges(before, memorySnapshot(dir))).toBe('- saved "car": Golf 7.\n- updated "pc": Ryzen 7 5700X3D.\n- forgot "old"');
   });
 });

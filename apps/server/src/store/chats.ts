@@ -133,6 +133,15 @@ export class ChatStore {
     }));
   }
 
+  /** Title, open state and the last `limit` lines of a chat, for Harv's own chat tools. */
+  transcript(id: string, limit = 60): { title: string; open: boolean; updatedAt: number; lines: StoredLine[] } | null {
+    const chat = this.db.prepare('SELECT title, open, updated_at FROM chats WHERE id = ?').get(id) as
+      { title: string; open: number; updated_at: number } | undefined;
+    if (!chat) return null;
+    const lines = this.snapshot(id)!.lines.slice(-limit);
+    return { title: chat.title, open: chat.open === 1, updatedAt: chat.updated_at, lines };
+  }
+
   delete(id: string): void {
     this.db.prepare('DELETE FROM chats WHERE id = ?').run(id);
   }

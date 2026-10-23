@@ -1,6 +1,6 @@
 # Harv: build plan
 
-Status: M0–M3 done 2026-10-22 (scaffold, glass shell, live hardware panel, chat on the subscription, persistent tabs/history + Harv's persona and memory). M4 (file attachments) done 2026-10-23: attach button, drag-and-drop and pasted screenshots; images ≤3.75 MB, PDFs ≤20 MB and text ≤100 KB go inline as content blocks (verified live: Claude Code accepts `image` and `document` blocks in streaming input), and anything bigger is saved under `~/.harv/workspace/attachments/<tab>/<id>/` for the Read tool. Next: M5 (safety gate). Web app only for now; the desktop app (M9) is deferred until the user asks.
+Status: M0–M3 done 2026-10-22 (scaffold, glass shell, live hardware panel, chat on the subscription, persistent tabs/history + Harv's persona and memory). M4 (file attachments) done 2026-10-23: attach button, drag-and-drop and pasted screenshots; images ≤3.75 MB, PDFs ≤20 MB and text ≤100 KB go inline as content blocks (verified live: Claude Code accepts `image` and `document` blocks in streaming input), and anything bigger is saved under `~/.harv/workspace/attachments/<tab>/<id>/` for the Read tool. M4b (one Harv across tabs) done 2026-10-23, see §6c. Next: M5 (safety gate). Web app only for now; the desktop app (M9) is deferred until the user asks.
 
 ## 1. Can Harv run on a Claude subscription? (research summary)
 
@@ -114,6 +114,15 @@ The user's principle: **the behaviour built in development sessions IS Harv.** T
 - `harv/persona.md` (public repo): personality and behaviour rules. Runtime Harv loads it into its system prompt, and `CLAUDE.md` tells dev sessions to follow it too. No personal data goes here.
 - `~/.harv/memory/` (private, on the PC): what Harv knows about the user, such as their profile, preferences and decisions. It's read into context at session start and updated through a scoped `remember`/`forget` tool that can only write inside that folder.
 - When the user teaches a new rule, it goes into `harv/persona.md` if it applies to Harv generally. Dev-only rules (git, testing) stay in `CLAUDE.md` or dev memory.
+
+## 6c. One Harv across tabs (M4b, decided 2026-10-23)
+
+The user's wish: every tab is its own session, but they all behave as the same Harv, remember past sessions and can work with the other open chats.
+
+- **Same Harv:** every session gets `persona.md` and the memory files. When memory changes (another tab's `remember`/`forget`, or a hand edit), each open session gets a short note with its next message (`memorySnapshot`/`memoryChanges`); a session's own edits aren't echoed back.
+- **Past sessions:** the system prompt lists the 10 most recent other chats (id, title, date, open/closed), which needs no model call. The `list_chats` tool (search titles and messages) and the `read_chat` tool (the latest lines, capped at about 16k characters) read the SQLite history. They're only used when the user refers to another chat.
+- **Open tabs:** `read_chat` works on open tabs too, but only shows finished lines.
+- **Later (after M5):** handing work to another tab (tab A asks tab B to do something). It runs two sessions at once (about 2× usage) and must pass the safety gate. Optional automatic chat summaries (one Haiku call per chat) are on hold for Pro limits.
 
 ## 7. Risks and open questions
 
