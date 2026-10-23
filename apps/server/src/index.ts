@@ -166,6 +166,9 @@ app.get('/ws', { websocket: true }, (socket) => {
       case 'chat.delete':
         chats.delete(msg.tabId);
         break;
+      case 'chat.rename':
+        chats.rename(msg.tabId, msg.title);
+        break;
       case 'approval.answer':
         gate.answer(msg.id, msg.approve, msg.command);
         break;

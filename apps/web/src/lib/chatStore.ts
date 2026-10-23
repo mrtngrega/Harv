@@ -203,6 +203,9 @@ export function applyChatEvent(msg: ChatServerMessage): void {
         activeId: msg.focus === false && s.activeId ? s.activeId : msg.chat.id,
       }));
       break;
+    case 'chat.renamed':
+      updateTab(msg.tabId, (t) => ({ ...t, title: msg.title }));
+      break;
     case 'chat.removed':
       store.set((s) => {
         const tabs = s.tabs.filter((t) => t.id !== msg.tabId);
@@ -299,6 +302,14 @@ export const chat = {
   openFromHistory(id: string) {
     if (store.get().tabs.some((t) => t.id === id)) chat.setActive(id);
     else sendMessage({ type: 'chat.open', tabId: id });
+  },
+
+  /** Renames a chat; Harv stops naming it automatically. */
+  rename(tabId: string, raw: string) {
+    const title = raw.replace(/\s+/g, ' ').trim();
+    if (!title) return;
+    updateTab(tabId, (t) => ({ ...t, title }));
+    sendMessage({ type: 'chat.rename', tabId, title });
   },
 
   deleteChat(id: string) {

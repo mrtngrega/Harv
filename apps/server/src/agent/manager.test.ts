@@ -145,6 +145,66 @@ describe('limit handling', () => {
   });
 });
 
+describe('chat names', () => {
+  it('names a chat from the classifier, until the user renames it', async () => {
+    const sent: ChatServerMessage[] = [];
+    const store = new ChatStore(':memory:');
+    const routes = new RouteStore(':memory:');
+    const gate = new SafetyGate(new ActionStore(':memory:'), { broadcast: () => {}, notice: () => {}, onChange: () => {} });
+    const meter = new UsageMeter(
+      { onChange: () => {}, onResume: () => {} },
+      () => routes.summary(),
+      async () => undefined,
+    );
+    let title = 'Week plan';
+    const classify = vi.fn(async () => ({
+      category: 'planning',
+      difficulty: 3 as const,
+      stakes: 'normal' as const,
+      ambiguous: false,
+      title,
+    }));
+    const chats = new ChatManager(
+      store,
+      gate,
+      new Router(routes, classify),
+      meter,
+      (m) => sent.push(m),
+      () => {},
+    );
+
+    await chats.send('n', 'plan my week around the deadlines in notes.md', 'auto', 'medium');
+    expect(store.title('n')).toBe('Week plan');
+    expect(sent).toContainEqual({ type: 'chat.renamed', tabId: 'n', title: 'Week plan' });
+    // The first message's own text isn't offered as a title to keep.
+    expect(classify.mock.calls[0]![3]).toBeUndefined();
+    FakeSession.all.get('n')!.finish();
+
+    chats.rename('n', '  My   week ');
+    expect(store.title('n')).toBe('My week');
+    title = 'Something else';
+    await chats.send('n', 'new question: now write a poem about tides and the moon', 'auto', 'medium');
+    expect(store.title('n')).toBe('My week');
+    FakeSession.all.get('n')!.finish();
+  });
+
+  it('names a new chat in manual mode with one classifier call', async () => {
+    const { chats, store } = setup();
+    // setup()'s classifier answers null, so the first-message title stays.
+    await chats.send('m', 'hello there in manual mode', 'sonnet', 'medium');
+    await settle();
+    expect(store.title('m')).toBe('hello there in manual mode');
+    FakeSession.all.get('m')!.finish();
+  });
+
+  it('saves a name given to a tab before its first message', () => {
+    const { chats, store } = setup();
+    chats.rename('blank', 'Ideas');
+    expect(store.title('blank')).toBe('Ideas');
+    expect(store.titleLocked('blank')).toBe(true);
+  });
+});
+
 describe('hand-off between chats', () => {
   it('runs the task in a new tab and brings the answer back', async () => {
     const { chats, store } = setup();

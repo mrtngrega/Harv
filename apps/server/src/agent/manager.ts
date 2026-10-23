@@ -253,6 +253,29 @@ export class ChatManager {
       return;
     }
     await this.start(tabId, message, choice, effort, files);
+    // Manual mode never asks the classifier, so a new chat gets its short name from one cheap call.
+    if (isNew && choice !== 'auto') {
+      void this.router.name(parseOverride(message).text, files).then((title) => title && this.autoTitle(tabId, title));
+    }
+  }
+
+  /** Harv's short name for what a chat is about; skipped once the user has named it. */
+  private autoTitle(tabId: string, title: string) {
+    if (!this.store.exists(tabId) || this.store.titleLocked(tabId) || this.store.title(tabId) === title) return;
+    this.store.setTitle(tabId, title);
+    this.broadcast({ type: 'chat.renamed', tabId, title });
+    this.publishHistory();
+  }
+
+  /** The user renamed a chat (right-click on its tab). */
+  rename(tabId: string, raw: string): void {
+    const title = raw.replace(/\s+/g, ' ').trim().slice(0, 60);
+    if (!title) return;
+    // A tab that hasn't sent anything yet is saved now, so its name sticks.
+    this.store.ensureChat(tabId, title);
+    this.store.setTitle(tabId, title, true);
+    this.broadcast({ type: 'chat.renamed', tabId, title });
+    this.publishHistory();
   }
 
   /** Adds a line the dashboard didn't write itself (it only shows the user's own messages as they're sent). */
@@ -332,7 +355,12 @@ export class ChatManager {
     this.setRouting(tabId, true);
     try {
       if (choice === 'auto') {
-        ({ decision, text } = await this.router.route(tabId, message, files));
+        // A new chat's title is just its first message, not a name worth keeping.
+        const current = this.store.title(tabId);
+        const named = current && current !== titleFrom(parseOverride(message).text.trim() || message) ? current : undefined;
+        const routed = await this.router.route(tabId, message, files, named);
+        ({ decision, text } = routed);
+        if (routed.title) this.autoTitle(tabId, routed.title);
       } else {
         // `/opus`-style words work in manual mode too, for one message.
         const override = parseOverride(message);

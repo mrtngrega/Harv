@@ -145,6 +145,9 @@ export function ChatPanel() {
   // Draft attachments per tab: each upload lands in that tab's folder on the server.
   const [pendingByTab, setPendingByTab] = useState<Record<string, Pending[]>>({});
   const [dragging, setDragging] = useState(false);
+  /** The tab whose name is being edited (right-click or F2 on it). */
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const renameCancelled = useRef(false);
   const logRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const active = tabs.find((t) => t.id === activeId) ?? null;
@@ -242,16 +245,51 @@ export function ChatPanel() {
                 on ? 'border-[rgb(220_232_245/0.18)] bg-white/10' : 'border-transparent'
               }`}
             >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={on}
-                onClick={() => chat.setActive(t.id)}
-                className={`flex min-h-9 cursor-pointer items-center gap-1.5 truncate pr-1 pl-3 text-xs ${on ? 'text-ink' : 'text-muted'}`}
-              >
-                {t.busy && <span aria-hidden="true" className="animate-blink size-1.5 flex-none rounded-full bg-accent" />}
-                <span className="truncate">{t.title}</span>
-              </button>
+              {renaming === t.id ? (
+                <input
+                  aria-label="Chat name"
+                  autoFocus
+                  defaultValue={t.title}
+                  maxLength={60}
+                  onFocus={(e) => e.target.select()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.currentTarget.blur();
+                    if (e.key === 'Escape') {
+                      e.stopPropagation();
+                      renameCancelled.current = true;
+                      e.currentTarget.blur();
+                    }
+                  }}
+                  onBlur={(e) => {
+                    // Enter and clicking away save; Escape doesn't.
+                    const name = e.target.value.trim();
+                    if (!renameCancelled.current && name && name !== t.title) chat.rename(t.id, name);
+                    renameCancelled.current = false;
+                    setRenaming(null);
+                  }}
+                  className="my-1 ml-1.5 min-h-7 w-[150px] rounded-md border border-accent/60 bg-black/30 px-1.5 text-xs text-ink outline-none"
+                />
+              ) : (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={on}
+                  title={`${t.title} · right-click to rename`}
+                  onClick={() => chat.setActive(t.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setRenaming(t.id);
+                  }}
+                  onKeyDown={(e) => {
+                    // F2 renames too, for the keyboard.
+                    if (e.key === 'F2') setRenaming(t.id);
+                  }}
+                  className={`flex min-h-9 cursor-pointer items-center gap-1.5 truncate pr-1 pl-3 text-xs ${on ? 'text-ink' : 'text-muted'}`}
+                >
+                  {t.busy && <span aria-hidden="true" className="animate-blink size-1.5 flex-none rounded-full bg-accent" />}
+                  <span className="truncate">{t.title}</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => chat.closeTab(t.id)}

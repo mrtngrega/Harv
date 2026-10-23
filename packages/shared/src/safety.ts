@@ -41,8 +41,7 @@ export interface ApprovalRequest {
 }
 
 export type SafetyClientMessage =
-  | { type: 'approval.answer'; id: string; approve: boolean; command?: string }
-  | { type: 'action.undo'; id: string };
+  { type: 'approval.answer'; id: string; approve: boolean; command?: string } | { type: 'action.undo'; id: string };
 
 export type SafetyServerMessage =
   | { type: 'approval.request'; approval: ApprovalRequest }

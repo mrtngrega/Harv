@@ -97,6 +97,8 @@ export type ChatClientMessage =
   /** Reopen a chat from history as a tab. */
   | { type: 'chat.open'; tabId: string }
   | { type: 'chat.delete'; tabId: string }
+  /** The user renamed a chat (right-click on its tab); auto-naming leaves it alone after that. */
+  | { type: 'chat.rename'; tabId: string; title: string }
   | { type: 'history.search'; query: string };
 
 export type ChatServerMessage =
@@ -114,5 +116,7 @@ export type ChatServerMessage =
   /** A finished line added by the server (a hand-off's request), appended as is. */
   | { type: 'chat.line'; tabId: string; line: StoredLine }
   | { type: 'chat.removed'; tabId: string }
+  /** A chat's title changed (named automatically, or by the user). */
+  | { type: 'chat.renamed'; tabId: string; title: string }
   /** The history list; `query` echoes the search it answers ("" = everything). */
   | { type: 'history'; items: HistoryItem[]; query: string };

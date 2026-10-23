@@ -10,6 +10,7 @@ const SCHEMA = `
     session_id TEXT,
     open       INTEGER NOT NULL DEFAULT 1,
     context    INTEGER,
+    title_locked INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
@@ -54,6 +55,9 @@ export class ChatStore {
     if (!columns.some((c) => c.name === 'reason')) this.db.exec('ALTER TABLE lines ADD COLUMN reason TEXT');
     const chatColumns = this.db.prepare('PRAGMA table_info(chats)').all() as { name: string }[];
     if (!chatColumns.some((c) => c.name === 'context')) this.db.exec('ALTER TABLE chats ADD COLUMN context INTEGER');
+    if (!chatColumns.some((c) => c.name === 'title_locked')) {
+      this.db.exec('ALTER TABLE chats ADD COLUMN title_locked INTEGER NOT NULL DEFAULT 0');
+    }
   }
 
   close(): void {
@@ -69,8 +73,16 @@ export class ChatStore {
     return (this.db.prepare('SELECT title FROM chats WHERE id = ?').get(id) as { title: string } | undefined)?.title;
   }
 
-  setTitle(id: string, title: string): void {
-    this.db.prepare('UPDATE chats SET title = ? WHERE id = ?').run(title, id);
+  /** `byUser` locks the title: automatic naming never changes it after that. */
+  setTitle(id: string, title: string, byUser = false): void {
+    this.db.prepare('UPDATE chats SET title = ?, title_locked = MAX(title_locked, ?) WHERE id = ?').run(title, byUser ? 1 : 0, id);
+  }
+
+  /** The user named this chat themselves. */
+  titleLocked(id: string): boolean {
+    return (
+      (this.db.prepare('SELECT title_locked FROM chats WHERE id = ?').get(id) as { title_locked: number } | undefined)?.title_locked === 1
+    );
   }
 
   setOpen(id: string, open: boolean): void {
@@ -99,19 +111,37 @@ export class ChatStore {
     const now = Date.now();
     this.db
       .prepare('INSERT INTO lines (chat_id, kind, text, tag, reason, files, ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(chatId, line.kind, line.text, line.tag ?? null, line.reason ?? null, line.files?.length ? JSON.stringify(line.files) : null, line.ref ?? null, now);
+      .run(
+        chatId,
+        line.kind,
+        line.text,
+        line.tag ?? null,
+        line.reason ?? null,
+        line.files?.length ? JSON.stringify(line.files) : null,
+        line.ref ?? null,
+        now,
+      );
     this.db.prepare('UPDATE chats SET updated_at = ? WHERE id = ?').run(now, chatId);
   }
 
   snapshot(id: string): ChatSnapshot | null {
     const row = this.db.prepare('SELECT id, title, context FROM chats WHERE id = ?').get(id) as
-      | { id: string; title: string; context: number | null }
-      | undefined;
+      { id: string; title: string; context: number | null } | undefined;
     if (!row) return null;
     const chat = { id: row.id, title: row.title, ...(row.context ? { context: row.context } : {}) };
     const rows = this.db
-      .prepare('SELECT kind, text, tag, reason, files, ref, created_at FROM (SELECT * FROM lines WHERE chat_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id')
-      .all(id, RESTORE_LINES) as { kind: LineKind; text: string; tag: string | null; reason: string | null; files: string | null; ref: string | null; created_at: number }[];
+      .prepare(
+        'SELECT kind, text, tag, reason, files, ref, created_at FROM (SELECT * FROM lines WHERE chat_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id',
+      )
+      .all(id, RESTORE_LINES) as {
+      kind: LineKind;
+      text: string;
+      tag: string | null;
+      reason: string | null;
+      files: string | null;
+      ref: string | null;
+      created_at: number;
+    }[];
     return {
       ...chat,
       lines: rows.map((r) => ({

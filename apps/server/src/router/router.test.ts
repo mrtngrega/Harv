@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { RouteStore } from '../store/routes.ts';
-import { parseClassification } from './classifier.ts';
+import { cleanTitle, parseClassification } from './classifier.ts';
 import { Router } from './router.ts';
 import { instantRules, isFollowUp, parseOverride } from './rules.ts';
 import { pickFor, stepUp, tag, type Classification } from './table.ts';
@@ -98,6 +98,16 @@ describe('classifier reply', () => {
     expect(parseClassification('{"difficulty": 9}')).toBeNull();
     expect(parseClassification('no idea')).toBeNull();
   });
+
+  it('keeps a tidy short title', () => {
+    expect(parseClassification('{"category":"planning","difficulty":3,"stakes":"normal","title":"\\"Week plan.\\""}')?.title).toBe(
+      'Week plan',
+    );
+    expect(cleanTitle('  GPU   driver\nupdate ')).toBe('GPU driver update');
+    expect(cleanTitle('A very long title that goes on and on forever')).toHaveLength(32);
+    expect(cleanTitle('')).toBeUndefined();
+    expect(cleanTitle(42)).toBeUndefined();
+  });
 });
 
 describe('router', () => {
@@ -108,6 +118,16 @@ describe('router', () => {
     const next = await router.route('t', 'ok and what about raw files?');
     expect(next.decision).toMatchObject({ model: 'opus', effort: 'high', source: 'followup' });
     expect(classify).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes the classifier’s title on, and the current title to the classifier', async () => {
+    const classify = vi.fn(async () => ({ ...c(3), title: 'Week plan' }));
+    const { router } = newRouter(classify);
+    const r = await router.route('t', 'Plan my week around the deadlines in notes.md', [], 'Old name');
+    expect(r.title).toBe('Week plan');
+    expect(classify).toHaveBeenCalledWith('Plan my week around the deadlines in notes.md', [], undefined, 'Old name');
+    // Follow-ups skip the classifier, so they don't rename.
+    expect((await router.route('t', 'and Friday?')).title).toBeUndefined();
   });
 
   it('doesn’t let small talk replace the task decision', async () => {

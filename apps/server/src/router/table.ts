@@ -11,6 +11,8 @@ export interface Classification {
   difficulty: 1 | 2 | 3 | 4 | 5;
   stakes: 'low' | 'normal' | 'high';
   ambiguous: boolean;
+  /** A short name for what the chat is about now (the tab title). */
+  title?: string;
 }
 
 /**
