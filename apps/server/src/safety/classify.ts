@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Tier } from '@harv/shared';
 import { isHarvData, isInside, isProgramDir, isWindowsDir, loadSettings, toWindowsPath, WORKSPACE } from './paths.ts';
 
@@ -168,13 +169,65 @@ export function pathsInCommand(command: string, cwd = WORKSPACE): string[] {
 function isOpenApp(segment: string): boolean {
   const [first = '', ...rest] = words(segment).map(unquote);
   const cmd = first.toLowerCase();
-  if (!['start', 'start-process', 'saps', 'explorer', 'explorer.exe', 'notepad', 'calc', 'code'].includes(cmd)) return false;
+  if (!['start', 'start-process', 'saps', 'invoke-item', 'ii', 'explorer', 'explorer.exe', 'notepad', 'calc', 'code'].includes(cmd))
+    return false;
   if (/-verb\s+runas|-credential|-argumentlist/i.test(segment)) return false;
   const target = rest.filter((w) => !w.startsWith('-') && w !== '""')[0] ?? '';
   if (/^https?:\/\//i.test(target)) return true;
   if (EXECUTABLE.test(target)) return false;
   // A bare app name (no folder) or a document/folder path.
   return true;
+}
+
+/**
+ * The new folders a command creates (`mkdir x`, `md x`, `New-Item -ItemType Directory -Path x [-Name y]`),
+ * or null when it does anything else or a folder already exists.
+ */
+export function newFolders(command: string, cwd = WORKSPACE): string[] | null {
+  const segments = splitCommand(command);
+  if (segments.length === 0 || /\$\(|`|>/.test(command)) return null;
+  const out: string[] = [];
+  for (const segment of segments) {
+    const ws = words(segment).map(unquote);
+    const cmd = (ws[0] ?? '').toLowerCase();
+    let targets: string[];
+    if (cmd === 'mkdir' || cmd === 'md') {
+      targets = ws.slice(1).filter((w) => !w.startsWith('-'));
+    } else if (cmd === 'new-item' || cmd === 'ni') {
+      const opts: Record<string, string> = {};
+      const positional: string[] = [];
+      for (let i = 1; i < ws.length; i++) {
+        const w = ws[i]!;
+        if (!w.startsWith('-')) positional.push(w);
+        else if (w.toLowerCase() !== '-force') opts[w.slice(1).toLowerCase()] = ws[++i] ?? '';
+      }
+      if (!/^(directory|dir|container)$/i.test(opts.itemtype ?? opts.type ?? '')) return null;
+      const base = opts.path ?? opts.literalpath ?? positional[0];
+      if (!base && !opts.name) return null;
+      targets = [opts.name ? join(base ?? '.', opts.name) : base!];
+    } else {
+      return null;
+    }
+    if (targets.length === 0) return null;
+    for (const target of targets) {
+      const path = toWindowsPath(target, cwd);
+      if (/[*?$]/.test(target) || existsSync(path)) return null;
+      out.push(path);
+    }
+  }
+  return out;
+}
+
+/** Making new folders can't destroy anything, so it's yellow (logged, Undo removes them) unless it's somewhere off-limits. */
+function classifyNewFolders(folders: string[], summary: string): Verdict {
+  const protectedDir = loadSettings().protectedPaths.find((dir) => folders.some((f) => isInside(f, dir)));
+  if (protectedDir) return verdict('blocked', `Blocked: ${protectedDir} is on your read-only list.`, summary);
+  if (folders.some(isWindowsDir)) return verdict('blocked', 'Blocked: Harv never changes the Windows folder.', summary);
+  if (folders.some(isHarvData))
+    return verdict('blocked', "Blocked: Harv's database, backups and memory are only changed by Harv itself.", summary);
+  if (folders.every((f) => isInside(f, WORKSPACE))) return verdict('green', "Inside Harv's own workspace.", summary);
+  if (folders.some(isProgramDir)) return verdict('red', 'It changes an installed program’s folder.', summary, folders);
+  return verdict('yellow', 'Creates new folders.', summary, folders);
 }
 
 function isGreenSegment(segment: string): boolean {
@@ -215,6 +268,9 @@ export function classifyCommand(command: string, description = ''): Verdict {
       return verdict('green', 'Only reads information.', summary);
     }
   }
+
+  const folders = newFolders(command);
+  if (folders) return classifyNewFolders(folders, summary);
 
   const paths = pathsInCommand(command);
   const settings = loadSettings();

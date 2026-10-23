@@ -241,9 +241,13 @@ export class SafetyGate {
       return;
     }
     try {
-      const restored = restoreBackup(backup);
-      this.actions.update(id, { status: 'undone', result: `Restored ${restored.length} item(s) from ${backup.dir}.` });
-      this.hooks.notice(action.tabId, `Undone: ${action.summary}. Restored ${restored.join(', ')}.`);
+      const { restored, removed } = restoreBackup(backup);
+      const parts = [
+        restored.length ? `Restored ${restored.join(', ')}.` : '',
+        removed.length ? `Removed ${removed.join(', ')} (kept in ${backup.dir} in case you want it back).` : '',
+      ].filter(Boolean);
+      this.actions.update(id, { status: 'undone', result: parts.join(' ') });
+      this.hooks.notice(action.tabId, `Undone: ${action.summary}. ${parts.join(' ')}`);
     } catch (err) {
       this.hooks.notice(action.tabId, `Undo failed: ${(err as Error).message}. The backup is still in ${backup.dir}.`);
     }

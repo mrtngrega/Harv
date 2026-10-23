@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { HookCallbackMatcher, HookEvent, Options } from '@anthropic-ai/claude-agent-sdk';
 import { HARV_VERSION, type EffortLevel } from '@harv/shared';
@@ -47,6 +48,8 @@ function systemPrompt(chat?: ChatContext): string {
       '- Your tools: read and search files, search and fetch the web, create and edit files, run PowerShell and Bash commands (prefer PowerShell for Windows tasks), remember/forget for your memory, and list_chats/read_chat for your other chats.',
       `- Harv's safety gate checks every action. Reading is free, and so is creating files in your workspace (${WORKSPACE}). Editing or creating the user's files is backed up first and they can Undo it. Riskier things (deleting, installing, stopping programs, scripts, the registry, system settings, sending data, git push) show the user an approval card with the exact command, and you wait for their answer. Formatting drives, touching the Windows folder, turning off antivirus or the firewall, and reading stored credentials are always blocked.`,
       "- So: pick the least risky way to do what's asked, say in a sentence what you're about to do before a risky step, and keep commands simple and readable (the user approves exactly what they see). If something is denied or blocked, don't retry it or work around it; ask what they'd like instead.",
+      "- One plain command per step. Simple commands pass without bothering the user, but anything with variables, if/else, loops or several steps chained together always needs their approval. For example, check with `Test-Path '<path>'` first, then create a folder with just `New-Item -ItemType Directory -Path '<full path>'` (new folders don't need approval), and open a file with `Start-Process '<path>'`.",
+      `- The user's home folder is ${homedir()} (Downloads, Documents and Desktop are usually inside it; check if a path isn't there). You can read and open files anywhere on the PC.`,
       `- Today is ${today}.`,
     ].join('\n'),
     '## Your memory',

@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 
 const home = mkdtempSync(join(tmpdir(), 'harv-safety-'));
 vi.stubEnv('HARV_HOME', home);
-const { classify, classifyCommand, pathsInCommand, splitCommand } = await import('./classify.ts');
+const { classify, classifyCommand, newFolders, pathsInCommand, splitCommand } = await import('./classify.ts');
 const { isInside, toWindowsPath } = await import('./paths.ts');
 
 const userDir = mkdtempSync(join(tmpdir(), 'harv-user-'));
@@ -94,6 +94,8 @@ describe('shell commands', () => {
     'start notepad',
     'Start-Process https://example.com',
     'explorer C:\\Users\\me\\Downloads',
+    "Start-Process 'C:\\Users\\me\\Downloads\\My File.pdf'",
+    "Invoke-Item 'C:\\Users\\me\\Downloads\\report.docx'",
   ])('green: %s', (command) => {
     expect(cmd(command)).toBe('green');
   });
@@ -115,6 +117,8 @@ describe('shell commands', () => {
     ['Invoke-Expression (Get-Content x.ps1)', /./],
     ['Get-Date; $(rm x)', /./],
     ['npm install left-pad', /Installs/],
+    ['Invoke-Item C:\\Users\\me\\Downloads\\setup.exe', /./],
+    ['New-Item -ItemType File -Path notes.txt', /Writes/],
   ])('red: %s', (command, reason) => {
     const v = classifyCommand(command);
     expect(v.tier).toBe('red');
@@ -145,6 +149,20 @@ describe('shell commands', () => {
     expect(pathsInCommand(`Remove-Item "${userFile}" -Force`)).toEqual([userFile]);
     expect(classifyCommand(`del "${userFile}"`).targets).toEqual([userFile]);
     expect(pathsInCommand('taskkill /IM chrome.exe /F')).toEqual([]);
+  });
+
+  it('lets Harv make new folders (yellow, with Undo) but not where it must not', () => {
+    const project = join(userDir, 'Projects', 'weather-app');
+    expect(newFolders(`New-Item -ItemType Directory -Path "${join(userDir, 'Projects')}" -Name weather-app -Force`)).toEqual([project]);
+    expect(newFolders(`mkdir -p "${project}"`)).toEqual([project]);
+    const v = classifyCommand(`New-Item -ItemType Directory -Path "${project}"`);
+    expect(v).toMatchObject({ tier: 'yellow', targets: [project] });
+    expect(cmd(`mkdir "${join(home, 'workspace', 'scratch')}"`)).toBe('green');
+    expect(cmd(`mkdir "${join(protectedDir, 'new')}"`)).toBe('blocked');
+    expect(cmd('mkdir C:\\Windows\\Harv')).toBe('blocked');
+    // Already exists, or combined with something else: back to the normal rules.
+    expect(newFolders(`mkdir "${userDir}"`)).toBeNull();
+    expect(cmd(`mkdir "${project}"; Remove-Item x`)).toBe('red');
   });
 
   it('splits command chains', () => {

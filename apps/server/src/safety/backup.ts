@@ -81,9 +81,10 @@ export function createBackup(actionId: string, paths: string[], now = new Date()
  * Puts the backed-up files back. Whatever is there now is first moved aside to
  * <backup>/replaced-<time>/, so an Undo can never lose anything either.
  */
-export function restoreBackup(backup: Backup, now = new Date()): string[] {
+export function restoreBackup(backup: Backup, now = new Date()): { restored: string[]; removed: string[] } {
   const aside = join(backup.dir, `replaced-${now.toISOString().replace(/[:.]/g, '-')}`);
   const restored: string[] = [];
+  const removed: string[] = [];
   for (const entry of backup.entries) {
     if (existsSync(entry.original)) {
       const moved = join(aside, relativeCopy(entry.original));
@@ -99,10 +100,13 @@ export function restoreBackup(backup: Backup, now = new Date()): string[] {
     if (entry.copy && existsSync(entry.copy)) {
       mkdirSync(dirname(entry.original), { recursive: true });
       cpSync(entry.copy, entry.original, { recursive: true, preserveTimestamps: true });
+      restored.push(entry.original);
+    } else {
+      // It didn't exist before the action, so undoing it means taking it away (kept in the backup folder).
+      removed.push(entry.original);
     }
-    restored.push(entry.original);
   }
-  return restored;
+  return { restored, removed };
 }
 
 export function readBackup(dir: string): Backup | null {

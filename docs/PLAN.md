@@ -77,6 +77,7 @@ Shell commands are parsed for risky patterns: `rm`, `del`, `Remove-Item`, `forma
   - Reads and Harv's own tools are green.
   - Write/Edit in the workspace is green. Elsewhere it's yellow, red in Program Files, and blocked in Windows, protected folders, Harv's data and secrets.
   - A shell command is green only if every part is on a read-only list (or it just opens an app, page or document) and it has no redirection or command substitution.
+  - Creating *new* folders (`mkdir`, `New-Item -ItemType Directory`) is yellow: logged, and Undo removes them. It's green in the workspace. Added 2026-10-23 so that "new project" (persona rule 8) creates its folder in the user's projects folder without a card.
   - Blocked patterns (drive formatting, AV/firewall off, credential stores, Windows folder, protected folders) come first. Everything else is red with a category reason.
 - `safety/gate.ts` runs inside the `PreToolUse` hook (24 h timeout), so a red call waits right there for the dashboard's answer. `canUseTool` is a backstop that denies any red call without a recorded approval. `PostToolUse`/`PostToolUseFailure` verify and log.
 - Backups are best-effort for shell commands: every literal path in the command that exists is copied, up to 500 MB / 5000 files, and the card says when nothing could be backed up. Undo first moves the current version aside, so it never loses data.
