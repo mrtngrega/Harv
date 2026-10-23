@@ -3,6 +3,8 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Attachment } from '@harv/shared';
 import { formatSize, uploadAttachment } from '../lib/attachments.ts';
+import { resetTime } from '../lib/format.ts';
+import { useUsage } from '../lib/useHarvSocket.ts';
 import { chat, useChat, type Line } from '../lib/chatStore.ts';
 import { useSafety } from '../lib/safetyStore.ts';
 import { ActionBadge, ApprovalCard } from './ApprovalCard.tsx';
@@ -116,6 +118,7 @@ function ToolLine({ line }: { line: Line }) {
 export function ChatPanel() {
   const { tabs, activeId } = useChat();
   const { approvals } = useSafety();
+  const usage = useUsage();
   const [draft, setDraft] = useState('');
   // Draft attachments per tab: each upload lands in that tab's folder on the server.
   const [pendingByTab, setPendingByTab] = useState<Record<string, Pending[]>>({});
@@ -261,6 +264,24 @@ export function ChatPanel() {
               onRemove={() => activeId && updatePending(activeId, (list) => list.filter((x) => x.key !== p.key))}
             />
           ))}
+        </div>
+      )}
+
+      {usage?.pausedUntil && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 pt-2 text-xs text-warn">
+          <span>
+            Claude Pro limit reached: messages queue until {resetTime(usage.pausedUntil)}
+            {usage.queued > 0 && ` (${usage.queued} waiting)`}.
+          </span>
+          {active && usage.queued > 0 && (
+            <button
+              type="button"
+              onClick={() => chat.stop(active.id)}
+              className="cursor-pointer rounded px-1.5 text-muted hover:bg-white/10 hover:text-ink"
+            >
+              cancel this tab’s queue
+            </button>
+          )}
         </div>
       )}
 

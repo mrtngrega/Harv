@@ -1,4 +1,4 @@
-import { query, type Query, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { query, type Query, type SDKMessage, type SDKRateLimitInfo, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ChatServerMessage, EffortLevel } from '@harv/shared';
 import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
@@ -16,6 +16,8 @@ export interface SessionHooks {
   onSessionId: (sessionId: string) => void;
   /** Resuming an old session failed before it started (e.g. its transcript is gone). */
   onResumeFailed: () => void;
+  /** Live plan usage from Claude; `rejected` means a limit is hit. */
+  onRateLimit: (info: SDKRateLimitInfo) => void;
 }
 
 const ERROR_TEXT: Record<string, string> = {
@@ -147,6 +149,7 @@ export class ChatSession {
 
       case 'assistant': {
         if (msg.parent_tool_use_id) return;
+        if (msg.error === 'rate_limit') this.hooks.onRateLimit({ status: 'rejected' });
         if (msg.error && msg.error !== 'max_output_tokens') {
           this.emit({ type: 'chat.error', tabId, message: ERROR_TEXT[msg.error] ?? `Claude error: ${msg.error}` });
         }
@@ -189,7 +192,12 @@ export class ChatSession {
           ok,
           stopped: this.stopping,
           error,
-          usage: { inputTokens: msg.usage.input_tokens, outputTokens: msg.usage.output_tokens, durationMs: msg.duration_ms },
+          usage: {
+            // Cached context counts too: it's most of what a long chat sends.
+            inputTokens: msg.usage.input_tokens + (msg.usage.cache_read_input_tokens ?? 0) + (msg.usage.cache_creation_input_tokens ?? 0),
+            outputTokens: msg.usage.output_tokens,
+            durationMs: msg.duration_ms,
+          },
         });
         this.stopping = false;
         this.setBusy(false);
@@ -199,6 +207,18 @@ export class ChatSession {
       case 'rate_limit_event': {
         const info = msg.rate_limit_info;
         const resets = info.resetsAt ? ` It resets at ${clock(info.resetsAt)}.` : '';
+        if (info.isUsingOverage || info.overageInUse) {
+          // Extra usage is billed. Harv is subscription-only, so stop right here and wait for the reset.
+          this.hooks.onRateLimit({ ...info, status: 'rejected' });
+          this.emit({
+            type: 'chat.error',
+            tabId,
+            message: `Stopped: Claude was about to use paid extra usage, which Harv never does. Turn extra usage off at claude.ai › Settings › Usage.${resets}`,
+          });
+          void this.stop();
+          return;
+        }
+        this.hooks.onRateLimit(info);
         if (info.status === 'rejected') {
           // Never offer to buy credits or use overage: Harv is subscription-only.
           this.emit({ type: 'chat.error', tabId, message: `Claude Pro usage limit reached.${resets}` });

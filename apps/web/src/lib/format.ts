@@ -47,3 +47,19 @@ export function duration(sec: number): string {
 
 /** Bars turn amber from this load or temperature share. */
 export const WARN_AT = 85;
+
+/** When a plan meter resets: "23:40" today, "Mon 08:00" later in the week. */
+export function resetTime(at: number | null, now = Date.now()): string {
+  if (at === null) return '—';
+  const d = new Date(at);
+  const hm = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  if (at - now < 20 * 60 * 60 * 1000 && d.getDate() === new Date(now).getDate()) return hm;
+  return `${d.toLocaleDateString('en-GB', { weekday: 'short' })} ${hm}`;
+}
+
+/** Token counts: 820, 12.4k, 1.3M. */
+export function tokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}

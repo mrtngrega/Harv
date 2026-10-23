@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import type { MetricsSnapshot } from '@harv/shared';
+import type { MetricsSnapshot, PlanUsage } from '@harv/shared';
 import { pct, rate } from '../lib/format.ts';
-import { useMetrics } from '../lib/useHarvSocket.ts';
+import { useMetrics, useUsage } from '../lib/useHarvSocket.ts';
 import { Bar, barColor } from './stats/parts.tsx';
+import { PlanDetails } from './stats/PlanDetails.tsx';
 import { StatsDetails } from './stats/StatsDetails.tsx';
 
 interface CompactItem {
@@ -22,11 +23,15 @@ function compactItems(m: MetricsSnapshot | null): CompactItem[] {
   ];
 }
 
-// Claude plan usage arrives in M7.
-const PLAN_ITEMS: CompactItem[] = [
-  { label: 'SESSION', value: '—', load: undefined },
-  { label: 'WEEKLY', value: '—', load: undefined },
-];
+function planItems(u: PlanUsage | null): CompactItem[] {
+  const meter = (kind: string) => u?.meters.find((m) => m.kind === kind)?.percent;
+  const session = meter('session');
+  const weekly = meter('weekly_all');
+  return [
+    { label: 'SESSION', value: pct(session), load: session },
+    { label: 'WEEKLY', value: pct(weekly), load: weekly },
+  ];
+}
 
 function CompactRow({ item }: { item: CompactItem }) {
   return (
@@ -45,6 +50,7 @@ function CompactRow({ item }: { item: CompactItem }) {
 export function StatsPanel() {
   const [wide, setWide] = useState(false);
   const metrics = useMetrics();
+  const usage = useUsage();
 
   if (!wide) {
     return (
@@ -62,7 +68,7 @@ export function StatsPanel() {
           <CompactRow key={item.label} item={item} />
         ))}
         <div className="mx-2 border-t border-line" />
-        {PLAN_ITEMS.map((item) => (
+        {planItems(usage).map((item) => (
           <CompactRow key={item.label} item={item} />
         ))}
       </aside>
@@ -86,6 +92,7 @@ export function StatsPanel() {
         </button>
       </div>
       {metrics ? <StatsDetails m={metrics} /> : <p className="m-0 p-2 text-xs text-muted">Waiting for sensors…</p>}
+      <PlanDetails usage={usage} />
     </aside>
   );
 }

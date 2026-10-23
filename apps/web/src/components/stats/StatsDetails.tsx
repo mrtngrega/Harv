@@ -165,10 +165,6 @@ export function StatsDetails({ m }: { m: MetricsSnapshot }) {
       <div className="mt-1 border-t border-line px-1 pt-2.5 text-[11px] tracking-[2px] text-muted">HARV</div>
       <ActionLog />
 
-      <div className="mt-1 border-t border-line px-1 pt-2.5 text-[11px] tracking-[2px] text-muted">CLAUDE PLAN</div>
-      <Card title="Usage" sub="session · weekly">
-        <p className="m-0 text-xs text-muted">Plan usage arrives in M7.</p>
-      </Card>
     </>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countDuplicates, duration, rate, sizePair } from './format.ts';
+import { countDuplicates, duration, rate, resetTime, sizePair, tokens } from './format.ts';
 
 describe('format', () => {
   it('formats throughput', () => {
@@ -21,5 +21,18 @@ describe('format', () => {
   it('formats uptime', () => {
     expect(duration(3 * 86400 + 4 * 3600 + 12 * 60)).toBe('3d 4h 12m');
     expect(duration(2 * 3600 + 5 * 60)).toBe('2h 5m');
+  });
+});
+
+describe('plan usage format', () => {
+  it('shows a reset as a time today, or a weekday later', () => {
+    const now = new Date(2026, 9, 23, 20, 0).getTime();
+    expect(resetTime(new Date(2026, 9, 23, 23, 40).getTime(), now)).toBe('23:40');
+    expect(resetTime(new Date(2026, 9, 27, 8, 0).getTime(), now)).toBe('Tue 08:00');
+    expect(resetTime(null, now)).toBe('—');
+  });
+
+  it('shortens token counts', () => {
+    expect([tokens(820), tokens(12_400), tokens(1_300_000), tokens(4200)]).toEqual(['820', '12k', '1.3M', '4.2k']);
   });
 });

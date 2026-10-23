@@ -1,4 +1,4 @@
-import { AUTO_FALLBACK, type Attachment, type RouteDecision, type RouteSource } from '@harv/shared';
+import { AUTO_FALLBACK, type Attachment, type ChatUsage, type RouteDecision, type RouteSource } from '@harv/shared';
 import type { RouteStore } from '../store/routes.ts';
 import { classify as haikuClassify } from './classifier.ts';
 import { instantRules, isFollowUp, parseOverride } from './rules.ts';
@@ -93,9 +93,15 @@ export class Router {
     return this.record(tabId, up, 'harder', why);
   }
 
+  /** Logs a turn the user picked the model for (manual mode), so Harv's stats count every turn. */
+  manual(tabId: string, decision: RouteDecision): void {
+    this.record(tabId, decision, decision.source, decision.reason);
+  }
+
   /** A turn ended; failures make the next follow-up step up. */
-  finished(tabId: string, ok: boolean, stopped: boolean): void {
+  finished(tabId: string, ok: boolean, stopped: boolean, usage?: ChatUsage): void {
     this.state(tabId).failed = !ok && !stopped;
+    if (usage) this.log.finishLast(tabId, usage);
   }
 
   forget(tabId: string): void {

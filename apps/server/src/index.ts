@@ -16,6 +16,7 @@ import { Router } from './router/router.ts';
 import { ActionStore } from './store/actions.ts';
 import { ChatStore } from './store/chats.ts';
 import { RouteStore } from './store/routes.ts';
+import { UsageMeter } from './usage/meter.ts';
 
 const removed = stripBilledCredentials();
 ensureHarvHome();
@@ -53,8 +54,19 @@ const gate = new SafetyGate(actions, {
   notice: (tabId, message) => chats.notice(tabId, message),
   onChange: () => chats.refreshStatus(),
 });
-const router = new Router(new RouteStore(join(HARV_HOME, 'harv.db')));
-const chats = new ChatManager(store, gate, router, broadcast, (status) => broadcast({ type: 'harv.status', status }));
+const routes = new RouteStore(join(HARV_HOME, 'harv.db'));
+const meter = new UsageMeter(
+  {
+    onChange: (usage) => {
+      broadcast({ type: 'usage.update', usage });
+      chats.refreshStatus();
+    },
+    onResume: () => void chats.flushQueue(),
+  },
+  () => routes.summary(),
+);
+const router = new Router(routes, undefined, () => meter.weeklyPercent());
+const chats = new ChatManager(store, gate, router, meter, broadcast, (status) => broadcast({ type: 'harv.status', status }));
 
 app.get('/api/health', async () => ({ ok: true, version: HARV_VERSION, status: chats.status, home: HARV_HOME }));
 
@@ -91,6 +103,7 @@ app.get('/ws', { websocket: true }, (socket) => {
     history: chats.history(),
     approvals: gate.approvals(),
     actions: actions.recent(30),
+    usage: meter.snapshot(),
   });
 
   const unsubscribe = metrics.onSnapshot((snapshot) => send({ type: 'metrics.tick', metrics: snapshot }));
@@ -143,6 +156,7 @@ app.get('/ws', { websocket: true }, (socket) => {
 
 app.addHook('onClose', async () => {
   metrics.stop();
+  meter.stop();
   chats.closeAll();
   store.close();
   actions.close();
@@ -173,3 +187,6 @@ loadCatalog()
     app.log.info({ plan: catalog.plan, models: catalog.models.map((m) => m.id) }, 'Claude models');
   })
   .catch((err: Error) => app.log.error({ err: err.message }, 'Could not load Claude models'));
+
+// Plan usage: /usage now and every 10 minutes (no tokens), plus live rate-limit events.
+meter.start();
