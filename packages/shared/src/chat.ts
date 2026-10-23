@@ -20,8 +20,20 @@ export interface Catalog {
 /** "auto" lets Harv pick; anything else is a model id from the catalog. */
 export type ModelChoice = 'auto' | (string & {});
 
-/** What AUTO resolves to until the router lands in M6. */
+/** What AUTO runs when the router can't decide (e.g. the classifier failed). */
 export const AUTO_FALLBACK = { model: 'sonnet', effort: 'medium' } as const satisfies { model: string; effort: EffortLevel };
+
+/** How a turn's model·effort was chosen. */
+export type RouteSource = 'manual' | 'override' | 'rule' | 'classifier' | 'followup' | 'harder' | 'fallback';
+
+/** The model·effort a turn runs at, and why. */
+export interface RouteDecision {
+  model: string;
+  effort: EffortLevel;
+  source: RouteSource;
+  /** Shown when hovering the reply's tag. */
+  reason: string;
+}
 
 export interface ChatUsage {
   inputTokens: number;
@@ -37,6 +49,8 @@ export interface StoredLine {
   text: string;
   /** "sonnet·medium" on Harv's replies. */
   tag?: string;
+  /** Why that model·effort was picked. */
+  reason?: string;
   /** Names of the files attached to the user's message. */
   files?: string[];
   /** On tool lines: the tool_use id, which is also the action log id. */
@@ -73,6 +87,8 @@ export interface HistoryItem {
 export type ChatClientMessage =
   | { type: 'chat.send'; tabId: string; text: string; model: ModelChoice; effort: EffortLevel; attachments?: Attachment[] }
   | { type: 'chat.stop'; tabId: string }
+  /** Run the last message again one step up the model·effort ladder. */
+  | { type: 'chat.harder'; tabId: string }
   | { type: 'chat.close'; tabId: string }
   /** Reopen a chat from history as a tab. */
   | { type: 'chat.open'; tabId: string }
@@ -81,7 +97,7 @@ export type ChatClientMessage =
 
 export type ChatServerMessage =
   /** A turn began; `model`/`effort` are what actually runs (AUTO resolved). */
-  | { type: 'chat.started'; tabId: string; model: string; effort: EffortLevel; auto: boolean }
+  | { type: 'chat.started'; tabId: string; model: string; effort: EffortLevel; auto: boolean; reason: string }
   | { type: 'chat.delta'; tabId: string; text: string }
   /** Final text of one assistant message (replaces the streamed text). */
   | { type: 'chat.assistant'; tabId: string; text: string }

@@ -1,4 +1,4 @@
-import type { Attachment, ChatServerMessage, ChatSnapshot, EffortLevel, HistoryItem, LineKind, ModelChoice } from '@harv/shared';
+import type { Attachment, ChatServerMessage, ClientMessage, ChatSnapshot, EffortLevel, HistoryItem, LineKind, ModelChoice } from '@harv/shared';
 import { createStore } from './createStore.ts';
 import { onServerMessage, sendMessage } from './socket.ts';
 
@@ -10,6 +10,8 @@ export interface Line {
   text: string;
   /** "sonnet·medium" on Harv's replies. */
   tag?: string;
+  /** Why that model·effort was picked (shown on hover). */
+  reason?: string;
   /** Names of files attached to the user's message. */
   files?: string[];
   /** On tool lines: the action log id. */
@@ -25,6 +27,7 @@ export interface Tab {
   /** The Harv line deltas currently stream into. */
   currentId: string | null;
   tag?: string;
+  reason?: string;
 }
 
 export interface ChatState {
@@ -34,6 +37,7 @@ export interface ChatState {
   effort: EffortLevel;
   /** What AUTO ran last, e.g. "Sonnet 5.5 · medium". */
   routed: string | null;
+  routedReason?: string;
 }
 
 const newId = () => crypto.randomUUID();
@@ -81,6 +85,7 @@ const fromSnapshot = (chat: ChatSnapshot): Tab => ({
     kind: l.kind,
     text: l.text,
     ...(l.tag ? { tag: l.tag } : {}),
+    ...(l.reason ? { reason: l.reason } : {}),
     ...(l.files ? { files: l.files } : {}),
     ...(l.ref ? { ref: l.ref } : {}),
   })),
@@ -119,7 +124,7 @@ function withCurrent(tab: Tab, update: (text: string) => string): Tab {
   if (tab.currentId) {
     return { ...tab, lines: tab.lines.map((l) => (l.id === tab.currentId ? { ...l, text: update(l.text) } : l)) };
   }
-  const fresh = line('harv', update(''), { tag: tab.tag, streaming: true });
+  const fresh = line('harv', update(''), { tag: tab.tag, reason: tab.reason, streaming: true });
   return { ...tab, lines: [...tab.lines, fresh], currentId: fresh.id };
 }
 
@@ -127,9 +132,18 @@ export function applyChatEvent(msg: ChatServerMessage): void {
   switch (msg.type) {
     case 'chat.started': {
       const tag = `${msg.model.split(' ')[0]!.toLowerCase()}·${msg.effort}`;
-      const pending = line('harv', '', { tag, streaming: true });
-      updateTab(msg.tabId, (t) => ({ ...t, busy: true, tag, lines: [...t.lines, pending], currentId: pending.id }));
-      if (msg.auto) store.set((s) => ({ ...s, routed: `${msg.model} · ${msg.effort}` }));
+      const { reason } = msg;
+      updateTab(msg.tabId, (t) => {
+        // The thinking line added on send gets its tag now that the router has decided.
+        const waiting = t.lines.find((l) => l.id === t.currentId && l.text === '');
+        if (waiting) {
+          const lines = t.lines.map((l) => (l === waiting ? { ...l, tag, reason } : l));
+          return { ...t, busy: true, tag, reason, lines };
+        }
+        const pending = line('harv', '', { tag, reason, streaming: true });
+        return { ...t, busy: true, tag, reason, lines: [...t.lines, pending], currentId: pending.id };
+      });
+      if (msg.auto) store.set((s) => ({ ...s, routed: `${msg.model} · ${msg.effort}`, routedReason: msg.reason }));
       break;
     }
     case 'chat.delta':
@@ -229,9 +243,23 @@ export const chat = {
       title: t.title === 'New chat' ? (text || files[0] || 'Attachment').slice(0, 24) : t.title,
       lines: [...t.lines, line('you', text, files.length ? { files } : {})],
     }));
-    if (!sendMessage({ type: 'chat.send', tabId, text, model, effort, ...(attachments.length ? { attachments } : {}) })) {
+    chat.dispatch(tabId, { type: 'chat.send', tabId, text, model, effort, ...(attachments.length ? { attachments } : {}) });
+  },
+
+  /** Runs the tab's last message again one step up the model·effort ladder. */
+  harder(tabId: string) {
+    updateTab(tabId, (t) => ({ ...t, lines: [...t.lines, line('you', 'Try harder.')] }));
+    chat.dispatch(tabId, { type: 'chat.harder', tabId });
+  },
+
+  /** Sends a turn, showing Harv thinking right away (AUTO may take a moment to pick a model). */
+  dispatch(tabId: string, msg: ClientMessage) {
+    if (!sendMessage(msg)) {
       updateTab(tabId, (t) => ({ ...t, lines: [...t.lines, line('error', 'Not connected to the Harv server.')] }));
+      return;
     }
+    const pending = line('harv', '', { streaming: true });
+    updateTab(tabId, (t) => ({ ...t, busy: true, lines: [...t.lines, pending], currentId: pending.id }));
   },
 
   stop(tabId: string) {

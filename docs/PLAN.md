@@ -1,6 +1,6 @@
 # Harv: build plan
 
-Status: M0–M3 done 2026-10-22 (scaffold, glass shell, live hardware panel, chat on the subscription, persistent tabs/history + Harv's persona and memory). M4 (file attachments) done 2026-10-23: attach button, drag-and-drop and pasted screenshots; images ≤3.75 MB, PDFs ≤20 MB and text ≤100 KB go inline as content blocks (verified live: Claude Code accepts `image` and `document` blocks in streaming input), and anything bigger is saved under `~/.harv/workspace/attachments/<tab>/<id>/` for the Read tool. M4b (one Harv across tabs) done 2026-10-23, see §6c. M5 (safety gate) done 2026-10-23, see §4: Harv can now write files and run PowerShell/Bash behind green/yellow/red/blocked tiers, with backups, approval cards, Undo, an action log and Esc to stop. Verified live: yellow create/edit with Undo, red delete approved then undone, red delete denied. Next: M6 (Auto router). Web app only for now; the desktop app (M9) is deferred until the user asks.
+Status: M0–M3 done 2026-10-22 (scaffold, glass shell, live hardware panel, chat on the subscription, persistent tabs/history + Harv's persona and memory). M4 (file attachments) done 2026-10-23: attach button, drag-and-drop and pasted screenshots; images ≤3.75 MB, PDFs ≤20 MB and text ≤100 KB go inline as content blocks (verified live: Claude Code accepts `image` and `document` blocks in streaming input), and anything bigger is saved under `~/.harv/workspace/attachments/<tab>/<id>/` for the Read tool. M4b (one Harv across tabs) done 2026-10-23, see §6c. M5 (safety gate) done 2026-10-23, see §4: Harv can now write files and run PowerShell/Bash behind green/yellow/red/blocked tiers, with backups, approval cards, Undo, an action log and Esc to stop. Verified live: yellow create/edit with Undo, red delete approved then undone, red delete denied. M6 (Auto router) done 2026-10-23, see §5 "As built": verified live (small talk → haiku·low with no classifier call, a question → Haiku classifier → haiku·low, Try harder → haiku·medium). Next: M7 (plan usage meter + limit handling). Web app only for now; the desktop app (M9) is deferred until the user asks.
 
 ## 1. Can Harv run on a Claude subscription? (research summary)
 
@@ -104,6 +104,17 @@ Shell commands are parsed for risky patterns: `rm`, `del`, `Remove-Item`, `forma
 - Fable 5.1 **is** offered on Pro (verified in M2). It stays out of AUTO unless the user turns it on, and is available as a manual pick.
 - At M2, check which models the subscription actually offers in Claude Code (the SDK's model list) and remove any that aren't available from the switcher and the router.
 - Plan-aware trimming starts at about 70% weekly instead of 80%.
+
+**As built (M6, 2026-10-23).** Code in `apps/server/src/router/`; tune it from the `routes` log.
+- Ladder (Try harder and automatic step-ups climb it one step): haiku·low → haiku·medium → sonnet·medium → sonnet·high → opus·high → opus·xhigh → opus·max. Manual picks off the ladder (sonnet·low, Fable) step to the next one above.
+- Rules: `/opus`, `/sonnet`, `/haiku`, `/fable` and `/low`…`/max` at the start of a message (stripped, also work in manual mode); small talk → haiku·low; a risky verb (delete, install, kill, registry…) plus a PC object (file, folder, app, process, a path…) → opus·high. Red actions can't be known before the model acts, so this text rule stands in for "any red action".
+- **Changed from the spec for Pro:** code or large input (code fences, code attachments, >2 MB of files, >6000 chars) sets a *floor* of sonnet·high, not Opus·high. The classifier can still raise it to Opus for difficulty 4–5.
+- Table: d1 haiku·low, d2 haiku·medium, d3 sonnet·medium (sonnet·high for code), d4 opus·high, d5 opus·max; high stakes one step up.
+- Follow-ups: a short message (≤160 chars, no attachments, no "new question"-style words) within 20 min reuses the tab's task decision without calling the classifier. Small talk doesn't replace the task decision. If the previous turn failed, the follow-up steps up one.
+- Classifier: one Haiku·low turn, no tools, `maxTurns: 1`, not persisted, 20 s timeout, about 3–4 s. On failure → sonnet·medium (respecting any floor). The status pill shows "thinking" while it runs, and the chat shows the thinking line right away.
+- Log: `routes` table in `harv.db` (model, effort, source, reason, category, difficulty, stakes, feedback = "harder"). `RouteStore.split()` gives the routing split.
+- Reply tags show the reason on hover (stored with the line, so it survives reloads). "↑ try harder" sits on the newest reply once the tab is idle.
+- **Not built yet:** plan-aware trimming has its code and tests but needs M7's weekly % (`Router`'s `weeklyUsed`); step-up on tool/test failure or when the model says it's unsure; extra effort for a long task's hardest step; the routing split in the stats panel; an "allow Fable" setting (Fable stays manual-only).
 
 ## 6. Milestones (each ends with something you can see working)
 

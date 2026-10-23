@@ -48,7 +48,7 @@ function Thinking() {
   );
 }
 
-function ChatLine({ line }: { line: Line }) {
+function ChatLine({ line, onHarder }: { line: Line; onHarder?: () => void }) {
   switch (line.kind) {
     case 'you':
       return (
@@ -68,8 +68,22 @@ function ChatLine({ line }: { line: Line }) {
         <div className="animate-fade-in">
           <div className="flex items-baseline gap-2">
             <span className="text-ok">harv ›</span>
-            {line.tag && <span className="text-[11px] text-faint">[{line.tag}]</span>}
+            {line.tag && (
+              <span title={line.reason} className="cursor-help text-[11px] text-faint">
+                [{line.tag}]
+              </span>
+            )}
             {line.streaming && line.text === '' && <Thinking />}
+            {onHarder && (
+              <button
+                type="button"
+                onClick={onHarder}
+                title="Run that again one step up (a stronger model or more effort)"
+                className="cursor-pointer rounded px-1.5 text-[11px] text-muted hover:bg-white/10 hover:text-accent"
+              >
+                ↑ try harder
+              </button>
+            )}
           </div>
           {line.text && (
             <div className="harv-md mt-1">
@@ -112,6 +126,8 @@ export function ChatPanel() {
   const pending = (activeId && pendingByTab[activeId]) || [];
   const uploading = pending.some((p) => !p.file && !p.error);
   const waiting = approvals.filter((a) => a.tabId === activeId);
+  // "Try harder" sits on the newest reply, once the tab is idle.
+  const lastReplyId = active?.lines.findLast((l) => l.kind === 'harv' && l.tag)?.id;
 
   // Esc is the stop hotkey: it halts the active tab and denies its waiting approvals.
   useEffect(() => {
@@ -216,7 +232,13 @@ export function ChatPanel() {
         {!active || active.lines.length === 0 ? (
           <p className="m-auto text-center text-muted">{active ? 'New chat. Ask Harv anything.' : 'No chat open. Press + to start one.'}</p>
         ) : (
-          active.lines.map((l) => <ChatLine key={l.id} line={l} />)
+          active.lines.map((l) => (
+            <ChatLine
+              key={l.id}
+              line={l}
+              onHarder={!active.busy && l.id === lastReplyId ? () => chat.harder(active.id) : undefined}
+            />
+          ))
         )}
         {waiting.map((a) => (
           <ApprovalCard key={a.id} approval={a} />

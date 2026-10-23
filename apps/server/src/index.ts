@@ -12,8 +12,10 @@ import { ensureLhmRunning } from './metrics/lhmLauncher.ts';
 import { stripBilledCredentials } from './env.ts';
 import { ensureHarvHome, HARV_HOME } from './paths.ts';
 import { SafetyGate } from './safety/gate.ts';
+import { Router } from './router/router.ts';
 import { ActionStore } from './store/actions.ts';
 import { ChatStore } from './store/chats.ts';
+import { RouteStore } from './store/routes.ts';
 
 const removed = stripBilledCredentials();
 ensureHarvHome();
@@ -51,7 +53,8 @@ const gate = new SafetyGate(actions, {
   notice: (tabId, message) => chats.notice(tabId, message),
   onChange: () => chats.refreshStatus(),
 });
-const chats = new ChatManager(store, gate, broadcast, (status) => broadcast({ type: 'harv.status', status }));
+const router = new Router(new RouteStore(join(HARV_HOME, 'harv.db')));
+const chats = new ChatManager(store, gate, router, broadcast, (status) => broadcast({ type: 'harv.status', status }));
 
 app.get('/api/health', async () => ({ ok: true, version: HARV_VERSION, status: chats.status, home: HARV_HOME }));
 
@@ -112,6 +115,9 @@ app.get('/ws', { websocket: true }, (socket) => {
         break;
       case 'chat.stop':
         void chats.stop(msg.tabId);
+        break;
+      case 'chat.harder':
+        void chats.harder(msg.tabId);
         break;
       case 'chat.close':
         chats.close(msg.tabId);

@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { applyChatEvent, chat, getChatState } from './chatStore.ts';
+
+vi.mock('./socket.ts', () => ({ onServerMessage: () => {}, sendMessage: () => true }));
 
 function openTab(): string {
   chat.newTab();
@@ -11,7 +13,7 @@ const tab = (id: string) => getChatState().tabs.find((t) => t.id === id)!;
 describe('chat stream handling', () => {
   it('builds a reply from started → delta → tool → delta → done', () => {
     const tabId = openTab();
-    applyChatEvent({ type: 'chat.started', tabId, model: 'Sonnet 5.5', effort: 'medium', auto: true });
+    applyChatEvent({ type: 'chat.started', tabId, model: 'Sonnet 5.5', effort: 'medium', auto: true, reason: 'test' });
     applyChatEvent({ type: 'chat.delta', tabId, text: 'Let me ' });
     applyChatEvent({ type: 'chat.delta', tabId, text: 'check.' });
     applyChatEvent({ type: 'chat.tool', tabId, id: 'toolu_1', name: 'Read', detail: 'notes.md' });
@@ -30,7 +32,7 @@ describe('chat stream handling', () => {
 
   it('lets the final assistant text replace streamed text', () => {
     const tabId = openTab();
-    applyChatEvent({ type: 'chat.started', tabId, model: 'Haiku 5.5', effort: 'low', auto: false });
+    applyChatEvent({ type: 'chat.started', tabId, model: 'Haiku 5.5', effort: 'low', auto: false, reason: 'test' });
     applyChatEvent({ type: 'chat.delta', tabId, text: 'Hel' });
     applyChatEvent({ type: 'chat.assistant', tabId, text: 'Hello!' });
     applyChatEvent({ type: 'chat.done', tabId, ok: true, stopped: false });
@@ -39,8 +41,22 @@ describe('chat stream handling', () => {
 
   it('drops the empty thinking line when a turn is stopped', () => {
     const tabId = openTab();
-    applyChatEvent({ type: 'chat.started', tabId, model: 'Opus 5.5', effort: 'high', auto: false });
+    applyChatEvent({ type: 'chat.started', tabId, model: 'Opus 5.5', effort: 'high', auto: false, reason: 'test' });
     applyChatEvent({ type: 'chat.done', tabId, ok: false, stopped: true });
     expect(tab(tabId).lines.map((l) => [l.kind, l.text])).toEqual([['notice', 'Stopped.']]);
+  });
+});
+
+describe('waiting for the router', () => {
+  it('tags the thinking line shown on send once AUTO decides', () => {
+    const tabId = openTab();
+    chat.harder(tabId);
+    applyChatEvent({ type: 'chat.started', tabId, model: 'Opus 5.5', effort: 'high', auto: true, reason: 'you asked to try harder' });
+    applyChatEvent({ type: 'chat.delta', tabId, text: 'Better.' });
+    applyChatEvent({ type: 'chat.done', tabId, ok: true, stopped: false });
+    expect(tab(tabId).lines.map((l) => [l.kind, l.text, l.tag, l.reason])).toEqual([
+      ['you', 'Try harder.', undefined, undefined],
+      ['harv', 'Better.', 'opus·high', 'you asked to try harder'],
+    ]);
   });
 });

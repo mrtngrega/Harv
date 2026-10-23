@@ -18,6 +18,7 @@ const SCHEMA = `
     kind       TEXT NOT NULL,
     text       TEXT NOT NULL,
     tag        TEXT,
+    reason     TEXT,
     files      TEXT,
     ref        TEXT,
     created_at INTEGER NOT NULL
@@ -49,6 +50,7 @@ export class ChatStore {
     const columns = this.db.prepare('PRAGMA table_info(lines)').all() as { name: string }[];
     if (!columns.some((c) => c.name === 'files')) this.db.exec('ALTER TABLE lines ADD COLUMN files TEXT');
     if (!columns.some((c) => c.name === 'ref')) this.db.exec('ALTER TABLE lines ADD COLUMN ref TEXT');
+    if (!columns.some((c) => c.name === 'reason')) this.db.exec('ALTER TABLE lines ADD COLUMN reason TEXT');
   }
 
   close(): void {
@@ -88,8 +90,8 @@ export class ChatStore {
   addLine(chatId: string, line: StoredLine): void {
     const now = Date.now();
     this.db
-      .prepare('INSERT INTO lines (chat_id, kind, text, tag, files, ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(chatId, line.kind, line.text, line.tag ?? null, line.files?.length ? JSON.stringify(line.files) : null, line.ref ?? null, now);
+      .prepare('INSERT INTO lines (chat_id, kind, text, tag, reason, files, ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(chatId, line.kind, line.text, line.tag ?? null, line.reason ?? null, line.files?.length ? JSON.stringify(line.files) : null, line.ref ?? null, now);
     this.db.prepare('UPDATE chats SET updated_at = ? WHERE id = ?').run(now, chatId);
   }
 
@@ -97,14 +99,15 @@ export class ChatStore {
     const chat = this.db.prepare('SELECT id, title FROM chats WHERE id = ?').get(id) as { id: string; title: string } | undefined;
     if (!chat) return null;
     const rows = this.db
-      .prepare('SELECT kind, text, tag, files, ref FROM (SELECT * FROM lines WHERE chat_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id')
-      .all(id, RESTORE_LINES) as { kind: LineKind; text: string; tag: string | null; files: string | null; ref: string | null }[];
+      .prepare('SELECT kind, text, tag, reason, files, ref FROM (SELECT * FROM lines WHERE chat_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id')
+      .all(id, RESTORE_LINES) as { kind: LineKind; text: string; tag: string | null; reason: string | null; files: string | null; ref: string | null }[];
     return {
       ...chat,
       lines: rows.map((r) => ({
         kind: r.kind,
         text: r.text,
         ...(r.tag ? { tag: r.tag } : {}),
+        ...(r.reason ? { reason: r.reason } : {}),
         ...(r.files ? { files: JSON.parse(r.files) as string[] } : {}),
         ...(r.ref ? { ref: r.ref } : {}),
       })),

@@ -22,7 +22,7 @@ function Segment({ on, label, title, onClick }: { on: boolean; label: string; ti
 
 export function ModelSwitcher() {
   const catalog = useCatalog();
-  const { model, effort, routed } = useChat();
+  const { model, effort, routed, routedReason } = useChat();
   const current = catalog?.models.find((m) => m.id === model);
   const efforts = current?.efforts.length ? current.efforts : EFFORT_LEVELS;
 
@@ -40,7 +40,11 @@ export function ModelSwitcher() {
       </div>
 
       {model === 'auto' ? (
-        routed && <span className="animate-fade-in text-xs text-muted">auto → {routed}</span>
+        routed && (
+          <span title={routedReason} className="animate-fade-in cursor-help text-xs text-muted">
+            auto → {routed}
+          </span>
+        )
       ) : (
         <div role="group" aria-label="Effort" className="flex gap-1 rounded-xl bg-black/20 p-[3px]">
           {efforts.map((e) => (
