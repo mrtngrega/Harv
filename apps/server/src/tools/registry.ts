@@ -4,7 +4,7 @@ const TITLES: Record<ToolKind, string> = { terminal: 'PowerShell', files: 'Files
 
 /** What a kind of tool tab needs from the server when it opens and closes. */
 export interface ToolBackend {
-  open(id: string): void | Promise<void>;
+  open(id: string, opts: { cwd?: string }): void | Promise<void>;
   close(id: string): void;
 }
 
@@ -37,7 +37,7 @@ export class ToolRegistry {
     for (let n = 2; ; n++) if (!taken.has(`${base} ${n}`)) return `${base} ${n}`;
   }
 
-  async open(id: string, kind: ToolKind): Promise<ToolTab> {
+  async open(id: string, kind: ToolKind, opts: { cwd?: string } = {}): Promise<ToolTab> {
     const existing = this.tabs.get(id);
     if (existing) return existing;
     if (!/^[\w-]{1,64}$/.test(id)) throw new Error('Bad tab id');
@@ -45,7 +45,7 @@ export class ToolRegistry {
     this.tabs.set(id, tab);
     this.onChange(this.list());
     try {
-      await this.backends[kind]?.open(id);
+      await this.backends[kind]?.open(id, opts);
     } catch (err) {
       this.tabs.delete(id);
       this.onChange(this.list());

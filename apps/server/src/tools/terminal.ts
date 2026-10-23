@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { spawn, type IPty } from '@lydell/node-pty';
 
@@ -28,13 +29,13 @@ export class TerminalManager {
     private shell = 'powershell.exe',
   ) {}
 
-  open(id: string, cols = 100, rows = 30): void {
+  open(id: string, cwd?: string, cols = 100, rows = 30): void {
     if (this.terms.has(id)) return;
     const pty = spawn(this.shell, ['-NoLogo'], {
       name: 'xterm-256color',
       cols,
       rows,
-      cwd: homedir(),
+      cwd: cwd && existsSync(cwd) ? cwd : homedir(),
       // Harv's environment already has the API credentials stripped (env.ts).
       env: process.env as Record<string, string>,
     });

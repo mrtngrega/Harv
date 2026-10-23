@@ -19,6 +19,21 @@ import { RouteStore } from './store/routes.ts';
 import { UsageMeter } from './usage/meter.ts';
 import { loadSettings, updateSettings } from './settings.ts';
 import { cleanPath, listFolder, openWithDefault, places, previewType } from './tools/files.ts';
+import {
+  copyItems,
+  deleteForever,
+  drives,
+  moveItems,
+  newFile,
+  newFolder,
+  properties,
+  recentFiles,
+  recycle,
+  renameItem,
+  saveUpload,
+  search,
+} from './tools/fileOps.ts';
+import type { FileOp } from '@harv/shared';
 import { ToolRegistry } from './tools/registry.ts';
 import { TerminalManager } from './tools/terminal.ts';
 
@@ -79,7 +94,7 @@ const terminals = new TerminalManager({
 });
 const tools = new ToolRegistry(
   {
-    terminal: { open: (id) => terminals.open(id), close: (id) => terminals.close(id) },
+    terminal: { open: (id, { cwd }) => terminals.open(id, cleanPath(cwd) ?? undefined), close: (id) => terminals.close(id) },
   },
   (tabs) => broadcast({ type: 'tools', tabs }),
 );
@@ -176,6 +191,70 @@ app.post<{ Body: { path?: string; tab?: string } }>('/api/files/attach', async (
   }
 });
 
+app.get('/api/files/drives', async () => drives());
+app.get('/api/files/recent', async () => recentFiles());
+app.get<{ Querystring: { path?: string; q?: string } }>('/api/files/search', async (req, reply) => {
+  const path = cleanPath(req.query.path);
+  if (!path || !req.query.q) return reply.code(400).send({ error: 'Expected a folder and words to search for' });
+  return search(path, req.query.q);
+});
+app.get<{ Querystring: { path?: string } }>('/api/files/props', async (req, reply) => {
+  const path = cleanPath(req.query.path);
+  if (!path) return reply.code(400).send({ error: 'Bad path' });
+  try {
+    return properties(path);
+  } catch {
+    return reply.code(404).send({ error: 'Not found' });
+  }
+});
+// Changes from the explorer: new, rename, copy, move, Recycle Bin, delete for good.
+app.post<{ Body: FileOp }>('/api/files/op', async (req, reply) => {
+  const body = req.body;
+  const paths = (list: unknown) => (Array.isArray(list) ? list.map(cleanPath) : []);
+  try {
+    switch (body?.op) {
+      case 'newFolder':
+      case 'newFile': {
+        const dir = cleanPath(body.dir);
+        if (!dir) break;
+        return { paths: [body.op === 'newFolder' ? newFolder(dir) : newFile(dir)], errors: [] };
+      }
+      case 'rename': {
+        const path = cleanPath(body.path);
+        if (!path || typeof body.name !== 'string') break;
+        return { paths: [renameItem(path, body.name.trim())], errors: [] };
+      }
+      case 'copy':
+      case 'move': {
+        const list = paths(body.paths);
+        const dest = cleanPath(body.dest);
+        if (!dest || !list.length || list.some((p) => !p)) break;
+        return (body.op === 'copy' ? copyItems : moveItems)(list as string[], dest);
+      }
+      case 'recycle':
+      case 'deleteForever': {
+        const list = paths(body.paths);
+        // Never a whole drive.
+        if (!list.length || list.some((p) => !p || /^[a-z]:\\?$/i.test(p))) break;
+        return body.op === 'recycle' ? await recycle(list as string[]) : deleteForever(list as string[]);
+      }
+    }
+  } catch (err) {
+    return reply.code(400).send({ error: (err as Error).message });
+  }
+  return reply.code(400).send({ error: 'Bad request' });
+});
+// Files dropped into the explorer from Windows: the raw file as the body.
+app.post<{ Querystring: { dir?: string; name?: string } }>('/api/files/upload', async (req, reply) => {
+  const dir = cleanPath(req.query.dir);
+  if (!dir || !req.query.name || !Buffer.isBuffer(req.body)) return reply.code(400).send({ error: 'Expected ?dir=&name= and a file body' });
+  try {
+    return { path: saveUpload(dir, req.query.name, req.body) };
+  } catch (err) {
+    return reply.code(400).send({ error: (err as Error).message });
+  }
+});
+
 // Lets the dashboard retry starting the sensors (e.g. after the UAC prompt was declined).
 app.post('/api/sensors/start', async () => ({ result: await ensureLhmRunning() }));
 
@@ -243,7 +322,7 @@ app.get('/ws', { websocket: true }, (socket) => {
         gate.undo(msg.id);
         break;
       case 'tool.open':
-        tools.open(msg.id, msg.kind).catch((err: Error) => {
+        tools.open(msg.id, msg.kind, { cwd: msg.cwd }).catch((err: Error) => {
           app.log.error({ err: err.message }, 'Could not open tool tab');
         });
         break;

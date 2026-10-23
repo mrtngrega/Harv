@@ -279,12 +279,13 @@ export const chat = {
     });
   },
 
-  /** Opens a terminal or files tab and switches to it. */
-  openTool(kind: ToolKind) {
+  /** Opens a terminal (optionally in `cwd`) or files tab, switches to it, and returns its id. */
+  openTool(kind: ToolKind, cwd?: string): string {
     const id = newId();
     const title = { terminal: 'PowerShell', files: 'Files' }[kind];
     store.set((s) => ({ ...s, tools: [...s.tools, { id, kind, title }], activeId: id }));
-    sendMessage({ type: 'tool.open', id, kind });
+    sendMessage({ type: 'tool.open', id, kind, ...(cwd ? { cwd } : {}) });
+    return id;
   },
 
   closeTool(id: string) {

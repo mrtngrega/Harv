@@ -52,7 +52,7 @@ export function SpecialTab({
 const ITEMS: { label: string; icon: string; hint: string; run: () => void }[] = [
   { label: 'New chat', icon: '+', hint: 'Ctrl+click + for this directly', run: () => chat.newTab() },
   { label: 'Terminal', icon: TOOL_ICONS.terminal, hint: 'PowerShell', run: () => chat.openTool('terminal') },
-  { label: 'Files', icon: TOOL_ICONS.files, hint: 'Browse, preview, send to chat', run: () => chat.openTool('files') },
+  { label: 'File Explorer', icon: TOOL_ICONS.files, hint: 'File Explorer', run: () => chat.openTool('files') },
 ];
 
 /** The + at the end of the chat bar: a new chat, a terminal or the file explorer. */

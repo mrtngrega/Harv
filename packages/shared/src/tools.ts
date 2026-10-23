@@ -27,6 +27,42 @@ export interface FolderListing {
   entries: FileEntry[];
 }
 
+/** A drive on This PC. */
+export interface DriveInfo {
+  path: string;
+  label: string;
+  /** Bytes; 0 when unknown. */
+  total: number;
+  free: number;
+}
+
+/** The explorer's Properties dialog. */
+export interface FileProps {
+  path: string;
+  name: string;
+  dir: boolean;
+  /** Bytes (for folders: everything inside). */
+  size: number;
+  created: number;
+  modified: number;
+  accessed: number;
+  readOnly: boolean;
+  files?: number;
+  folders?: number;
+  /** The folder was too big to count completely. */
+  partial?: boolean;
+}
+
+/** A change the file explorer asks for (POST /api/files/op). */
+export type FileOp =
+  | { op: 'newFolder'; dir: string }
+  | { op: 'newFile'; dir: string }
+  | { op: 'rename'; path: string; name: string }
+  | { op: 'copy'; paths: string[]; dest: string }
+  | { op: 'move'; paths: string[]; dest: string }
+  | { op: 'recycle'; paths: string[] }
+  | { op: 'deleteForever'; paths: string[] };
+
 /** Shortcuts on the explorer's left: home folders and drives. */
 export interface FilePlaces {
   places: { name: string; path: string }[];
@@ -35,17 +71,16 @@ export interface FilePlaces {
 
 export type ToolClientMessage =
   /** Opens a tool tab; the dashboard picks the id. */
-  | { type: 'tool.open'; id: string; kind: ToolKind }
+  /** `cwd`: the folder a terminal starts in. */
+  | { type: 'tool.open'; id: string; kind: ToolKind; cwd?: string }
   | { type: 'tool.close'; id: string }
   /** Asks for a terminal's output so far (after a reload). */
   | { type: 'term.attach'; id: string }
   | { type: 'term.input'; id: string; data: string }
   | { type: 'term.resize'; id: string; cols: number; rows: number };
 
-
 export type ToolServerMessage =
   | { type: 'tools'; tabs: ToolTab[] }
   /** Terminal output; `reset` replaces what the tab shows (the replay after attach). */
   | { type: 'term.data'; id: string; data: string; reset?: boolean }
   | { type: 'term.exit'; id: string; code: number };
-
