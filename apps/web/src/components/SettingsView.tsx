@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ACCENTS } from '@harv/shared';
 import { updateSettings, useBackground, useSettings } from '../lib/useHarvSocket.ts';
 
@@ -152,75 +152,53 @@ function ProtectedFolders() {
   );
 }
 
-/** Harv's settings: look and feel, the background photo, AUTO, and read-only folders. Saved in ~/.harv/settings.json. */
-export function SettingsPanel({ onClose }: { onClose: () => void }) {
+/** Harv's settings, shown as a tab in the chat bar: look and feel, the background photo, AUTO, and read-only folders. Saved in ~/.harv/settings.json. */
+export function SettingsView() {
   const settings = useSettings();
-  const panel = useRef<HTMLDivElement>(null);
-
-  // Esc closes; focus moves into the panel while it's open.
-  useEffect(() => {
-    panel.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-30 flex items-start justify-end p-4 pt-[72px]" onClick={onClose}>
-      <div
-        ref={panel}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Settings"
-        tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
-        className="glass animate-fade-in flex max-h-[calc(100vh-96px)] w-full max-w-[400px] flex-col gap-2.5 overflow-y-auto rounded-2xl p-3 outline-none"
-      >
-        <div className="flex items-center justify-between px-1">
-          <span className="text-[11px] tracking-[2px] text-muted">SETTINGS</span>
-          <button type="button" onClick={onClose} aria-label="Close settings" className="size-8 cursor-pointer rounded-lg hover:bg-white/5">
-            ×
-          </button>
+    <div className="animate-fade-in mx-auto grid w-full max-w-[860px] grid-cols-1 content-start gap-2.5 md:grid-cols-2">
+      <p className="m-0 px-1 text-xs text-muted md:col-span-2">
+        Saved on this PC in ~/.harv/settings.json. Changes apply at once in every Harv window.
+      </p>
+
+      <Section title="Look">
+        <Toggle
+          on={settings.motion}
+          label="Animations"
+          hint="Subtle fades, pulses and bars. Off keeps everything still."
+          onChange={(motion) => updateSettings({ motion })}
+        />
+        <div role="radiogroup" aria-label="Accent colour" className="flex items-center gap-2 pt-1 text-xs">
+          <span className="mr-1 text-muted">Accent</span>
+          {ACCENTS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              role="radio"
+              aria-checked={settings.accent === c}
+              aria-label={ACCENT_NAMES[c]}
+              title={ACCENT_NAMES[c]}
+              onClick={() => updateSettings({ accent: c })}
+              className={`size-7 cursor-pointer rounded-full border-2 ${settings.accent === c ? 'border-ink' : 'border-transparent'}`}
+              style={{ background: c }}
+            />
+          ))}
         </div>
+      </Section>
 
-        <Section title="Look">
-          <Toggle
-            on={settings.motion}
-            label="Animations"
-            hint="Subtle fades, pulses and bars. Off keeps everything still."
-            onChange={(motion) => updateSettings({ motion })}
-          />
-          <div role="radiogroup" aria-label="Accent colour" className="flex items-center gap-2 pt-1 text-xs">
-            <span className="mr-1 text-muted">Accent</span>
-            {ACCENTS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                role="radio"
-                aria-checked={settings.accent === c}
-                aria-label={ACCENT_NAMES[c]}
-                title={ACCENT_NAMES[c]}
-                onClick={() => updateSettings({ accent: c })}
-                className={`size-7 cursor-pointer rounded-full border-2 ${settings.accent === c ? 'border-ink' : 'border-transparent'}`}
-                style={{ background: c }}
-              />
-            ))}
-          </div>
-        </Section>
+      <BackgroundPicker />
 
-        <BackgroundPicker />
+      <Section title="AUTO">
+        <Toggle
+          on={settings.allowFable}
+          label="Allow Fable 5.1"
+          hint="Lets AUTO use Fable for the hardest tasks and as the top of Try harder. It's always available as a manual pick."
+          onChange={(allowFable) => updateSettings({ allowFable })}
+        />
+      </Section>
 
-        <Section title="AUTO">
-          <Toggle
-            on={settings.allowFable}
-            label="Allow Fable 5.1"
-            hint="Lets AUTO use Fable for the hardest tasks and as the top of Try harder. It's always available as a manual pick."
-            onChange={(allowFable) => updateSettings({ allowFable })}
-          />
-        </Section>
-
-        <ProtectedFolders />
-      </div>
+      <ProtectedFolders />
     </div>
   );
 }

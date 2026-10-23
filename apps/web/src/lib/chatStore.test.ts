@@ -60,3 +60,20 @@ describe('waiting for the router', () => {
     ]);
   });
 });
+
+describe('the Settings tab', () => {
+  it('opens next to the chats, and sending from it goes to a chat', () => {
+    const tabId = openTab();
+    chat.openSettings();
+    expect(getChatState()).toMatchObject({ settingsOpen: true, activeId: 'settings' });
+    // A file dropped or a message sent while Settings is showing lands in the last chat.
+    expect(chat.ensureTab()).toBe(getChatState().tabs.at(-1)!.id);
+    expect(getChatState().activeId).not.toBe('settings');
+
+    chat.openSettings();
+    chat.closeSettings();
+    expect(getChatState().settingsOpen).toBe(false);
+    expect(getChatState().tabs.some((t) => t.id === getChatState().activeId)).toBe(true);
+    expect(tab(tabId)).toBeDefined();
+  });
+});

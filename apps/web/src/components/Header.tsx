@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { HarvConnection } from '../lib/useHarvSocket.ts';
 import { ModelSwitcher } from './ModelSwitcher.tsx';
-import { SettingsPanel } from './SettingsPanel.tsx';
+import { chat, SETTINGS_TAB, useChat } from '../lib/chatStore.ts';
 import { StatusPill } from './StatusPill.tsx';
 
 function useClock(): string {
@@ -16,7 +16,7 @@ function useClock(): string {
 
 export function Header({ conn }: { conn: HarvConnection }) {
   const clock = useClock();
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const { activeId } = useChat();
 
   return (
     <header className="glass flex flex-wrap items-center gap-4 rounded-2xl px-4 py-2.5">
@@ -27,15 +27,14 @@ export function Header({ conn }: { conn: HarvConnection }) {
       <div className="text-muted tabular-nums">{clock}</div>
       <button
         type="button"
-        onClick={() => setSettingsOpen(true)}
+        onClick={chat.openSettings}
         aria-label="Settings"
-        aria-expanded={settingsOpen}
-        title="Settings"
-        className="size-9 cursor-pointer rounded-lg text-[15px] text-muted hover:bg-white/5 hover:text-ink"
+        aria-pressed={activeId === SETTINGS_TAB}
+        title="Settings (opens as a tab)"
+        className={`size-9 cursor-pointer rounded-lg text-[15px] hover:bg-white/5 hover:text-ink ${activeId === SETTINGS_TAB ? 'text-accent' : 'text-muted'}`}
       >
         ⚙
       </button>
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </header>
   );
 }

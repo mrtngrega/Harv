@@ -6,9 +6,10 @@ import { formatSize, uploadAttachment } from '../lib/attachments.ts';
 import { lineTime, resetTime, tokens } from '../lib/format.ts';
 import { HELP, parseCommand } from '../lib/commands.ts';
 import { useUsage } from '../lib/useHarvSocket.ts';
-import { chat, getChatState, useChat, type Line } from '../lib/chatStore.ts';
+import { chat, getChatState, SETTINGS_TAB, useChat, type Line } from '../lib/chatStore.ts';
 import { useSafety } from '../lib/safetyStore.ts';
 import { ActionBadge, ApprovalCard } from './ApprovalCard.tsx';
+import { SettingsView } from './SettingsView.tsx';
 
 /** A file attached to the draft: uploading, ready to send, or failed. */
 interface Pending {
@@ -138,7 +139,8 @@ function ToolLine({ line }: { line: Line }) {
 }
 
 export function ChatPanel() {
-  const { tabs, activeId } = useChat();
+  const { tabs, activeId, settingsOpen } = useChat();
+  const inSettings = activeId === SETTINGS_TAB;
   const { approvals } = useSafety();
   const usage = useUsage();
   const [draft, setDraft] = useState('');
@@ -301,6 +303,34 @@ export function ChatPanel() {
             </div>
           );
         })}
+        {settingsOpen && (
+          <div
+            className={`animate-fade-in flex items-center gap-0.5 rounded-t-[10px] border border-b-0 ${
+              inSettings ? 'border-[rgb(220_232_245/0.18)] bg-white/10' : 'border-transparent'
+            }`}
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={inSettings}
+              onClick={chat.openSettings}
+              className={`flex min-h-9 cursor-pointer items-center gap-1.5 pr-1 pl-3 text-xs whitespace-nowrap ${inSettings ? 'text-ink' : 'text-muted'}`}
+            >
+              <span aria-hidden="true" className="text-accent">
+                ⚙
+              </span>
+              Settings
+            </button>
+            <button
+              type="button"
+              onClick={chat.closeSettings}
+              aria-label="Close settings"
+              className="mr-1 size-7 cursor-pointer rounded-md text-[13px] text-muted hover:bg-white/10"
+            >
+              ×
+            </button>
+          </div>
+        )}
         <button type="button" onClick={chat.newTab} aria-label="New chat" className="size-9 cursor-pointer text-base hover:text-accent">
           +
         </button>
@@ -312,18 +342,26 @@ export function ChatPanel() {
         )}
       </div>
 
-      <div ref={logRef} className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-4 leading-relaxed">
-        {!active || active.lines.length === 0 ? (
-          <p className="m-auto text-center text-muted">{active ? 'New chat. Ask Harv anything.' : 'No chat open. Press + to start one.'}</p>
-        ) : (
-          active.lines.map((l) => (
-            <ChatLine key={l.id} line={l} onHarder={!active.busy && l.id === lastReplyId ? () => chat.harder(active.id) : undefined} />
-          ))
-        )}
-        {waiting.map((a) => (
-          <ApprovalCard key={a.id} approval={a} />
-        ))}
-      </div>
+      {inSettings ? (
+        <div className="flex flex-1 flex-col overflow-y-auto px-5 py-4">
+          <SettingsView />
+        </div>
+      ) : (
+        <div ref={logRef} className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-4 leading-relaxed">
+          {!active || active.lines.length === 0 ? (
+            <p className="m-auto text-center text-muted">
+              {active ? 'New chat. Ask Harv anything.' : 'No chat open. Press + to start one.'}
+            </p>
+          ) : (
+            active.lines.map((l) => (
+              <ChatLine key={l.id} line={l} onHarder={!active.busy && l.id === lastReplyId ? () => chat.harder(active.id) : undefined} />
+            ))
+          )}
+          {waiting.map((a) => (
+            <ApprovalCard key={a.id} approval={a} />
+          ))}
+        </div>
+      )}
 
       {dragging && (
         <div className="pointer-events-none absolute inset-2 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-[rgb(10_16_24/0.7)] text-accent">
@@ -331,7 +369,7 @@ export function ChatPanel() {
         </div>
       )}
 
-      {pending.length > 0 && (
+      {!inSettings && pending.length > 0 && (
         <div className="flex flex-wrap gap-1.5 border-t border-line px-5 pt-2.5">
           {pending.map((p) => (
             <FileChip
@@ -344,7 +382,7 @@ export function ChatPanel() {
         </div>
       )}
 
-      {usage?.pausedUntil && (
+      {!inSettings && usage?.pausedUntil && (
         <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 pt-2 text-xs text-warn">
           <span>
             Claude Pro limit reached: messages queue until {resetTime(usage.pausedUntil)}
@@ -362,62 +400,64 @@ export function ChatPanel() {
         </div>
       )}
 
-      <form onSubmit={send} className="flex items-center gap-2.5 border-t border-line py-2.5 pr-3 pl-5">
-        <label htmlFor="harv-cmd" className="font-semibold text-accent">
-          harv&gt;
-        </label>
-        <input
-          id="harv-cmd"
-          type="text"
-          autoComplete="off"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onPaste={(e) => {
-            // Pasted screenshots arrive as files.
-            if (e.clipboardData.files.length === 0) return;
-            e.preventDefault();
-            attach(e.clipboardData.files);
-          }}
-          placeholder="type a command or ask anything · /model · /attach"
-          className="min-h-11 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
-        />
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          hidden
-          onChange={(e) => {
-            if (e.target.files) attach(e.target.files);
-            e.target.value = '';
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          title="Attach files (or drop them on the chat, or paste a screenshot)"
-          className="min-h-11 cursor-pointer rounded-[10px] border border-[rgb(220_232_245/0.2)] bg-white/5 px-3.5 text-xs hover:bg-white/10"
-        >
-          + ATTACH
-        </button>
-        {active?.busy ? (
+      {!inSettings && (
+        <form onSubmit={send} className="flex items-center gap-2.5 border-t border-line py-2.5 pr-3 pl-5">
+          <label htmlFor="harv-cmd" className="font-semibold text-accent">
+            harv&gt;
+          </label>
+          <input
+            id="harv-cmd"
+            type="text"
+            autoComplete="off"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onPaste={(e) => {
+              // Pasted screenshots arrive as files.
+              if (e.clipboardData.files.length === 0) return;
+              e.preventDefault();
+              attach(e.clipboardData.files);
+            }}
+            placeholder="type a command or ask anything · /model · /attach"
+            className="min-h-11 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
+          />
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              if (e.target.files) attach(e.target.files);
+              e.target.value = '';
+            }}
+          />
           <button
             type="button"
-            onClick={() => chat.stop(active.id)}
-            title="Stop (Esc)"
-            className="min-h-11 cursor-pointer rounded-[10px] bg-warn px-4 text-xs font-semibold text-[#0f1620]"
+            onClick={() => fileInputRef.current?.click()}
+            title="Attach files (or drop them on the chat, or paste a screenshot)"
+            className="min-h-11 cursor-pointer rounded-[10px] border border-[rgb(220_232_245/0.2)] bg-white/5 px-3.5 text-xs hover:bg-white/10"
           >
-            STOP ■
+            + ATTACH
           </button>
-        ) : (
-          <button
-            type="submit"
-            disabled={uploading}
-            className="min-h-11 cursor-pointer rounded-[10px] bg-accent px-4 text-xs font-semibold text-[#0f1620] disabled:cursor-wait disabled:opacity-60"
-          >
-            RUN ⏎
-          </button>
-        )}
-      </form>
+          {active?.busy ? (
+            <button
+              type="button"
+              onClick={() => chat.stop(active.id)}
+              title="Stop (Esc)"
+              className="min-h-11 cursor-pointer rounded-[10px] bg-warn px-4 text-xs font-semibold text-[#0f1620]"
+            >
+              STOP ■
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={uploading}
+              className="min-h-11 cursor-pointer rounded-[10px] bg-accent px-4 text-xs font-semibold text-[#0f1620] disabled:cursor-wait disabled:opacity-60"
+            >
+              RUN ⏎
+            </button>
+          )}
+        </form>
+      )}
     </section>
   );
 }

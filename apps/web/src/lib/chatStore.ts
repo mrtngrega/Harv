@@ -43,9 +43,15 @@ export interface Tab {
   context?: number;
 }
 
+/** The Settings tab's id in `activeId`; it sits in the tab bar after the chats. */
+export const SETTINGS_TAB = 'settings';
+
 export interface ChatState {
   tabs: Tab[];
+  /** A chat tab's id, SETTINGS_TAB, or null when nothing is open. */
   activeId: string | null;
+  /** The Settings tab is in the tab bar. */
+  settingsOpen: boolean;
   model: ModelChoice;
   effort: EffortLevel;
   /** What AUTO ran last, e.g. "Sonnet 5.5 · medium". */
@@ -78,7 +84,7 @@ function saveSelection(model: ModelChoice, effort: EffortLevel) {
 }
 
 const first = blankTab();
-const store = createStore<ChatState>({ tabs: [first], activeId: first.id, ...loadSelection(), routed: null });
+const store = createStore<ChatState>({ tabs: [first], activeId: first.id, settingsOpen: false, ...loadSelection(), routed: null });
 
 export const useChat = store.use;
 export const getChatState = store.get;
@@ -116,7 +122,8 @@ function hydrate(chats: ChatSnapshot[]) {
     const blanks = s.tabs.filter((t) => t.lines.length === 0 && t.id !== first.id && !saved.some((c) => c.id === t.id));
     const tabs = [...saved, ...blanks];
     if (tabs.length === 0) tabs.push(s.tabs.find((t) => t.id === first.id) ?? blankTab());
-    const activeId = tabs.some((t) => t.id === s.activeId) ? s.activeId : tabs.at(-1)!.id;
+    const keep = s.activeId === SETTINGS_TAB || tabs.some((t) => t.id === s.activeId);
+    const activeId = keep ? s.activeId : tabs.at(-1)!.id;
     return { ...s, tabs, activeId };
   });
 }
@@ -249,14 +256,29 @@ export const chat = {
     sendMessage({ type: 'chat.close', tabId: id });
     store.set((s) => {
       const tabs = s.tabs.filter((t) => t.id !== id);
-      const activeId = s.activeId === id ? (tabs.at(-1)?.id ?? null) : s.activeId;
+      const activeId = s.activeId === id ? (tabs.at(-1)?.id ?? (s.settingsOpen ? SETTINGS_TAB : null)) : s.activeId;
       return { ...s, tabs, activeId };
     });
   },
 
-  /** The active tab's id, opening a new tab when none is open. */
+  /** Opens Settings as a tab in the chat bar (or switches to it). */
+  openSettings: () => store.set((s) => ({ ...s, settingsOpen: true, activeId: SETTINGS_TAB })),
+
+  closeSettings() {
+    store.set((s) => ({
+      ...s,
+      settingsOpen: false,
+      activeId: s.activeId === SETTINGS_TAB ? (s.tabs.at(-1)?.id ?? null) : s.activeId,
+    }));
+  },
+
+  /** The active chat's id. From Settings (or nothing) it switches to the last chat, or opens a new one. */
   ensureTab(): string {
-    if (!store.get().activeId) chat.newTab();
+    const s = store.get();
+    if (s.tabs.some((t) => t.id === s.activeId)) return s.activeId!;
+    const last = s.tabs.at(-1);
+    if (last) chat.setActive(last.id);
+    else chat.newTab();
     return store.get().activeId!;
   },
 

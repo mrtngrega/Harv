@@ -157,7 +157,7 @@ describe('chat names', () => {
       async () => undefined,
     );
     let title = 'Week plan';
-    const classify = vi.fn(async () => ({
+    const classify = vi.fn(async (..._args: unknown[]) => ({
       category: 'planning',
       difficulty: 3 as const,
       stakes: 'normal' as const,
