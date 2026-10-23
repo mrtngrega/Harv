@@ -54,7 +54,7 @@ export interface ChatState {
   activeId: string | null;
   /** The Settings tab is in the tab bar. */
   settingsOpen: boolean;
-  /** Terminal, files and browser tabs (the server's list). */
+  /** Terminal and files tabs (the server's list). */
   tools: ToolTab[];
   model: ModelChoice;
   effort: EffortLevel;
@@ -279,10 +279,10 @@ export const chat = {
     });
   },
 
-  /** Opens a terminal, files or browser tab and switches to it. */
+  /** Opens a terminal or files tab and switches to it. */
   openTool(kind: ToolKind) {
     const id = newId();
-    const title = { terminal: 'PowerShell', files: 'Files', browser: 'Browser' }[kind];
+    const title = { terminal: 'PowerShell', files: 'Files' }[kind];
     store.set((s) => ({ ...s, tools: [...s.tools, { id, kind, title }], activeId: id }));
     sendMessage({ type: 'tool.open', id, kind });
   },

@@ -1,6 +1,6 @@
 import type { ToolKind, ToolTab } from '@harv/shared';
 
-const TITLES: Record<ToolKind, string> = { terminal: 'PowerShell', files: 'Files', browser: 'Browser' };
+const TITLES: Record<ToolKind, string> = { terminal: 'PowerShell', files: 'Files' };
 
 /** What a kind of tool tab needs from the server when it opens and closes. */
 export interface ToolBackend {
@@ -9,7 +9,7 @@ export interface ToolBackend {
 }
 
 /**
- * The terminal, files and browser tabs open in the chat bar. They live as long
+ * The terminal and files tabs open in the chat bar. They live as long
  * as the server does, so a reloaded dashboard gets them back.
  */
 export class ToolRegistry {

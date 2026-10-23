@@ -41,7 +41,7 @@ export type ServerMessage =
       settings: HarvSettings;
       /** Background photo version (null = none set). */
       background: number | null;
-      /** Open terminal, files and browser tabs. */
+      /** Open terminal and files tabs. */
       tools: ToolTab[];
     }
   /** `detail` names the running tool while working. */

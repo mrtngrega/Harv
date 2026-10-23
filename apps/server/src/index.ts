@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { createReadStream, readFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import Fastify from 'fastify';
@@ -20,8 +19,6 @@ import { RouteStore } from './store/routes.ts';
 import { UsageMeter } from './usage/meter.ts';
 import { loadSettings, updateSettings } from './settings.ts';
 import { cleanPath, listFolder, openWithDefault, places, previewType } from './tools/files.ts';
-import { BrowserManager, findChrome, isWebUrl } from './tools/browser.ts';
-import { wireHarvBrowser } from './tools/harvBrowser.ts';
 import { ToolRegistry } from './tools/registry.ts';
 import { TerminalManager } from './tools/terminal.ts';
 
@@ -75,28 +72,17 @@ const meter = new UsageMeter(
   },
   () => routes.summary(),
 );
-// Terminal, files and browser tabs in the chat bar.
+// Terminal and files tabs in the chat bar.
 const terminals = new TerminalManager({
   data: (id, data) => broadcast({ type: 'term.data', id, data }),
   exit: (id, code) => broadcast({ type: 'term.exit', id, code }),
 });
-const browser = new BrowserManager({
-  frame: (id, data, width, height) => broadcast({ type: 'browser.frame', id, data, width, height }),
-  state: (id, state) => {
-    broadcast({ type: 'browser.state', id, state });
-    // The tab is named after the page it shows.
-    if (state.title) tools.rename(id, state.title.length > 28 ? `${state.title.slice(0, 27)}…` : state.title);
-  },
-  error: (id, message) => broadcast({ type: 'browser.error', id, message }),
-});
 const tools = new ToolRegistry(
   {
     terminal: { open: (id) => terminals.open(id), close: (id) => terminals.close(id) },
-    browser: { open: (id) => browser.open(id), close: (id) => browser.close(id) },
   },
   (tabs) => broadcast({ type: 'tools', tabs }),
 );
-wireHarvBrowser(browser, tools);
 
 const router = new Router(
   routes,
@@ -190,15 +176,6 @@ app.post<{ Body: { path?: string; tab?: string } }>('/api/files/attach', async (
   }
 });
 
-// "Open in Chrome": the browser tab's page in the user's own Chrome, with their normal profile.
-app.post<{ Body: { url?: string } }>('/api/browser/external', async (req, reply) => {
-  const url = String(req.body?.url ?? '');
-  const chrome = findChrome();
-  if (!isWebUrl(url) || !chrome) return reply.code(400).send({ error: chrome ? 'Only web pages' : 'Chrome isn’t installed' });
-  spawn(chrome, [url], { detached: true, stdio: 'ignore' }).unref();
-  return { ok: true };
-});
-
 // Lets the dashboard retry starting the sensors (e.g. after the UAC prompt was declined).
 app.post('/api/sensors/start', async () => ({ result: await ensureLhmRunning() }));
 
@@ -268,7 +245,6 @@ app.get('/ws', { websocket: true }, (socket) => {
       case 'tool.open':
         tools.open(msg.id, msg.kind).catch((err: Error) => {
           app.log.error({ err: err.message }, 'Could not open tool tab');
-          if (msg.kind === 'browser') send({ type: 'browser.error', id: msg.id, message: err.message });
         });
         break;
       case 'tool.close':
@@ -282,21 +258,6 @@ app.get('/ws', { websocket: true }, (socket) => {
         break;
       case 'term.resize':
         terminals.resize(msg.id, msg.cols, msg.rows);
-        break;
-      case 'browser.navigate':
-        void browser.navigate(msg.id, String(msg.url ?? ''));
-        break;
-      case 'browser.nav':
-        void browser.nav(msg.id, msg.action);
-        break;
-      case 'browser.input':
-        void browser.input(msg.id, msg.input);
-        break;
-      case 'browser.resize':
-        void browser.resize(msg.id, msg.width, msg.height);
-        break;
-      case 'browser.watch':
-        void browser.watch(msg.id, msg.on);
         break;
       case 'settings.update':
         broadcast({ type: 'settings', settings: updateSettings(msg.patch) });
@@ -312,7 +273,6 @@ app.addHook('onClose', async () => {
   metrics.stop();
   meter.stop();
   terminals.closeAll();
-  await browser.shutdown();
   chats.closeAll();
   store.close();
   actions.close();

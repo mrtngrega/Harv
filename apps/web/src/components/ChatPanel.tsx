@@ -10,7 +10,6 @@ import { useSafety } from '../lib/safetyStore.ts';
 import { ActionBadge, ApprovalCard } from './ApprovalCard.tsx';
 import { SettingsView } from './SettingsView.tsx';
 import { FilesView } from './tools/FilesView.tsx';
-import { BrowserView } from './tools/BrowserView.tsx';
 import { NewTabMenu, SpecialTab, TOOL_ICONS } from './tools/TabParts.tsx';
 import { TerminalView } from './tools/TerminalView.tsx';
 import { updatePending, useDrafts } from '../lib/drafts.ts';
@@ -333,8 +332,6 @@ export function ChatPanel() {
         <TerminalView key={activeTool.id} id={activeTool.id} />
       ) : activeTool?.kind === 'files' ? (
         <FilesView key={activeTool.id} id={activeTool.id} />
-      ) : activeTool?.kind === 'browser' ? (
-        <BrowserView key={activeTool.id} id={activeTool.id} />
       ) : (
         <div ref={logRef} className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-4 leading-relaxed">
           {!active || active.lines.length === 0 ? (

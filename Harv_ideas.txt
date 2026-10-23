@@ -1,0 +1,1 @@
+make it so when i leave a chat open with a session and i turn off my pc or the harv dashboard itself > make it so it remembrs the session and leaves the tab open like when i close chrome and then open it again and it remembers all the tabs i had open so make it like that

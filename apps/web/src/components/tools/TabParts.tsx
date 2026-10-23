@@ -3,9 +3,9 @@ import { createPortal } from 'react-dom';
 import type { ToolKind } from '@harv/shared';
 import { chat } from '../../lib/chatStore.ts';
 
-export const TOOL_ICONS: Record<ToolKind | 'settings', string> = { terminal: '›_', files: '▤', browser: '◎', settings: '⚙' };
+export const TOOL_ICONS: Record<ToolKind | 'settings', string> = { terminal: '›_', files: '▤', settings: '⚙' };
 
-/** A non-chat tab in the chat bar (terminal, files, browser, settings). */
+/** A non-chat tab in the chat bar (terminal, files, settings). */
 export function SpecialTab({
   icon,
   title,
@@ -53,10 +53,9 @@ const ITEMS: { label: string; icon: string; hint: string; run: () => void }[] = 
   { label: 'New chat', icon: '+', hint: 'Ctrl+click + for this directly', run: () => chat.newTab() },
   { label: 'Terminal', icon: TOOL_ICONS.terminal, hint: 'PowerShell', run: () => chat.openTool('terminal') },
   { label: 'Files', icon: TOOL_ICONS.files, hint: 'Browse, preview, send to chat', run: () => chat.openTool('files') },
-  { label: 'Browser', icon: TOOL_ICONS.browser, hint: 'Chrome, which Harv can use too', run: () => chat.openTool('browser') },
 ];
 
-/** The + at the end of the chat bar: a new chat, or a terminal, files or browser tab. */
+/** The + at the end of the chat bar: a new chat, a terminal or the file explorer. */
 export function NewTabMenu() {
   const [open, setOpen] = useState(false);
   const [at, setAt] = useState({ left: 0, top: 0 });
@@ -87,7 +86,7 @@ export function NewTabMenu() {
         aria-label="New tab"
         aria-haspopup="menu"
         aria-expanded={open}
-        title="New chat, terminal, files or browser"
+        title="New chat, terminal or file explorer"
         onClick={(e) => {
           if (e.ctrlKey) return chat.newTab();
           const r = e.currentTarget.getBoundingClientRect();
