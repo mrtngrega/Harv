@@ -40,8 +40,8 @@ export function checkTool(name: string, input: Record<string, unknown>): GuardVe
   return { allow: true };
 }
 
-/** One-line description of a tool call for the chat log. */
-export function describeTool(name: string, input: Record<string, unknown>): string {
+/** One-line description of a tool call for the chat log; `chatTitle` names chats read with read_chat. */
+export function describeTool(name: string, input: Record<string, unknown>, chatTitle?: (id: string) => string | undefined): string {
   const pick = (key: string) => (typeof input[key] === 'string' ? (input[key] as string) : '');
   switch (name) {
     case 'Read':
@@ -58,8 +58,10 @@ export function describeTool(name: string, input: Record<string, unknown>): stri
       return pick('name');
     case 'mcp__harv__list_chats':
       return pick('query') || (input.open_only ? 'open tabs' : 'recent');
-    case 'mcp__harv__read_chat':
-      return pick('id').slice(0, 8);
+    case 'mcp__harv__read_chat': {
+      const title = chatTitle?.(pick('id'));
+      return title ? `"${title}"` : pick('id').slice(0, 8);
+    }
     default:
       return '';
   }

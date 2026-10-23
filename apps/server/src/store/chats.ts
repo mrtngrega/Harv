@@ -58,6 +58,10 @@ export class ChatStore {
     this.db.prepare('INSERT OR IGNORE INTO chats (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)').run(id, title, now, now);
   }
 
+  title(id: string): string | undefined {
+    return (this.db.prepare('SELECT title FROM chats WHERE id = ?').get(id) as { title: string } | undefined)?.title;
+  }
+
   setTitle(id: string, title: string): void {
     this.db.prepare('UPDATE chats SET title = ? WHERE id = ?').run(title, id);
   }

@@ -50,7 +50,7 @@ export class ChatSession {
     private effort: EffortLevel,
     private emit: Emit,
     private hooks: SessionHooks,
-    store: ChatStore,
+    private store: ChatStore,
     private resume?: string,
   ) {
     this.q = query({ prompt: this.input, options: buildOptions(model, effort, this.abort, { resume, chat: { store, tabId } }) });
@@ -160,7 +160,12 @@ export class ChatSession {
               text = '';
             }
             const input = (block.input ?? {}) as Record<string, unknown>;
-            this.emit({ type: 'chat.tool', tabId, name: block.name.replace(/^mcp__harv__/, ''), detail: describeTool(block.name, input) });
+            this.emit({
+              type: 'chat.tool',
+              tabId,
+              name: block.name.replace(/^mcp__harv__/, ''),
+              detail: describeTool(block.name, input, (id) => this.store.title(id)),
+            });
           }
         }
         if (text) this.emit({ type: 'chat.assistant', tabId, text });
