@@ -12,6 +12,8 @@ export interface Line {
   tag?: string;
   /** Names of files attached to the user's message. */
   files?: string[];
+  /** On tool lines: the action log id. */
+  ref?: string;
   streaming?: boolean;
 }
 
@@ -80,6 +82,7 @@ const fromSnapshot = (chat: ChatSnapshot): Tab => ({
     text: l.text,
     ...(l.tag ? { tag: l.tag } : {}),
     ...(l.files ? { files: l.files } : {}),
+    ...(l.ref ? { ref: l.ref } : {}),
   })),
 });
 
@@ -138,7 +141,7 @@ export function applyChatEvent(msg: ChatServerMessage): void {
     case 'chat.tool':
       updateTab(msg.tabId, (t) => {
         const done = finishCurrent(t);
-        return { ...done, lines: [...done.lines, line('tool', msg.detail ? `${msg.name} · ${msg.detail}` : msg.name)] };
+        return { ...done, lines: [...done.lines, line('tool', msg.detail ? `${msg.name} · ${msg.detail}` : msg.name, { ref: msg.id })] };
       });
       break;
     case 'chat.done':

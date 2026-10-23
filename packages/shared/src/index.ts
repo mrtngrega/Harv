@@ -3,14 +3,17 @@ export const SERVER_PORT = 4317;
 
 export const HARV_VERSION = '0.0.1';
 
-export type HarvStatus = 'idle' | 'thinking' | 'working';
+/** `waiting` = a red action needs the user's approval. */
+export type HarvStatus = 'idle' | 'thinking' | 'working' | 'waiting';
 
 /** Result of POST /api/sensors/start (starting LibreHardwareMonitor). */
 export type LhmLaunchResult = 'already-running' | 'started' | 'declined' | 'not-installed' | 'failed';
 
 export type * from './metrics.ts';
 export * from './chat.ts';
+export type * from './safety.ts';
 import type { MetricsSnapshot } from './metrics.ts';
+import type { ActionEntry, ApprovalRequest, SafetyClientMessage, SafetyServerMessage } from './safety.ts';
 import type { Catalog, ChatClientMessage, ChatServerMessage, ChatSnapshot, HistoryItem } from './chat.ts';
 
 /** Messages the server pushes to the dashboard over /ws. */
@@ -24,11 +27,16 @@ export type ServerMessage =
       /** Open chat tabs restored from the database. */
       chats: ChatSnapshot[];
       history: HistoryItem[];
+      /** Red actions waiting for the user. */
+      approvals: ApprovalRequest[];
+      /** The latest entries of the action log. */
+      actions: ActionEntry[];
     }
   | { type: 'harv.status'; status: HarvStatus }
   | { type: 'metrics.tick'; metrics: MetricsSnapshot }
   | { type: 'catalog'; catalog: Catalog }
-  | ChatServerMessage;
+  | ChatServerMessage
+  | SafetyServerMessage;
 
 /** Messages the dashboard sends to the server over /ws. */
-export type ClientMessage = { type: 'ping' } | ChatClientMessage;
+export type ClientMessage = { type: 'ping' } | ChatClientMessage | SafetyClientMessage;

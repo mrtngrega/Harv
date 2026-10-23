@@ -1,5 +1,6 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ChatServerMessage, EffortLevel } from '@harv/shared';
+import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
 import type { ContentBlockParam } from './attachments.ts';
 import { describeTool, MEMORY_TOOLS } from './guard.ts';
@@ -51,9 +52,10 @@ export class ChatSession {
     private emit: Emit,
     private hooks: SessionHooks,
     private store: ChatStore,
+    gate: SafetyGate,
     private resume?: string,
   ) {
-    this.q = query({ prompt: this.input, options: buildOptions(model, effort, this.abort, { resume, chat: { store, tabId } }) });
+    this.q = query({ prompt: this.input, options: buildOptions(model, effort, this.abort, { resume, chat: { store, tabId, gate } }) });
     void this.consume();
   }
 
@@ -163,6 +165,7 @@ export class ChatSession {
             this.emit({
               type: 'chat.tool',
               tabId,
+              id: block.id,
               name: block.name.replace(/^mcp__harv__/, ''),
               detail: describeTool(block.name, input, (id) => this.store.title(id)),
             });

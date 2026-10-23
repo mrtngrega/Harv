@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { LhmLaunchResult, MetricsSnapshot } from '@harv/shared';
 import { celsius, countDuplicates, duration, gb, ghz, pct, rate, sizePair, watts } from '../../lib/format.ts';
+import { ActionLog } from './ActionLog.tsx';
 import { BarList, Card, Rows, ThreadBars } from './parts.tsx';
 
 const shortCpu = (name: string) => name.replace(/^AMD |^Intel\(R\) Core\(TM\) /, '').replace(/ \d+-Core Processor$/, '');
@@ -160,6 +161,9 @@ export function StatsDetails({ m }: { m: MetricsSnapshot }) {
           />
         </Card>
       )}
+
+      <div className="mt-1 border-t border-line px-1 pt-2.5 text-[11px] tracking-[2px] text-muted">HARV</div>
+      <ActionLog />
 
       <div className="mt-1 border-t border-line px-1 pt-2.5 text-[11px] tracking-[2px] text-muted">CLAUDE PLAN</div>
       <Card title="Usage" sub="session · weekly">

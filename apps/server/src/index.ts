@@ -11,6 +11,8 @@ import { MetricsCollector } from './metrics/collector.ts';
 import { ensureLhmRunning } from './metrics/lhmLauncher.ts';
 import { stripBilledCredentials } from './env.ts';
 import { ensureHarvHome, HARV_HOME } from './paths.ts';
+import { SafetyGate } from './safety/gate.ts';
+import { ActionStore } from './store/actions.ts';
 import { ChatStore } from './store/chats.ts';
 
 const removed = stripBilledCredentials();
@@ -42,7 +44,14 @@ const broadcast = (msg: ServerMessage) => clients.forEach((send) => send(msg));
 
 const metrics = new MetricsCollector();
 const store = new ChatStore(join(HARV_HOME, 'harv.db'));
-const chats = new ChatManager(store, broadcast, (status) => broadcast({ type: 'harv.status', status }));
+const actions = new ActionStore(join(HARV_HOME, 'harv.db'));
+actions.markInterrupted();
+const gate = new SafetyGate(actions, {
+  broadcast,
+  notice: (tabId, message) => chats.notice(tabId, message),
+  onChange: () => chats.refreshStatus(),
+});
+const chats = new ChatManager(store, gate, broadcast, (status) => broadcast({ type: 'harv.status', status }));
 
 app.get('/api/health', async () => ({ ok: true, version: HARV_VERSION, status: chats.status, home: HARV_HOME }));
 
@@ -77,6 +86,8 @@ app.get('/ws', { websocket: true }, (socket) => {
     catalog: chats.catalog,
     chats: chats.openChats(),
     history: chats.history(),
+    approvals: gate.approvals(),
+    actions: actions.recent(30),
   });
 
   const unsubscribe = metrics.onSnapshot((snapshot) => send({ type: 'metrics.tick', metrics: snapshot }));
@@ -111,6 +122,12 @@ app.get('/ws', { websocket: true }, (socket) => {
       case 'chat.delete':
         chats.delete(msg.tabId);
         break;
+      case 'approval.answer':
+        gate.answer(msg.id, msg.approve, msg.command);
+        break;
+      case 'action.undo':
+        gate.undo(msg.id);
+        break;
       case 'history.search':
         send({ type: 'history', items: chats.history(msg.query), query: msg.query });
         break;
@@ -122,6 +139,7 @@ app.addHook('onClose', async () => {
   metrics.stop();
   chats.closeAll();
   store.close();
+  actions.close();
 });
 
 // Claude Code subprocesses would otherwise keep the process alive on restart (tsx watch hangs).

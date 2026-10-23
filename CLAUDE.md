@@ -90,12 +90,16 @@ Harv runs only on the user's Claude subscription, which reaches Claude through t
     - `cwd` set to `~/.harv/workspace`
     - `settingSources: []` and `strictMcpConfig`, for isolation from the user's Claude Code config
     - Harv's own system prompt
-    - read-only tools only, until M5, plus Harv's own `mcp__harv__*` tools
-    - the `guard.ts` `PreToolUse` hook plus `canUseTool`
+    - `ENABLED_TOOLS` (read, Write/Edit, Bash/PowerShell) plus Harv's own `mcp__harv__*` tools
+    - the safety gate's `PreToolUse`/`PostToolUse` hooks plus `canUseTool` as a backstop
   - A session refuses to run if the init message's `apiKeySource` isn't `none`/`oauth` (a subscription login).
 - `apps/web/src`: `App.tsx` lays out Header, HistorySidebar, ChatPanel and StatsPanel. `lib/useHarvSocket.ts` is a module-level store over the single WebSocket: `useConnection()` and `useMetrics()` via `useSyncExternalStore`, so 1 s ticks only re-render what reads metrics. `components/stats/` holds the expanded panel's cards.
 - `apps/server/src/agent/attachments.ts`: `POST /api/attachments?tab=&name=` (raw `application/octet-stream` body, 32 MB max) saves to `~/.harv/workspace/attachments/<tab>/<id>/<name>`. `buildContent` inlines small images, PDFs and text, and lists every saved path for Read. Deleting a chat deletes its folder.
 - `apps/server/src/agent/chatTools.ts`: Harv's per-tab MCP server `harv` (memory tools plus `list_chats` and `read_chat` over the history DB). It also builds the recent-chats list for the system prompt. `ChatSession` diffs `memorySnapshot()` before each message and prepends a note when other chats changed memory. See `docs/PLAN.md` §6c.
+- `apps/server/src/safety`: the permission gate (see "Harv's safety model" below and `docs/PLAN.md` §4).
+  - `classify.ts` gives each tool call a tier, `gate.ts` enforces it from the SDK hooks, `backup.ts` handles backups and Undo, and `paths.ts` has path helpers, the workspace path and `~/.harv/settings.json` (`protectedPaths`).
+  - The action log is `store/actions.ts` (an `actions` table in `harv.db`). Tool lines in the chat carry the tool_use id (`ref`), which is also the action id.
+  - Any change here needs `classify.test.ts` / `gate.test.ts` cases. When in doubt, a command is red.
 - `index.ts` refuses any request whose `Origin` isn't the dashboard (any web page can reach 127.0.0.1, including the `/ws` upgrade).
 - `apps/server/src/store/chats.ts` keeps chat history in `~/.harv/harv.db` (`node:sqlite`, so there's no native dependency).
   - `ChatManager` writes every finished line through its `emit` wrapper. Deltas aren't stored.

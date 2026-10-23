@@ -39,6 +39,8 @@ export interface StoredLine {
   tag?: string;
   /** Names of the files attached to the user's message. */
   files?: string[];
+  /** On tool lines: the tool_use id, which is also the action log id. */
+  ref?: string;
 }
 
 /** A file uploaded with POST /api/attachments, waiting to be sent with a message. */
@@ -83,7 +85,7 @@ export type ChatServerMessage =
   | { type: 'chat.delta'; tabId: string; text: string }
   /** Final text of one assistant message (replaces the streamed text). */
   | { type: 'chat.assistant'; tabId: string; text: string }
-  | { type: 'chat.tool'; tabId: string; name: string; detail: string }
+  | { type: 'chat.tool'; tabId: string; id: string; name: string; detail: string }
   | { type: 'chat.done'; tabId: string; ok: boolean; stopped: boolean; error?: string; usage?: ChatUsage }
   | { type: 'chat.notice'; tabId: string; message: string }
   | { type: 'chat.error'; tabId: string; message: string }

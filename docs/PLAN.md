@@ -1,6 +1,6 @@
 # Harv: build plan
 
-Status: M0–M3 done 2026-10-22 (scaffold, glass shell, live hardware panel, chat on the subscription, persistent tabs/history + Harv's persona and memory). M4 (file attachments) done 2026-10-23: attach button, drag-and-drop and pasted screenshots; images ≤3.75 MB, PDFs ≤20 MB and text ≤100 KB go inline as content blocks (verified live: Claude Code accepts `image` and `document` blocks in streaming input), and anything bigger is saved under `~/.harv/workspace/attachments/<tab>/<id>/` for the Read tool. M4b (one Harv across tabs) done 2026-10-23, see §6c. Next: M5 (safety gate). Web app only for now; the desktop app (M9) is deferred until the user asks.
+Status: M0–M3 done 2026-10-22 (scaffold, glass shell, live hardware panel, chat on the subscription, persistent tabs/history + Harv's persona and memory). M4 (file attachments) done 2026-10-23: attach button, drag-and-drop and pasted screenshots; images ≤3.75 MB, PDFs ≤20 MB and text ≤100 KB go inline as content blocks (verified live: Claude Code accepts `image` and `document` blocks in streaming input), and anything bigger is saved under `~/.harv/workspace/attachments/<tab>/<id>/` for the Read tool. M4b (one Harv across tabs) done 2026-10-23, see §6c. M5 (safety gate) done 2026-10-23, see §4: Harv can now write files and run PowerShell/Bash behind green/yellow/red/blocked tiers, with backups, approval cards, Undo, an action log and Esc to stop. Verified live: yellow create/edit with Undo, red delete approved then undone, red delete denied. Next: M6 (Auto router). Web app only for now; the desktop app (M9) is deferred until the user asks.
 
 ## 1. Can Harv run on a Claude subscription? (research summary)
 
@@ -71,6 +71,18 @@ Every tool call → `PreToolUse` hook → classifier → tier:
 - Blocked: deny with a reason.
 
 Shell commands are parsed for risky patterns: `rm`, `del`, `Remove-Item`, `format`, `reg`, `winget install/uninstall`, `Stop-Process`, `taskkill`, `git push`, network sends, and so on. When unsure, the command is treated as red. The stop button calls `interrupt()` and aborts. The action log lives in SQLite.
+
+**As built (M5):**
+- `safety/classify.ts` sorts each call:
+  - Reads and Harv's own tools are green.
+  - Write/Edit in the workspace is green. Elsewhere it's yellow, red in Program Files, and blocked in Windows, protected folders, Harv's data and secrets.
+  - A shell command is green only if every part is on a read-only list (or it just opens an app, page or document) and it has no redirection or command substitution.
+  - Blocked patterns (drive formatting, AV/firewall off, credential stores, Windows folder, protected folders) come first. Everything else is red with a category reason.
+- `safety/gate.ts` runs inside the `PreToolUse` hook (24 h timeout), so a red call waits right there for the dashboard's answer. `canUseTool` is a backstop that denies any red call without a recorded approval. `PostToolUse`/`PostToolUseFailure` verify and log.
+- Backups are best-effort for shell commands: every literal path in the command that exists is copied, up to 500 MB / 5000 files, and the card says when nothing could be backed up. Undo first moves the current version aside, so it never loses data.
+- If the user edits a command on the card, it's re-classified. Only blocked edits are refused.
+- Protected folders are `protectedPaths` in `~/.harv/settings.json` (the settings UI comes in M8).
+- Esc (or Stop) denies the tab's waiting approvals and interrupts it. A waiting approval makes Harv's status `waiting` ("needs you").
 
 ## 5. Auto router (model + effort)
 

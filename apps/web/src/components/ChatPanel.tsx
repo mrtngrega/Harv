@@ -4,6 +4,8 @@ import remarkGfm from 'remark-gfm';
 import type { Attachment } from '@harv/shared';
 import { formatSize, uploadAttachment } from '../lib/attachments.ts';
 import { chat, useChat, type Line } from '../lib/chatStore.ts';
+import { useSafety } from '../lib/safetyStore.ts';
+import { ActionBadge, ApprovalCard } from './ApprovalCard.tsx';
 
 /** A file attached to the draft: uploading, ready to send, or failed. */
 interface Pending {
@@ -77,7 +79,7 @@ function ChatLine({ line }: { line: Line }) {
         </div>
       );
     case 'tool':
-      return <div className="animate-fade-in truncate text-faint">&nbsp;&nbsp;▸ {line.text}</div>;
+      return <ToolLine line={line} />;
     case 'notice':
       return <div className="animate-fade-in text-muted">— {line.text}</div>;
     case 'error':
@@ -85,8 +87,21 @@ function ChatLine({ line }: { line: Line }) {
   }
 }
 
+/** A tool call; non-green ones show their tier, status and Undo from the action log. */
+function ToolLine({ line }: { line: Line }) {
+  const { actions } = useSafety();
+  const action = line.ref ? actions[line.ref] : undefined;
+  return (
+    <div className="animate-fade-in flex items-center gap-3 text-faint">
+      <span className="min-w-0 truncate">&nbsp;&nbsp;▸ {line.text}</span>
+      {action && action.tier !== 'green' && <ActionBadge action={action} />}
+    </div>
+  );
+}
+
 export function ChatPanel() {
   const { tabs, activeId } = useChat();
+  const { approvals } = useSafety();
   const [draft, setDraft] = useState('');
   // Draft attachments per tab: each upload lands in that tab's folder on the server.
   const [pendingByTab, setPendingByTab] = useState<Record<string, Pending[]>>({});
@@ -96,6 +111,18 @@ export function ChatPanel() {
   const active = tabs.find((t) => t.id === activeId) ?? null;
   const pending = (activeId && pendingByTab[activeId]) || [];
   const uploading = pending.some((p) => !p.file && !p.error);
+  const waiting = approvals.filter((a) => a.tabId === activeId);
+
+  // Esc is the stop hotkey: it halts the active tab and denies its waiting approvals.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !active?.busy) return;
+      e.preventDefault();
+      chat.stop(active.id);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [active?.busy, active?.id]);
 
   const updatePending = (tabId: string, fn: (list: Pending[]) => Pending[]) =>
     setPendingByTab((all) => ({ ...all, [tabId]: fn(all[tabId] ?? []) }));
@@ -123,7 +150,7 @@ export function ChatPanel() {
   useEffect(() => {
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [active?.lines.length, lastText, activeId]);
+  }, [active?.lines.length, lastText, activeId, waiting.length]);
 
   const send = (e: FormEvent) => {
     e.preventDefault();
@@ -191,6 +218,9 @@ export function ChatPanel() {
         ) : (
           active.lines.map((l) => <ChatLine key={l.id} line={l} />)
         )}
+        {waiting.map((a) => (
+          <ApprovalCard key={a.id} approval={a} />
+        ))}
       </div>
 
       {dragging && (
@@ -253,6 +283,7 @@ export function ChatPanel() {
           <button
             type="button"
             onClick={() => chat.stop(active.id)}
+            title="Stop (Esc)"
             className="min-h-11 cursor-pointer rounded-[10px] bg-warn px-4 text-xs font-semibold text-[#0f1620]"
           >
             STOP ■

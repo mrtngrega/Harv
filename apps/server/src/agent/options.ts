@@ -1,22 +1,24 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { HookCallback, Options } from '@anthropic-ai/claude-agent-sdk';
+import type { HookCallbackMatcher, HookEvent, Options } from '@anthropic-ai/claude-agent-sdk';
 import { HARV_VERSION, type EffortLevel } from '@harv/shared';
-import { HARV_HOME } from '../paths.ts';
+import { ENABLED_TOOLS } from '../safety/classify.ts';
+import type { SafetyGate } from '../safety/gate.ts';
+import { WORKSPACE } from '../safety/paths.ts';
 import type { ChatStore } from '../store/chats.ts';
 import { harvServer, recentChatsContext } from './chatTools.ts';
-import { checkTool, READ_ONLY_TOOLS } from './guard.ts';
 import { memoryContext } from './memory.ts';
-
-/** Harv's own working folder; Claude starts here rather than in any project. */
-export const WORKSPACE = join(HARV_HOME, 'workspace');
 
 /** Login sources that mean the user's subscription (never per-token API billing). */
 export const SUBSCRIPTION_KEY_SOURCES = new Set(['none', 'oauth']);
 
 function subscriptionEnv(): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: `harv/${HARV_VERSION}` };
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    CLAUDE_AGENT_SDK_CLIENT_APP: `harv/${HARV_VERSION}`,
+    // Windows tasks go best through PowerShell; Bash (Git Bash) stays available too.
+    CLAUDE_CODE_USE_POWERSHELL_TOOL: '1',
+  };
   // `env` replaces the subprocess environment, so this guarantees no API key reaches Claude Code.
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;
@@ -26,10 +28,11 @@ function subscriptionEnv(): Record<string, string | undefined> {
 /** Harv's shared rulebook (repo root `harv/persona.md`); dev sessions follow the same file. */
 const PERSONA_PATH = fileURLToPath(new URL('../../../../harv/persona.md', import.meta.url));
 
-/** The chat tab a session belongs to; gives it the tools to see the other chats. */
+/** The chat tab a session belongs to: its tools to see the other chats, and the safety gate. */
 export interface ChatContext {
   store: ChatStore;
   tabId: string;
+  gate: SafetyGate;
 }
 
 /** Built fresh for each new session, so persona edits and new memories apply to the next chat. */
@@ -41,7 +44,9 @@ function systemPrompt(chat?: ChatContext): string {
     '## Right now',
     [
       "- You're running inside Harv's dashboard on the user's Windows PC. Replies render as Markdown in a log-style chat, so keep formatting light.",
-      "- Your tools: read and search files, search and fetch the web, remember/forget for your memory, and list_chats/read_chat for your other chats. You can't run commands, edit files or control the PC yet; that arrives with Harv's safety gate. If asked, say so plainly and offer what you can do.",
+      '- Your tools: read and search files, search and fetch the web, create and edit files, run PowerShell and Bash commands (prefer PowerShell for Windows tasks), remember/forget for your memory, and list_chats/read_chat for your other chats.',
+      `- Harv's safety gate checks every action. Reading is free, and so is creating files in your workspace (${WORKSPACE}). Editing or creating the user's files is backed up first and they can Undo it. Riskier things (deleting, installing, stopping programs, scripts, the registry, system settings, sending data, git push) show the user an approval card with the exact command, and you wait for their answer. Formatting drives, touching the Windows folder, turning off antivirus or the firewall, and reading stored credentials are always blocked.`,
+      "- So: pick the least risky way to do what's asked, say in a sentence what you're about to do before a risky step, and keep commands simple and readable (the user approves exactly what they see). If something is denied or blocked, don't retry it or work around it; ask what they'd like instead.",
       `- Today is ${today}.`,
     ].join('\n'),
     '## Your memory',
@@ -60,13 +65,49 @@ function systemPrompt(chat?: ChatContext): string {
   ].join('\n\n');
 }
 
-/** Every tool call passes this hook, even ones Claude Code would auto-approve. */
-const guardHook: HookCallback = async (input) => {
-  if (input.hook_event_name !== 'PreToolUse') return {};
-  const verdict = checkTool(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>);
-  if (verdict.allow) return {};
-  return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: verdict.reason } };
-};
+/** Every tool call passes the safety gate through these hooks, even ones Claude Code would auto-approve. */
+function gateHooks(chat?: ChatContext): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
+  if (!chat) {
+    // Sessions without a chat (the model catalog) never send a prompt; refuse any tool all the same.
+    return {
+      PreToolUse: [{ hooks: [async () => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny' } })] }],
+    };
+  }
+  const { gate, tabId } = chat;
+  const args = (input: { tool_input: unknown }) => (input.tool_input ?? {}) as Record<string, unknown>;
+  return {
+    PreToolUse: [
+      {
+        // A red action waits for the user's answer inside this hook, so give it all the time it needs.
+        timeout: 24 * 60 * 60,
+        hooks: [
+          async (input, _id, { signal }) =>
+            input.hook_event_name === 'PreToolUse' ? gate.preToolUse(tabId, input.tool_name, args(input), input.tool_use_id, signal) : {},
+        ],
+      },
+    ],
+    PostToolUse: [
+      {
+        hooks: [
+          async (input) => {
+            if (input.hook_event_name === 'PostToolUse') gate.done(input.tool_name, args(input), input.tool_use_id, input.tool_response);
+            return {};
+          },
+        ],
+      },
+    ],
+    PostToolUseFailure: [
+      {
+        hooks: [
+          async (input) => {
+            if (input.hook_event_name === 'PostToolUseFailure') gate.failed(input.tool_use_id, input.error, input.is_interrupt);
+            return {};
+          },
+        ],
+      },
+    ],
+  };
+}
 
 export function buildOptions(
   model: string,
@@ -87,13 +128,11 @@ export function buildOptions(
     strictMcpConfig: true,
     mcpServers: chat ? { harv: harvServer(chat.store, chat.tabId) } : {},
     systemPrompt: systemPrompt(chat),
-    tools: READ_ONLY_TOOLS,
+    tools: ENABLED_TOOLS,
     permissionMode: 'default',
-    canUseTool: async (name, input) => {
-      const verdict = checkTool(name, input);
-      return verdict.allow ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: verdict.reason };
-    },
-    hooks: { PreToolUse: [{ hooks: [guardHook] }] },
+    canUseTool: async (name, input, { toolUseID }) =>
+      chat ? chat.gate.canUseTool(name, input, toolUseID) : { behavior: 'deny', message: 'No tools here.' },
+    hooks: gateHooks(chat),
     includePartialMessages: true,
   };
 }

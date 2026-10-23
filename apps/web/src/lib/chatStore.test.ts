@@ -14,7 +14,7 @@ describe('chat stream handling', () => {
     applyChatEvent({ type: 'chat.started', tabId, model: 'Sonnet 5.5', effort: 'medium', auto: true });
     applyChatEvent({ type: 'chat.delta', tabId, text: 'Let me ' });
     applyChatEvent({ type: 'chat.delta', tabId, text: 'check.' });
-    applyChatEvent({ type: 'chat.tool', tabId, name: 'Read', detail: 'notes.md' });
+    applyChatEvent({ type: 'chat.tool', tabId, id: 'toolu_1', name: 'Read', detail: 'notes.md' });
     applyChatEvent({ type: 'chat.delta', tabId, text: 'Done.' });
     applyChatEvent({ type: 'chat.done', tabId, ok: true, stopped: false });
 

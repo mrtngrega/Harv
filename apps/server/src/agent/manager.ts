@@ -8,6 +8,7 @@ import {
   type ModelChoice,
   type StoredLine,
 } from '@harv/shared';
+import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
 import { buildContent, deleteAttachments } from './attachments.ts';
 import { ChatSession } from './session.ts';
@@ -26,12 +27,14 @@ export class ChatManager {
 
   constructor(
     private store: ChatStore,
+    private gate: SafetyGate,
     private broadcast: (msg: ChatServerMessage) => void,
     private onStatus: (status: HarvStatus) => void,
   ) {}
 
   get status(): HarvStatus {
     const all = [...this.sessions.values()];
+    if (this.gate.waiting > 0) return 'waiting';
     if (all.some((s) => s.toolRunning)) return 'working';
     if (all.some((s) => s.busy)) return 'thinking';
     return 'idle';
@@ -64,7 +67,7 @@ export class ChatManager {
         save({ kind: 'harv', text: msg.text, tag: this.tags.get(msg.tabId) });
         break;
       case 'chat.tool':
-        save({ kind: 'tool', text: msg.detail ? `${msg.name} · ${msg.detail}` : msg.name });
+        save({ kind: 'tool', text: msg.detail ? `${msg.name} · ${msg.detail}` : msg.name, ref: msg.id });
         break;
       case 'chat.notice':
         save({ kind: 'notice', text: msg.message });
@@ -103,6 +106,7 @@ export class ChatManager {
         },
       },
       this.store,
+      this.gate,
       this.store.getSession(tabId) ?? undefined,
     );
     this.sessions.set(tabId, session);
@@ -136,11 +140,23 @@ export class ChatManager {
   }
 
   async stop(tabId: string): Promise<void> {
+    this.gate.cancel(tabId);
     await this.sessions.get(tabId)?.stop();
+  }
+
+  /** A line from Harv itself (e.g. an Undo result) in a chat's log. */
+  notice(tabId: string, message: string): void {
+    if (this.store.exists(tabId)) this.emit({ type: 'chat.notice', tabId, message });
+  }
+
+  /** Harv's overall status changed outside a session (an approval arrived or was answered). */
+  refreshStatus(): void {
+    this.onStatus(this.status);
   }
 
   /** Closing a tab keeps the chat in history; its Claude session can be resumed later. */
   close(tabId: string): void {
+    this.gate.cancel(tabId);
     this.sessions.get(tabId)?.close();
     this.sessions.delete(tabId);
     if (this.store.exists(tabId)) {
@@ -159,6 +175,7 @@ export class ChatManager {
   }
 
   delete(tabId: string): void {
+    this.gate.cancel(tabId);
     this.sessions.get(tabId)?.close();
     this.sessions.delete(tabId);
     this.store.delete(tabId);

@@ -3,7 +3,8 @@ import type { HarvConnection } from '../lib/useHarvSocket.ts';
 const LOOK = {
   idle: { label: 'idle', color: 'var(--color-ok)' },
   thinking: { label: 'thinking…', color: 'var(--color-accent)' },
-  working: { label: 'working', color: 'var(--color-warn)' },
+  working: { label: 'working', color: 'var(--color-accent)' },
+  waiting: { label: 'needs you', color: 'var(--color-warn)' },
   offline: { label: 'offline', color: 'var(--color-faint)' },
 } as const;
 
