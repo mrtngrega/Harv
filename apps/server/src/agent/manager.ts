@@ -1,5 +1,6 @@
 import {
   AUTO_FALLBACK,
+  type Attachment,
   type Catalog,
   type ChatServerMessage,
   type EffortLevel,
@@ -8,6 +9,7 @@ import {
   type StoredLine,
 } from '@harv/shared';
 import type { ChatStore } from '../store/chats.ts';
+import { buildContent, deleteAttachments } from './attachments.ts';
 import { ChatSession } from './session.ts';
 
 const titleFrom = (text: string) => (text.length > 40 ? `${text.slice(0, 39)}…` : text);
@@ -106,26 +108,26 @@ export class ChatManager {
     return session;
   }
 
-  async send(tabId: string, text: string, choice: ModelChoice, effort: EffortLevel): Promise<void> {
+  async send(tabId: string, text: string, choice: ModelChoice, effort: EffortLevel, files: Attachment[] = []): Promise<void> {
     // AUTO becomes the real router in M6; until then it's a sensible default for Claude Pro.
     const auto = choice === 'auto';
     const model = auto ? AUTO_FALLBACK.model : choice;
     const runEffort = auto ? AUTO_FALLBACK.effort : effort;
 
     const isNew = !this.store.exists(tabId);
-    this.store.ensureChat(tabId, titleFrom(text));
+    this.store.ensureChat(tabId, titleFrom(text || (files[0]?.name ?? 'Attachment')));
     this.store.setOpen(tabId, true);
     const session = this.session(tabId, model, runEffort);
     if (session.busy) {
       this.broadcast({ type: 'chat.notice', tabId, message: 'Harv is still answering in this tab. Wait, or press Stop.' });
       return;
     }
-    this.store.addLine(tabId, { kind: 'you', text });
+    this.store.addLine(tabId, { kind: 'you', text, ...(files.length ? { files: files.map((f) => f.name) } : {}) });
     if (isNew) this.publishHistory();
 
     this.emit({ type: 'chat.started', tabId, model: this.modelName(model), effort: runEffort, auto });
     try {
-      await session.send(text, model, runEffort);
+      await session.send(files.length ? buildContent(tabId, text, files) : text, model, runEffort);
     } catch (err) {
       this.emit({ type: 'chat.error', tabId, message: `Couldn’t send: ${(err as Error).message}` });
       this.emit({ type: 'chat.done', tabId, ok: false, stopped: false });
@@ -159,6 +161,7 @@ export class ChatManager {
     this.sessions.get(tabId)?.close();
     this.sessions.delete(tabId);
     this.store.delete(tabId);
+    deleteAttachments(tabId);
     this.broadcast({ type: 'chat.removed', tabId });
     this.publishHistory();
     this.onStatus(this.status);

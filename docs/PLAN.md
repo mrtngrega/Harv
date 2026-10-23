@@ -1,6 +1,6 @@
 # Harv: build plan
 
-Status: M0–M3 done 2026-10-22 (scaffold, glass shell, live hardware panel, chat on the subscription, persistent tabs/history + Harv's persona and memory). Next: M4 (file attachments). Web app only for now; the desktop app (M9) is deferred until the user asks.
+Status: M0–M3 done 2026-10-22 (scaffold, glass shell, live hardware panel, chat on the subscription, persistent tabs/history + Harv's persona and memory). M4 (file attachments) done 2026-10-23: attach button, drag-and-drop and pasted screenshots; images ≤3.75 MB, PDFs ≤20 MB and text ≤100 KB go inline as content blocks (verified live: Claude Code accepts `image` and `document` blocks in streaming input), and anything bigger is saved under `~/.harv/workspace/attachments/<tab>/<id>/` for the Read tool. Next: M5 (safety gate). Web app only for now; the desktop app (M9) is deferred until the user asks.
 
 ## 1. Can Harv run on a Claude subscription? (research summary)
 
@@ -49,7 +49,7 @@ Harv/
     agent/          Agent SDK sessions (one per tab), router, safety gate
     metrics/        systeminformation, nvidia-smi, LibreHardwareMonitor collectors
     usage/          /usage polling + rate_limit_event tracking
-    store/          SQLite (better-sqlite3): tabs, chats, routing log, action log, settings
+    store/          SQLite (`node:sqlite`, built into Node): tabs, chats, routing log, action log, settings
   apps/web/         React + Vite + Tailwind: the Mission Control Glass UI
   apps/desktop/     Tauri 2 shell (M9)
   packages/shared/  WebSocket message types shared by server and web

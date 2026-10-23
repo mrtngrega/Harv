@@ -1,5 +1,6 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ChatServerMessage, EffortLevel } from '@harv/shared';
+import type { ContentBlockParam } from './attachments.ts';
 import { describeTool } from './guard.ts';
 import { buildOptions, SUBSCRIPTION_KEY_SOURCES } from './options.ts';
 import { AsyncQueue } from './queue.ts';
@@ -50,7 +51,7 @@ export class ChatSession {
     void this.consume();
   }
 
-  async send(text: string, model: string, effort: EffortLevel): Promise<void> {
+  async send(content: string | ContentBlockParam[], model: string, effort: EffortLevel): Promise<void> {
     if (model !== this.model) {
       await this.q.setModel(model);
       this.model = model;
@@ -61,7 +62,7 @@ export class ChatSession {
     }
     this.stopping = false;
     this.setBusy(true);
-    this.input.push({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null });
+    this.input.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });
   }
 
   async stop(): Promise<void> {

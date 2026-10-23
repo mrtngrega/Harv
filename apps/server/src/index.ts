@@ -2,7 +2,8 @@ import { createReadStream } from 'node:fs';
 import { join } from 'node:path';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
-import { HARV_VERSION, SERVER_PORT, type ClientMessage, type ServerMessage } from '@harv/shared';
+import { HARV_VERSION, MAX_ATTACHMENT_BYTES, SERVER_PORT, type ClientMessage, type ServerMessage } from '@harv/shared';
+import { isValidTab, saveAttachment } from './agent/attachments.ts';
 import { loadCatalog } from './agent/catalog.ts';
 import { ChatManager } from './agent/manager.ts';
 import { findBackground } from './background.ts';
@@ -22,6 +23,19 @@ if (removed.length > 0) {
   app.log.warn({ removed }, 'Removed API credentials from the environment: Harv is subscription-only');
 }
 
+// Only the dashboard itself may talk to Harv. A web page in any browser tab can
+// reach 127.0.0.1, so requests (and WebSocket upgrades) from other origins are refused.
+const ALLOWED_ORIGINS = new Set([
+  `http://127.0.0.1:${SERVER_PORT}`,
+  `http://localhost:${SERVER_PORT}`,
+  'http://127.0.0.1:5173',
+  'http://localhost:5173',
+]);
+app.addHook('onRequest', async (req, reply) => {
+  const origin = req.headers.origin;
+  if (origin && !ALLOWED_ORIGINS.has(origin)) return reply.code(403).send({ error: 'Forbidden origin' });
+});
+
 // Every connected dashboard window gets every update, so several windows stay in sync.
 const clients = new Set<(msg: ServerMessage) => void>();
 const broadcast = (msg: ServerMessage) => clients.forEach((send) => send(msg));
@@ -36,6 +50,17 @@ app.get('/api/background', async (_req, reply) => {
   const bg = findBackground();
   if (!bg) return reply.code(404).send({ error: 'No background set' });
   return reply.type(bg.contentType).header('Cache-Control', 'no-cache').send(createReadStream(bg.path));
+});
+
+// Attachments arrive as the raw file body: POST /api/attachments?tab=<tabId>&name=<file name>.
+app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer', bodyLimit: MAX_ATTACHMENT_BYTES }, (_req, body, done) =>
+  done(null, body),
+);
+app.post<{ Querystring: { tab?: string; name?: string } }>('/api/attachments', async (req, reply) => {
+  const { tab = '', name = '' } = req.query;
+  if (!isValidTab(tab) || !name || !Buffer.isBuffer(req.body))
+    return reply.code(400).send({ error: 'Expected ?tab=&name= and a file body' });
+  return saveAttachment(tab, name, req.body);
 });
 
 // Lets the dashboard retry starting the sensors (e.g. after the UAC prompt was declined).
@@ -72,7 +97,7 @@ app.get('/ws', { websocket: true }, (socket) => {
         send({ type: 'harv.status', status: chats.status });
         break;
       case 'chat.send':
-        void chats.send(msg.tabId, msg.text, msg.model, msg.effort);
+        void chats.send(msg.tabId, msg.text, msg.model, msg.effort, msg.attachments);
         break;
       case 'chat.stop':
         void chats.stop(msg.tabId);

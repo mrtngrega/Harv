@@ -85,4 +85,11 @@ describe('snippetAround', () => {
     expect(snip.endsWith('…')).toBe(true);
     expect(snip).toContain('needle');
   });
+
+  it('keeps the names of attached files with the line', () => {
+    const s = fresh();
+    s.ensureChat('a', 'Files');
+    s.addLine('a', { kind: 'you', text: 'look', files: ['shot.png', 'report.pdf'] });
+    expect(s.snapshot('a')!.lines).toEqual([{ kind: 'you', text: 'look', files: ['shot.png', 'report.pdf'] }]);
+  });
 });

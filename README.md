@@ -5,7 +5,7 @@
 **A personal, Jarvis-style AI assistant for your PC: a live dashboard, powered by Claude.**
 
 ![status](https://img.shields.io/badge/status-early%20build-A8C8E8?style=flat-square&labelColor=141B23)
-![milestone](https://img.shields.io/badge/milestone-M3%20of%20M9-9FE0C4?style=flat-square&labelColor=141B23)
+![milestone](https://img.shields.io/badge/milestone-M4%20of%20M9-9FE0C4?style=flat-square&labelColor=141B23)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-A8C8E8?style=flat-square&logo=typescript&logoColor=E8EDF2&labelColor=141B23)
 ![platform](https://img.shields.io/badge/platform-Windows%2011-A8C8E8?style=flat-square&labelColor=141B23)
 
@@ -65,7 +65,7 @@ flowchart LR
 - [x] **M1**: Live hardware panel
 - [x] **M2**: Chat with Claude (streaming, model and effort)
 - [x] **M3**: Tabs, persistent history, Harv's persona and memory
-- [ ] **M4**: File attachments
+- [x] **M4**: File attachments
 - [ ] **M5**: Safety gate, approvals, backups, stop button
 - [ ] **M6**: AUTO router
 - [ ] **M7**: Claude plan usage meter

@@ -1,4 +1,4 @@
-import type { ChatServerMessage, ChatSnapshot, EffortLevel, HistoryItem, LineKind, ModelChoice } from '@harv/shared';
+import type { Attachment, ChatServerMessage, ChatSnapshot, EffortLevel, HistoryItem, LineKind, ModelChoice } from '@harv/shared';
 import { createStore } from './createStore.ts';
 import { onServerMessage, sendMessage } from './socket.ts';
 
@@ -10,6 +10,8 @@ export interface Line {
   text: string;
   /** "sonnet·medium" on Harv's replies. */
   tag?: string;
+  /** Names of files attached to the user's message. */
+  files?: string[];
   streaming?: boolean;
 }
 
@@ -72,7 +74,13 @@ const fromSnapshot = (chat: ChatSnapshot): Tab => ({
   title: chat.title,
   busy: false,
   currentId: null,
-  lines: chat.lines.map((l) => ({ id: newId(), kind: l.kind, text: l.text, ...(l.tag ? { tag: l.tag } : {}) })),
+  lines: chat.lines.map((l) => ({
+    id: newId(),
+    kind: l.kind,
+    text: l.text,
+    ...(l.tag ? { tag: l.tag } : {}),
+    ...(l.files ? { files: l.files } : {}),
+  })),
 });
 
 /** Saved chats from the server replace ours; unsent blank tabs are kept. */
@@ -203,20 +211,22 @@ export const chat = {
     });
   },
 
-  send(text: string) {
-    let { activeId } = store.get();
-    if (!activeId) {
-      chat.newTab();
-      activeId = store.get().activeId!;
-    }
+  /** The active tab's id, opening a new tab when none is open. */
+  ensureTab(): string {
+    if (!store.get().activeId) chat.newTab();
+    return store.get().activeId!;
+  },
+
+  send(text: string, attachments: Attachment[] = []) {
+    const tabId = chat.ensureTab();
     const { model, effort } = store.get();
-    const tabId = activeId;
+    const files = attachments.map((a) => a.name);
     updateTab(tabId, (t) => ({
       ...t,
-      title: t.title === 'New chat' ? text.slice(0, 24) : t.title,
-      lines: [...t.lines, line('you', text)],
+      title: t.title === 'New chat' ? (text || files[0] || 'Attachment').slice(0, 24) : t.title,
+      lines: [...t.lines, line('you', text, files.length ? { files } : {})],
     }));
-    if (!sendMessage({ type: 'chat.send', tabId, text, model, effort })) {
+    if (!sendMessage({ type: 'chat.send', tabId, text, model, effort, ...(attachments.length ? { attachments } : {}) })) {
       updateTab(tabId, (t) => ({ ...t, lines: [...t.lines, line('error', 'Not connected to the Harv server.')] }));
     }
   },

@@ -94,6 +94,8 @@ Harv runs only on the user's Claude subscription, which reaches Claude through t
     - the `guard.ts` `PreToolUse` hook plus `canUseTool`
   - A session refuses to run if the init message's `apiKeySource` isn't `none`/`oauth` (a subscription login).
 - `apps/web/src`: `App.tsx` lays out Header, HistorySidebar, ChatPanel and StatsPanel. `lib/useHarvSocket.ts` is a module-level store over the single WebSocket: `useConnection()` and `useMetrics()` via `useSyncExternalStore`, so 1 s ticks only re-render what reads metrics. `components/stats/` holds the expanded panel's cards.
+- `apps/server/src/agent/attachments.ts`: `POST /api/attachments?tab=&name=` (raw `application/octet-stream` body, 32 MB max) saves to `~/.harv/workspace/attachments/<tab>/<id>/<name>`. `buildContent` inlines small images, PDFs and text, and lists every saved path for Read. Deleting a chat deletes its folder.
+- `index.ts` refuses any request whose `Origin` isn't the dashboard (any web page can reach 127.0.0.1, including the `/ws` upgrade).
 - `apps/server/src/store/chats.ts` keeps chat history in `~/.harv/harv.db` (`node:sqlite`, so there's no native dependency).
   - `ChatManager` writes every finished line through its `emit` wrapper. Deltas aren't stored.
   - It also stores the Claude `session_id` per chat. Reopening or restarting creates the session with `resume`, and if that fails, `onResumeFailed` starts it fresh.

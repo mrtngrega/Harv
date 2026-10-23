@@ -1,7 +1,40 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { Attachment } from '@harv/shared';
+import { formatSize, uploadAttachment } from '../lib/attachments.ts';
 import { chat, useChat, type Line } from '../lib/chatStore.ts';
+
+/** A file attached to the draft: uploading, ready to send, or failed. */
+interface Pending {
+  key: string;
+  name: string;
+  size: number;
+  file?: Attachment;
+  error?: string;
+}
+
+function FileChip({ name, detail, onRemove }: { name: string; detail?: string; onRemove?: () => void }) {
+  return (
+    <span className="inline-flex max-w-[260px] items-center gap-1.5 rounded-md border border-[rgb(220_232_245/0.2)] bg-white/5 py-0.5 pr-1 pl-2 text-[11px]">
+      <span aria-hidden="true" className="text-accent">
+        ▤
+      </span>
+      <span className="truncate text-ink">{name}</span>
+      {detail && <span className="flex-none text-faint">{detail}</span>}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove ${name}`}
+          className="size-6 flex-none cursor-pointer rounded text-muted hover:bg-white/10"
+        >
+          ×
+        </button>
+      )}
+    </span>
+  );
+}
 
 function Thinking() {
   return (
@@ -19,6 +52,13 @@ function ChatLine({ line }: { line: Line }) {
       return (
         <div className="animate-fade-in whitespace-pre-wrap">
           <span className="text-accent">you ›</span> {line.text}
+          {line.files && (
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {line.files.map((name, i) => (
+                <FileChip key={i} name={name} />
+              ))}
+            </div>
+          )}
         </div>
       );
     case 'harv':
@@ -48,8 +88,35 @@ function ChatLine({ line }: { line: Line }) {
 export function ChatPanel() {
   const { tabs, activeId } = useChat();
   const [draft, setDraft] = useState('');
+  // Draft attachments per tab: each upload lands in that tab's folder on the server.
+  const [pendingByTab, setPendingByTab] = useState<Record<string, Pending[]>>({});
+  const [dragging, setDragging] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const active = tabs.find((t) => t.id === activeId) ?? null;
+  const pending = (activeId && pendingByTab[activeId]) || [];
+  const uploading = pending.some((p) => !p.file && !p.error);
+
+  const updatePending = (tabId: string, fn: (list: Pending[]) => Pending[]) =>
+    setPendingByTab((all) => ({ ...all, [tabId]: fn(all[tabId] ?? []) }));
+
+  const attach = (files: Iterable<File>) => {
+    const tabId = chat.ensureTab();
+    for (const file of files) {
+      const key = crypto.randomUUID();
+      updatePending(tabId, (list) => [...list, { key, name: file.name || 'pasted-image.png', size: file.size }]);
+      uploadAttachment(tabId, file).then(
+        (uploaded) => updatePending(tabId, (list) => list.map((p) => (p.key === key ? { ...p, file: uploaded } : p))),
+        (err: Error) => updatePending(tabId, (list) => list.map((p) => (p.key === key ? { ...p, error: err.message } : p))),
+      );
+    }
+  };
+
+  const onDrop = (e: DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    if (e.dataTransfer.files.length) attach(e.dataTransfer.files);
+  };
 
   // Keep the newest output in view while Harv streams.
   const lastText = active?.lines.at(-1)?.text;
@@ -61,15 +128,26 @@ export function ChatPanel() {
   const send = (e: FormEvent) => {
     e.preventDefault();
     const text = draft.trim();
-    if (!text || active?.busy) return;
-    chat.send(text);
+    const ready = pending.flatMap((p) => (p.file ? [p.file] : []));
+    if ((!text && ready.length === 0) || active?.busy || uploading) return;
+    chat.send(text, ready);
     setDraft('');
+    if (activeId) updatePending(activeId, () => []);
   };
 
   return (
     <section
       aria-label="Chat"
-      className="glass flex max-h-[calc(100vh-110px)] min-w-0 flex-[999_1_520px] flex-col overflow-hidden rounded-2xl"
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={onDrop}
+      className="glass relative flex max-h-[calc(100vh-110px)] min-w-0 flex-[999_1_520px] flex-col overflow-hidden rounded-2xl"
     >
       <div role="tablist" aria-label="Open chats" className="flex items-end gap-1 overflow-x-auto border-b border-line px-2 pt-2">
         {tabs.map((t) => {
@@ -115,6 +193,25 @@ export function ChatPanel() {
         )}
       </div>
 
+      {dragging && (
+        <div className="pointer-events-none absolute inset-2 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-[rgb(10_16_24/0.7)] text-accent">
+          drop files to attach
+        </div>
+      )}
+
+      {pending.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 border-t border-line px-5 pt-2.5">
+          {pending.map((p) => (
+            <FileChip
+              key={p.key}
+              name={p.name}
+              detail={p.error ? `! ${p.error}` : p.file ? formatSize(p.size) : 'uploading…'}
+              onRemove={() => activeId && updatePending(activeId, (list) => list.filter((x) => x.key !== p.key))}
+            />
+          ))}
+        </div>
+      )}
+
       <form onSubmit={send} className="flex items-center gap-2.5 border-t border-line py-2.5 pr-3 pl-5">
         <label htmlFor="harv-cmd" className="font-semibold text-accent">
           harv&gt;
@@ -125,14 +222,30 @@ export function ChatPanel() {
           autoComplete="off"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          onPaste={(e) => {
+            // Pasted screenshots arrive as files.
+            if (e.clipboardData.files.length === 0) return;
+            e.preventDefault();
+            attach(e.clipboardData.files);
+          }}
           placeholder="ask anything · read a file · search the web"
           className="min-h-11 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
         />
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files) attach(e.target.files);
+            e.target.value = '';
+          }}
+        />
         <button
           type="button"
-          disabled
-          title="File attachments arrive in M4"
-          className="min-h-11 cursor-not-allowed rounded-[10px] border border-[rgb(220_232_245/0.2)] bg-white/5 px-3.5 text-xs opacity-60"
+          onClick={() => fileInputRef.current?.click()}
+          title="Attach files (or drop them on the chat, or paste a screenshot)"
+          className="min-h-11 cursor-pointer rounded-[10px] border border-[rgb(220_232_245/0.2)] bg-white/5 px-3.5 text-xs hover:bg-white/10"
         >
           + ATTACH
         </button>
@@ -145,7 +258,11 @@ export function ChatPanel() {
             STOP ■
           </button>
         ) : (
-          <button type="submit" className="min-h-11 cursor-pointer rounded-[10px] bg-accent px-4 text-xs font-semibold text-[#0f1620]">
+          <button
+            type="submit"
+            disabled={uploading}
+            className="min-h-11 cursor-pointer rounded-[10px] bg-accent px-4 text-xs font-semibold text-[#0f1620] disabled:cursor-wait disabled:opacity-60"
+          >
             RUN ⏎
           </button>
         )}

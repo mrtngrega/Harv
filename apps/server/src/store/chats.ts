@@ -18,6 +18,7 @@ const SCHEMA = `
     kind       TEXT NOT NULL,
     text       TEXT NOT NULL,
     tag        TEXT,
+    files      TEXT,
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS lines_by_chat ON lines(chat_id, id);
@@ -43,6 +44,9 @@ export class ChatStore {
   constructor(path: string) {
     this.db = new DatabaseSync(path);
     this.db.exec(SCHEMA);
+    // Databases from before M4 lack the attachments column.
+    const columns = this.db.prepare('PRAGMA table_info(lines)').all() as { name: string }[];
+    if (!columns.some((c) => c.name === 'files')) this.db.exec('ALTER TABLE lines ADD COLUMN files TEXT');
   }
 
   close(): void {
@@ -78,8 +82,8 @@ export class ChatStore {
   addLine(chatId: string, line: StoredLine): void {
     const now = Date.now();
     this.db
-      .prepare('INSERT INTO lines (chat_id, kind, text, tag, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(chatId, line.kind, line.text, line.tag ?? null, now);
+      .prepare('INSERT INTO lines (chat_id, kind, text, tag, files, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(chatId, line.kind, line.text, line.tag ?? null, line.files?.length ? JSON.stringify(line.files) : null, now);
     this.db.prepare('UPDATE chats SET updated_at = ? WHERE id = ?').run(now, chatId);
   }
 
@@ -87,9 +91,17 @@ export class ChatStore {
     const chat = this.db.prepare('SELECT id, title FROM chats WHERE id = ?').get(id) as { id: string; title: string } | undefined;
     if (!chat) return null;
     const rows = this.db
-      .prepare('SELECT kind, text, tag FROM (SELECT * FROM lines WHERE chat_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id')
-      .all(id, RESTORE_LINES) as { kind: LineKind; text: string; tag: string | null }[];
-    return { ...chat, lines: rows.map((r) => ({ kind: r.kind, text: r.text, ...(r.tag ? { tag: r.tag } : {}) })) };
+      .prepare('SELECT kind, text, tag, files FROM (SELECT * FROM lines WHERE chat_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id')
+      .all(id, RESTORE_LINES) as { kind: LineKind; text: string; tag: string | null; files: string | null }[];
+    return {
+      ...chat,
+      lines: rows.map((r) => ({
+        kind: r.kind,
+        text: r.text,
+        ...(r.tag ? { tag: r.tag } : {}),
+        ...(r.files ? { files: JSON.parse(r.files) as string[] } : {}),
+      })),
+    };
   }
 
   openChats(): ChatSnapshot[] {

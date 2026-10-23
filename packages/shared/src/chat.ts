@@ -37,7 +37,20 @@ export interface StoredLine {
   text: string;
   /** "sonnet·medium" on Harv's replies. */
   tag?: string;
+  /** Names of the files attached to the user's message. */
+  files?: string[];
 }
+
+/** A file uploaded with POST /api/attachments, waiting to be sent with a message. */
+export interface Attachment {
+  id: string;
+  name: string;
+  size: number;
+  mime: string;
+}
+
+/** Largest file the dashboard accepts. */
+export const MAX_ATTACHMENT_BYTES = 32 * 1024 * 1024;
 
 /** An open chat tab with its saved lines (sent on connect and when reopening from history). */
 export interface ChatSnapshot {
@@ -56,7 +69,7 @@ export interface HistoryItem {
 }
 
 export type ChatClientMessage =
-  | { type: 'chat.send'; tabId: string; text: string; model: ModelChoice; effort: EffortLevel }
+  | { type: 'chat.send'; tabId: string; text: string; model: ModelChoice; effort: EffortLevel; attachments?: Attachment[] }
   | { type: 'chat.stop'; tabId: string }
   | { type: 'chat.close'; tabId: string }
   /** Reopen a chat from history as a tab. */
