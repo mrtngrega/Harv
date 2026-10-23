@@ -31,6 +31,16 @@ export function describeTool(name: string, input: Record<string, unknown>, chatT
       const title = chatTitle?.(pick('id'));
       return title ? `"${title}"` : pick('id').slice(0, 8);
     }
+    case 'mcp__harv__browser_open':
+      return pick('url');
+    case 'mcp__harv__browser_click':
+      return `[${String(input.ref ?? '')}]`;
+    case 'mcp__harv__browser_type':
+      return `[${String(input.ref ?? '')}] "${pick('text').slice(0, 40)}"${input.submit === true ? ' ⏎' : ''}`;
+    case 'mcp__harv__browser_press':
+      return pick('key');
+    case 'mcp__harv__browser_scroll':
+      return pick('direction');
     case 'mcp__harv__hand_off': {
       const to = pick('to');
       const target = to

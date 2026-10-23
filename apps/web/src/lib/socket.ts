@@ -9,8 +9,10 @@ const connectionListeners = new Set<ConnectionListener>();
 let socket: WebSocket | null = null;
 let started = false;
 
-export function onServerMessage(listener: MessageListener): void {
+/** Returns a function that stops listening (components unsubscribe when they unmount). */
+export function onServerMessage(listener: MessageListener): () => void {
   messageListeners.add(listener);
+  return () => messageListeners.delete(listener);
 }
 
 export function onConnectionChange(listener: ConnectionListener): void {

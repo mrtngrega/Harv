@@ -7,6 +7,8 @@ import type {
   HistoryItem,
   LineKind,
   ModelChoice,
+  ToolKind,
+  ToolTab,
 } from '@harv/shared';
 import { createStore } from './createStore.ts';
 import { onServerMessage, sendMessage } from './socket.ts';
@@ -52,6 +54,8 @@ export interface ChatState {
   activeId: string | null;
   /** The Settings tab is in the tab bar. */
   settingsOpen: boolean;
+  /** Terminal, files and browser tabs (the server's list). */
+  tools: ToolTab[];
   model: ModelChoice;
   effort: EffortLevel;
   /** What AUTO ran last, e.g. "Sonnet 5.5 · medium". */
@@ -84,7 +88,14 @@ function saveSelection(model: ModelChoice, effort: EffortLevel) {
 }
 
 const first = blankTab();
-const store = createStore<ChatState>({ tabs: [first], activeId: first.id, settingsOpen: false, ...loadSelection(), routed: null });
+const store = createStore<ChatState>({
+  tabs: [first],
+  activeId: first.id,
+  settingsOpen: false,
+  tools: [],
+  ...loadSelection(),
+  routed: null,
+});
 
 export const useChat = store.use;
 export const getChatState = store.get;
@@ -122,7 +133,7 @@ function hydrate(chats: ChatSnapshot[]) {
     const blanks = s.tabs.filter((t) => t.lines.length === 0 && t.id !== first.id && !saved.some((c) => c.id === t.id));
     const tabs = [...saved, ...blanks];
     if (tabs.length === 0) tabs.push(s.tabs.find((t) => t.id === first.id) ?? blankTab());
-    const keep = s.activeId === SETTINGS_TAB || tabs.some((t) => t.id === s.activeId);
+    const keep = s.activeId === SETTINGS_TAB || tabs.some((t) => t.id === s.activeId) || s.tools.some((t) => t.id === s.activeId);
     const activeId = keep ? s.activeId : tabs.at(-1)!.id;
     return { ...s, tabs, activeId };
   });
@@ -228,9 +239,16 @@ export function applyChatEvent(msg: ChatServerMessage): void {
 
 onServerMessage((msg) => {
   if (msg.type === 'hello') {
+    store.set((s) => ({ ...s, tools: msg.tools }));
     hydrate(msg.chats);
     history.set({ items: msg.history, query: '' });
     if (history.get().query) sendMessage({ type: 'history.search', query: history.get().query });
+  } else if (msg.type === 'tools') {
+    // The server's list wins; a closed tool tab that was showing gives way to the last chat.
+    store.set((s) => {
+      const gone = !msg.tabs.some((t) => t.id === s.activeId) && s.tools.some((t) => t.id === s.activeId);
+      return { ...s, tools: msg.tabs, activeId: gone ? (s.tabs.at(-1)?.id ?? null) : s.activeId };
+    });
   } else if (msg.type.startsWith('chat.') || msg.type === 'history') {
     applyChatEvent(msg as ChatServerMessage);
   }
@@ -259,6 +277,23 @@ export const chat = {
       const activeId = s.activeId === id ? (tabs.at(-1)?.id ?? (s.settingsOpen ? SETTINGS_TAB : null)) : s.activeId;
       return { ...s, tabs, activeId };
     });
+  },
+
+  /** Opens a terminal, files or browser tab and switches to it. */
+  openTool(kind: ToolKind) {
+    const id = newId();
+    const title = { terminal: 'PowerShell', files: 'Files', browser: 'Browser' }[kind];
+    store.set((s) => ({ ...s, tools: [...s.tools, { id, kind, title }], activeId: id }));
+    sendMessage({ type: 'tool.open', id, kind });
+  },
+
+  closeTool(id: string) {
+    sendMessage({ type: 'tool.close', id });
+    store.set((s) => ({
+      ...s,
+      tools: s.tools.filter((t) => t.id !== id),
+      activeId: s.activeId === id ? (s.tabs.at(-1)?.id ?? null) : s.activeId,
+    }));
   },
 
   /** Opens Settings as a tab in the chat bar (or switches to it). */

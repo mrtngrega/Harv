@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { Attachment } from '@harv/shared';
 import { formatSize, uploadAttachment } from '../lib/attachments.ts';
 import { lineTime, resetTime, tokens } from '../lib/format.ts';
 import { HELP, parseCommand } from '../lib/commands.ts';
@@ -10,15 +9,11 @@ import { chat, getChatState, SETTINGS_TAB, useChat, type Line } from '../lib/cha
 import { useSafety } from '../lib/safetyStore.ts';
 import { ActionBadge, ApprovalCard } from './ApprovalCard.tsx';
 import { SettingsView } from './SettingsView.tsx';
-
-/** A file attached to the draft: uploading, ready to send, or failed. */
-interface Pending {
-  key: string;
-  name: string;
-  size: number;
-  file?: Attachment;
-  error?: string;
-}
+import { FilesView } from './tools/FilesView.tsx';
+import { BrowserView } from './tools/BrowserView.tsx';
+import { NewTabMenu, SpecialTab, TOOL_ICONS } from './tools/TabParts.tsx';
+import { TerminalView } from './tools/TerminalView.tsx';
+import { updatePending, useDrafts } from '../lib/drafts.ts';
 
 function FileChip({ name, detail, onRemove }: { name: string; detail?: string; onRemove?: () => void }) {
   return (
@@ -139,13 +134,15 @@ function ToolLine({ line }: { line: Line }) {
 }
 
 export function ChatPanel() {
-  const { tabs, activeId, settingsOpen } = useChat();
+  const { tabs, activeId, settingsOpen, tools } = useChat();
   const inSettings = activeId === SETTINGS_TAB;
+  const activeTool = tools.find((t) => t.id === activeId);
+  /** Settings or a tool tab is showing: no chat input or attachments. */
+  const nonChat = inSettings || !!activeTool;
   const { approvals } = useSafety();
   const usage = useUsage();
   const [draft, setDraft] = useState('');
-  // Draft attachments per tab: each upload lands in that tab's folder on the server.
-  const [pendingByTab, setPendingByTab] = useState<Record<string, Pending[]>>({});
+  const pendingByTab = useDrafts();
   const [dragging, setDragging] = useState(false);
   /** The tab whose name is being edited (right-click or F2 on it). */
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -169,9 +166,6 @@ export function ChatPanel() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [active?.busy, active?.id]);
-
-  const updatePending = (tabId: string, fn: (list: Pending[]) => Pending[]) =>
-    setPendingByTab((all) => ({ ...all, [tabId]: fn(all[tabId] ?? []) }));
 
   const attach = (files: Iterable<File>) => {
     const tabId = chat.ensureTab();
@@ -303,37 +297,26 @@ export function ChatPanel() {
             </div>
           );
         })}
+        {tools.map((t) => (
+          <SpecialTab
+            key={t.id}
+            icon={TOOL_ICONS[t.kind]}
+            title={t.title}
+            active={t.id === activeId}
+            onSelect={() => chat.setActive(t.id)}
+            onClose={() => chat.closeTool(t.id)}
+          />
+        ))}
         {settingsOpen && (
-          <div
-            className={`animate-fade-in flex items-center gap-0.5 rounded-t-[10px] border border-b-0 ${
-              inSettings ? 'border-[rgb(220_232_245/0.18)] bg-white/10' : 'border-transparent'
-            }`}
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={inSettings}
-              onClick={chat.openSettings}
-              className={`flex min-h-9 cursor-pointer items-center gap-1.5 pr-1 pl-3 text-xs whitespace-nowrap ${inSettings ? 'text-ink' : 'text-muted'}`}
-            >
-              <span aria-hidden="true" className="text-accent">
-                ⚙
-              </span>
-              Settings
-            </button>
-            <button
-              type="button"
-              onClick={chat.closeSettings}
-              aria-label="Close settings"
-              className="mr-1 size-7 cursor-pointer rounded-md text-[13px] text-muted hover:bg-white/10"
-            >
-              ×
-            </button>
-          </div>
+          <SpecialTab
+            icon={TOOL_ICONS.settings}
+            title="Settings"
+            active={inSettings}
+            onSelect={chat.openSettings}
+            onClose={chat.closeSettings}
+          />
         )}
-        <button type="button" onClick={chat.newTab} aria-label="New chat" className="size-9 cursor-pointer text-base hover:text-accent">
-          +
-        </button>
+        <NewTabMenu />
         <div className="flex-1" />
         {active?.context && (
           <div className="px-2 pb-2.5 text-[11px] whitespace-nowrap text-muted" title="Tokens Harv sent with the last message in this chat">
@@ -346,6 +329,12 @@ export function ChatPanel() {
         <div className="flex flex-1 flex-col overflow-y-auto px-5 py-4">
           <SettingsView />
         </div>
+      ) : activeTool?.kind === 'terminal' ? (
+        <TerminalView key={activeTool.id} id={activeTool.id} />
+      ) : activeTool?.kind === 'files' ? (
+        <FilesView key={activeTool.id} id={activeTool.id} />
+      ) : activeTool?.kind === 'browser' ? (
+        <BrowserView key={activeTool.id} id={activeTool.id} />
       ) : (
         <div ref={logRef} className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-4 leading-relaxed">
           {!active || active.lines.length === 0 ? (
@@ -369,7 +358,7 @@ export function ChatPanel() {
         </div>
       )}
 
-      {!inSettings && pending.length > 0 && (
+      {!nonChat && pending.length > 0 && (
         <div className="flex flex-wrap gap-1.5 border-t border-line px-5 pt-2.5">
           {pending.map((p) => (
             <FileChip
@@ -382,7 +371,7 @@ export function ChatPanel() {
         </div>
       )}
 
-      {!inSettings && usage?.pausedUntil && (
+      {!nonChat && usage?.pausedUntil && (
         <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 pt-2 text-xs text-warn">
           <span>
             Claude Pro limit reached: messages queue until {resetTime(usage.pausedUntil)}
@@ -400,7 +389,7 @@ export function ChatPanel() {
         </div>
       )}
 
-      {!inSettings && (
+      {!nonChat && (
         <form onSubmit={send} className="flex items-center gap-2.5 border-t border-line py-2.5 pr-3 pl-5">
           <label htmlFor="harv-cmd" className="font-semibold text-accent">
             harv&gt;

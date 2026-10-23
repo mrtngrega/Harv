@@ -1,5 +1,6 @@
-import { createReadStream } from 'node:fs';
-import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { createReadStream, readFileSync, statSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import { HARV_VERSION, MAX_ATTACHMENT_BYTES, SERVER_PORT, type ClientMessage, type ServerMessage } from '@harv/shared';
@@ -18,6 +19,11 @@ import { ChatStore } from './store/chats.ts';
 import { RouteStore } from './store/routes.ts';
 import { UsageMeter } from './usage/meter.ts';
 import { loadSettings, updateSettings } from './settings.ts';
+import { cleanPath, listFolder, openWithDefault, places, previewType } from './tools/files.ts';
+import { BrowserManager, findChrome, isWebUrl } from './tools/browser.ts';
+import { wireHarvBrowser } from './tools/harvBrowser.ts';
+import { ToolRegistry } from './tools/registry.ts';
+import { TerminalManager } from './tools/terminal.ts';
 
 const removed = stripBilledCredentials();
 ensureHarvHome();
@@ -40,6 +46,9 @@ const ALLOWED_ORIGINS = new Set([
 app.addHook('onRequest', async (req, reply) => {
   const origin = req.headers.origin;
   if (origin && !ALLOWED_ORIGINS.has(origin)) return reply.code(403).send({ error: 'Forbidden origin' });
+  // A plain <img> or link from another site sends no Origin, but browsers mark it. Only the dashboard itself may read files.
+  const site = req.headers['sec-fetch-site'];
+  if (site && site !== 'same-origin' && site !== 'none') return reply.code(403).send({ error: 'Forbidden' });
 });
 
 // Every connected dashboard window gets every update, so several windows stay in sync.
@@ -66,6 +75,29 @@ const meter = new UsageMeter(
   },
   () => routes.summary(),
 );
+// Terminal, files and browser tabs in the chat bar.
+const terminals = new TerminalManager({
+  data: (id, data) => broadcast({ type: 'term.data', id, data }),
+  exit: (id, code) => broadcast({ type: 'term.exit', id, code }),
+});
+const browser = new BrowserManager({
+  frame: (id, data, width, height) => broadcast({ type: 'browser.frame', id, data, width, height }),
+  state: (id, state) => {
+    broadcast({ type: 'browser.state', id, state });
+    // The tab is named after the page it shows.
+    if (state.title) tools.rename(id, state.title.length > 28 ? `${state.title.slice(0, 27)}…` : state.title);
+  },
+  error: (id, message) => broadcast({ type: 'browser.error', id, message }),
+});
+const tools = new ToolRegistry(
+  {
+    terminal: { open: (id) => terminals.open(id), close: (id) => terminals.close(id) },
+    browser: { open: (id) => browser.open(id), close: (id) => browser.close(id) },
+  },
+  (tabs) => broadcast({ type: 'tools', tabs }),
+);
+wireHarvBrowser(browser, tools);
+
 const router = new Router(
   routes,
   undefined,
@@ -110,6 +142,63 @@ app.delete('/api/background', async () => {
   return { ok: true };
 });
 
+// The file explorer tab: listings, previews, opening with the default app, and attaching to a chat.
+app.get('/api/files/places', async () => places());
+app.get<{ Querystring: { path?: string } }>('/api/files/list', async (req, reply) => {
+  const path = cleanPath(req.query.path);
+  if (!path) return reply.code(400).send({ error: 'Expected an absolute path like C:\\Users' });
+  try {
+    return listFolder(path);
+  } catch (err) {
+    return reply
+      .code(404)
+      .send({ error: (err as NodeJS.ErrnoException).code === 'EPERM' ? 'No permission to open this folder' : 'Folder not found' });
+  }
+});
+app.get<{ Querystring: { path?: string } }>('/api/files/raw', async (req, reply) => {
+  const path = cleanPath(req.query.path);
+  if (!path) return reply.code(400).send({ error: 'Bad path' });
+  try {
+    if (!statSync(path).isFile()) return reply.code(400).send({ error: 'Not a file' });
+  } catch {
+    return reply.code(404).send({ error: 'File not found' });
+  }
+  // Anything that isn't an image, PDF or media file is plain text: no sniffing, and a sandbox in case
+  // the browser renders it anyway. (Chrome's PDF viewer won't run in a sandbox, so PDFs skip it.)
+  const preview = previewType(path);
+  reply.type(preview.mime).header('X-Content-Type-Options', 'nosniff').header('Cache-Control', 'no-store');
+  if (preview.kind === 'text') reply.header('Content-Security-Policy', "sandbox; default-src 'none'");
+  return reply.send(createReadStream(path));
+});
+app.post<{ Body: { path?: string; reveal?: boolean } }>('/api/files/open', async (req, reply) => {
+  const path = cleanPath(req.body?.path);
+  if (!path) return reply.code(400).send({ error: 'Bad path' });
+  openWithDefault(path, req.body?.reveal === true);
+  return { ok: true };
+});
+app.post<{ Body: { path?: string; tab?: string } }>('/api/files/attach', async (req, reply) => {
+  const path = cleanPath(req.body?.path);
+  const tab = req.body?.tab ?? '';
+  if (!path || !isValidTab(tab)) return reply.code(400).send({ error: 'Bad path or tab' });
+  try {
+    const st = statSync(path);
+    if (!st.isFile()) return reply.code(400).send({ error: 'Not a file' });
+    if (st.size > MAX_ATTACHMENT_BYTES) return reply.code(413).send({ error: 'Bigger than 32 MB' });
+    return saveAttachment(tab, basename(path), readFileSync(path));
+  } catch {
+    return reply.code(404).send({ error: 'File not found' });
+  }
+});
+
+// "Open in Chrome": the browser tab's page in the user's own Chrome, with their normal profile.
+app.post<{ Body: { url?: string } }>('/api/browser/external', async (req, reply) => {
+  const url = String(req.body?.url ?? '');
+  const chrome = findChrome();
+  if (!isWebUrl(url) || !chrome) return reply.code(400).send({ error: chrome ? 'Only web pages' : 'Chrome isn’t installed' });
+  spawn(chrome, [url], { detached: true, stdio: 'ignore' }).unref();
+  return { ok: true };
+});
+
 // Lets the dashboard retry starting the sensors (e.g. after the UAC prompt was declined).
 app.post('/api/sensors/start', async () => ({ result: await ensureLhmRunning() }));
 
@@ -129,6 +218,7 @@ app.get('/ws', { websocket: true }, (socket) => {
     usage: meter.snapshot(),
     settings: loadSettings(),
     background: backgroundVersion(),
+    tools: tools.list(),
   });
 
   const unsubscribe = metrics.onSnapshot((snapshot) => send({ type: 'metrics.tick', metrics: snapshot }));
@@ -175,6 +265,39 @@ app.get('/ws', { websocket: true }, (socket) => {
       case 'action.undo':
         gate.undo(msg.id);
         break;
+      case 'tool.open':
+        tools.open(msg.id, msg.kind).catch((err: Error) => {
+          app.log.error({ err: err.message }, 'Could not open tool tab');
+          if (msg.kind === 'browser') send({ type: 'browser.error', id: msg.id, message: err.message });
+        });
+        break;
+      case 'tool.close':
+        tools.close(msg.id);
+        break;
+      case 'term.attach':
+        if (tools.has(msg.id, 'terminal')) send({ type: 'term.data', id: msg.id, data: terminals.replay(msg.id) ?? '', reset: true });
+        break;
+      case 'term.input':
+        if (typeof msg.data === 'string') terminals.input(msg.id, msg.data);
+        break;
+      case 'term.resize':
+        terminals.resize(msg.id, msg.cols, msg.rows);
+        break;
+      case 'browser.navigate':
+        void browser.navigate(msg.id, String(msg.url ?? ''));
+        break;
+      case 'browser.nav':
+        void browser.nav(msg.id, msg.action);
+        break;
+      case 'browser.input':
+        void browser.input(msg.id, msg.input);
+        break;
+      case 'browser.resize':
+        void browser.resize(msg.id, msg.width, msg.height);
+        break;
+      case 'browser.watch':
+        void browser.watch(msg.id, msg.on);
+        break;
       case 'settings.update':
         broadcast({ type: 'settings', settings: updateSettings(msg.patch) });
         break;
@@ -188,6 +311,8 @@ app.get('/ws', { websocket: true }, (socket) => {
 app.addHook('onClose', async () => {
   metrics.stop();
   meter.stop();
+  terminals.closeAll();
+  await browser.shutdown();
   chats.closeAll();
   store.close();
   actions.close();

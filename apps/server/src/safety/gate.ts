@@ -5,6 +5,8 @@ import type { ActionStore } from '../store/actions.ts';
 import { createBackup, readBackup, restoreBackup, type Backup } from './backup.ts';
 import { classify, FILE_WRITE_TOOLS, SHELL_TOOLS, type Verdict } from './classify.ts';
 import { loadSettings } from './paths.ts';
+import { BROWSER_TOOLS } from './browser.ts';
+import { browserRefs } from '../tools/browserRefs.ts';
 
 // Every tool call passes through here (Agent SDK hooks, so it can't be skipped):
 //   green   → run
@@ -34,6 +36,13 @@ function describeSize(path: string): string {
 /** Exactly what a red action will touch, for the approval card. */
 function buildPreview(tool: string, input: Record<string, unknown>, verdict: Verdict): string {
   const lines: string[] = [];
+  if (BROWSER_TOOLS.includes(tool)) {
+    // A web action: what it does and where, with what Harv would type.
+    lines.push(verdict.summary);
+    if (typeof input.text === 'string') lines.push(`text: "${input.text.slice(0, 300)}"${input.submit === true ? ' then Enter' : ''}`);
+    lines.push('', `Page: ${browserRefs.url || 'unknown'}`, 'You can watch it happen in the browser tab.');
+    return lines.join('\n');
+  }
   if (SHELL_TOOLS.includes(tool)) {
     lines.push(`${tool === 'PowerShell' ? 'PS>' : '$'} ${String(input.command ?? '')}`);
   } else if (tool === 'Write') {
@@ -122,7 +131,8 @@ export class SafetyGate {
     const backedUp = backup?.entries.filter((e) => e.copy).map((e) => e.original) ?? [];
     const notes: string[] = [];
     if (backup?.skipped.length) notes.push(`Too big to back up: ${backup.skipped.join(', ')}.`);
-    if (backedUp.length === 0) notes.push('Nothing to back up was found, so Undo won’t be available for this one.');
+    if (BROWSER_TOOLS.includes(tool)) notes.push('Things done on a website can’t be undone from Harv.');
+    else if (backedUp.length === 0) notes.push('Nothing to back up was found, so Undo won’t be available for this one.');
     const approval: ApprovalRequest = {
       id,
       tabId,

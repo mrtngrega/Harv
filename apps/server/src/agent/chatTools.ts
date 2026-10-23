@@ -2,6 +2,7 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import type { HistoryItem, StoredLine } from '@harv/shared';
 import { z } from 'zod';
 import type { ChatStore } from '../store/chats.ts';
+import { browserTools } from './browserTools.ts';
 import { memoryTools, text } from './memory.ts';
 
 // Every chat tab is its own Claude session, but they share one history. These
@@ -74,6 +75,7 @@ export function harvServer(store: ChatStore, tabId: string, delegate?: Delegate)
     version: '1.0.0',
     tools: [
       ...memoryTools,
+      ...browserTools,
       tool(
         'list_chats',
         "List your chats with the user (open tabs and past ones), newest first. Pass a query to search titles and messages. Use it when the user refers to another chat or something you talked about before that isn't in this conversation.",

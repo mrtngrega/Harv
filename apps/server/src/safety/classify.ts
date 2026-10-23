@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Tier } from '@harv/shared';
+import { BROWSER_TOOLS, classifyBrowser } from './browser.ts';
 import { isHarvData, isInside, isProgramDir, isWindowsDir, loadSettings, toWindowsPath, WORKSPACE } from './paths.ts';
 
 // Sorts every tool call into green / yellow / red / blocked (CLAUDE.md "Harv's
@@ -52,6 +53,10 @@ export function isSensitivePath(p: string): boolean {
 
 export function classify(tool: string, input: Record<string, unknown>): Verdict {
   if (HARV_TOOLS.includes(tool)) return verdict('green', "Harv's own memory and chat tools.", tool.replace('mcp__harv__', ''));
+  if (BROWSER_TOOLS.includes(tool)) {
+    const v = classifyBrowser(tool, input);
+    return verdict(v.tier, v.reason, v.summary);
+  }
 
   if (READ_TOOLS.includes(tool)) {
     const paths = ['file_path', 'path', 'pattern', 'glob'].map((k) => str(input, k)).filter(Boolean);
