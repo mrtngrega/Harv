@@ -145,6 +145,8 @@ export type ChatServerMessage =
   /** A finished line added by the server (a hand-off's request), appended as is. */
   | { type: 'chat.line'; tabId: string; line: StoredLine }
   | { type: 'chat.removed'; tabId: string }
+  /** /clear ran: the tab empties, like Claude Code's screen (the chat stays in history, empty). */
+  | { type: 'chat.cleared'; tabId: string }
   /** A chat's title changed (named automatically, or by the user). */
   | { type: 'chat.renamed'; tabId: string; title: string }
   /** The messages waiting in a chat for its turn to end (the whole list, replacing the last one). */

@@ -432,6 +432,27 @@ describe('slash commands', () => {
     expect(session.sent.at(-1)).toEqual({ content: '/compact keep the plan', model: 'haiku', effort: 'low', raw: true });
   });
 
+  it('/clear empties the tab and its saved lines once it worked (the user’s wish)', async () => {
+    const { chats, sent } = setup();
+    chats.catalog = { plan: 'Claude Pro', models: [], commands: [{ name: 'clear', description: '', argumentHint: '' }] };
+    await chats.send('c', 'hello', 'haiku', 'low');
+    const session = FakeSession.all.get('c')!;
+    session.reply('Hi!');
+    session.finish();
+    await chats.send('c', '/clear', 'auto', 'medium');
+    expect(sent.some((m) => m.type === 'chat.cleared')).toBe(false);
+    session.finish();
+    expect(sent.filter((m) => m.type === 'chat.cleared')).toEqual([{ type: 'chat.cleared', tabId: 'c' }]);
+    expect(chats.openChats().find((c) => c.id === 'c')?.lines).toEqual([]);
+    // Other commands leave the log alone.
+    chats.catalog.commands.push({ name: 'compact', description: '', argumentHint: '' });
+    await chats.send('c', 'again', 'haiku', 'low');
+    session.finish();
+    await chats.send('c', '/compact', 'auto', 'medium');
+    session.finish();
+    expect(chats.openChats().find((c) => c.id === 'c')?.lines.length).toBeGreaterThan(0);
+  });
+
   it('refuses commands that could bill or only work in a terminal, and leaves other slashes alone', async () => {
     const { chats, notices } = setup();
     chats.catalog = { plan: 'Claude Pro', models: [], commands: [] };

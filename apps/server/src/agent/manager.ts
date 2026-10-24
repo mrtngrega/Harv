@@ -97,6 +97,8 @@ export class ChatManager {
   private flushing = false;
   /** Tabs whose running turn hit a plan limit; they continue after the reset. */
   private limited = new Set<string>();
+  /** Tabs running /clear: when it succeeds, their log empties too. */
+  private clearing = new Set<string>();
   /** Resolvers waiting for a tab's turn to finish. */
   private waiters = new Map<string, (() => void)[]>();
   /** Chats waiting on a hand-off (from → to), to refuse loops. */
@@ -233,6 +235,11 @@ export class ChatManager {
     }
     this.broadcast(msg);
     if (msg.type === 'chat.done') {
+      if (this.clearing.delete(msg.tabId) && msg.ok) {
+        this.store.clearLines(msg.tabId);
+        this.router.forget(msg.tabId);
+        this.broadcast({ type: 'chat.cleared', tabId: msg.tabId });
+      }
       for (const resolve of this.waiters.get(msg.tabId) ?? []) resolve();
       this.waiters.delete(msg.tabId);
       // Whatever ended the turn (done, error or Stop), the next queued message runs.
@@ -438,6 +445,7 @@ export class ChatManager {
       this.broadcast({ type: 'chat.done', tabId, ok: true, stopped: false });
       return;
     }
+    if (name === 'clear') this.clearing.add(tabId);
     const last = this.lastRun.get(tabId) ?? this.lastTagged(tabId) ?? AUTO_FALLBACK;
     const decision: RouteDecision = { model: last.model, effort: last.effort, source: 'command', reason: `Claude Code command /${name}` };
     this.router.manual(tabId, decision);

@@ -307,6 +307,9 @@ export function applyChatEvent(msg: ChatServerMessage): void {
     case 'chat.commands':
       updateTab(msg.tabId, (t) => ({ ...t, commands: msg.commands }));
       break;
+    case 'chat.cleared':
+      updateTab(msg.tabId, (t) => ({ ...t, lines: [], currentId: null, context: undefined, lastTurn: undefined }));
+      break;
     case 'chat.removed':
       store.set((s) => {
         const tabs = s.tabs.filter((t) => t.id !== msg.tabId);

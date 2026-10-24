@@ -139,6 +139,18 @@ function ToolLine({ line }: { line: Line }) {
   );
 }
 
+/** Where a tab dropped at `x` lands: before the first tab whose middle is right of it, else after the last. */
+function dropSlot(bar: HTMLElement, x: number): { id: string; after: boolean } | null {
+  const tabs = [...bar.querySelectorAll<HTMLElement>('[data-tab]')];
+  const before = tabs.find((t) => {
+    const r = t.getBoundingClientRect();
+    return x < r.left + r.width / 2;
+  });
+  if (before) return { id: before.dataset.tab!, after: false };
+  const last = tabs.at(-1);
+  return last ? { id: last.dataset.tab!, after: true } : null;
+}
+
 export function ChatPanel() {
   const { tabs, activeId, settingsOpen, views } = useChat();
   const inSettings = activeId === SETTINGS_TAB;
@@ -284,7 +296,37 @@ export function ChatPanel() {
       onDrop={(e) => !nonChat && onDrop(e)}
       className="glass relative flex h-[calc(var(--app-h)-140px)] min-h-[420px] min-w-0 flex-1 flex-col overflow-hidden rounded-2xl lg:h-auto lg:max-h-[calc(var(--app-h)-110px)] lg:min-h-0"
     >
-      <div className="flex items-end gap-1 border-b border-line px-2 pt-2">
+      {/* The whole bar takes a dragged tab: gaps, the space past the last tab and the + too (the nearest slot wins). */}
+      <div
+        onDragOver={(e) => {
+          if (!dragTab || !e.dataTransfer.types.includes('application/x-harv-tab')) return;
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = 'move';
+          const bar = tabsRef.current;
+          if (!bar) return;
+          // Near either end of an overflowing bar, scroll it along.
+          const box = bar.getBoundingClientRect();
+          if (e.clientX < box.left + 24) bar.scrollLeft -= 12;
+          else if (e.clientX > box.right - 24) bar.scrollLeft += 12;
+          const next = dropSlot(bar, e.clientX);
+          if (next && (dropAt?.id !== next.id || dropAt.after !== next.after)) setDropAt(next);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(null);
+        }}
+        onDrop={(e) => {
+          const id = e.dataTransfer.getData('application/x-harv-tab');
+          if (!id) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const slot = tabsRef.current ? dropSlot(tabsRef.current, e.clientX) : null;
+          if (slot) chat.moveTab(id, slot.id, slot.after);
+          setDragTab(null);
+          setDropAt(null);
+        }}
+        className="flex items-end gap-1 border-b border-line px-2 pt-2"
+      >
         {/* Tabs shrink like Chrome's, then scroll sideways (mouse wheel too); + and the view menu stay put. */}
         <div
           ref={tabsRef}
@@ -308,23 +350,6 @@ export function ChatPanel() {
                   setDragTab(t.id);
                 }}
                 onDragEnd={() => {
-                  setDragTab(null);
-                  setDropAt(null);
-                }}
-                onDragOver={(e) => {
-                  if (!dragTab || !e.dataTransfer.types.includes('application/x-harv-tab')) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  const r = e.currentTarget.getBoundingClientRect();
-                  const after = e.clientX > r.left + r.width / 2;
-                  if (dropAt?.id !== t.id || dropAt.after !== after) setDropAt({ id: t.id, after });
-                }}
-                onDrop={(e) => {
-                  const id = e.dataTransfer.getData('application/x-harv-tab');
-                  if (!id) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (dropAt) chat.moveTab(id, dropAt.id, dropAt.after);
                   setDragTab(null);
                   setDropAt(null);
                 }}

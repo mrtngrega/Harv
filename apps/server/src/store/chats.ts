@@ -246,6 +246,12 @@ export class ChatStore {
     return { title: chat.title, open: chat.open === 1, updatedAt: chat.updated_at, lines };
   }
 
+  /** /clear: the chat's lines go (it keeps its name and place in history); the next message starts fresh. */
+  clearLines(id: string): void {
+    this.db.prepare('DELETE FROM lines WHERE chat_id = ?').run(id);
+    this.db.prepare('UPDATE chats SET context = NULL WHERE id = ?').run(id);
+  }
+
   delete(id: string): void {
     this.db.prepare('DELETE FROM chats WHERE id = ?').run(id);
   }
