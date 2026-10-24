@@ -74,6 +74,14 @@ export interface HarvSettings {
   watchdog: boolean;
   /** Programs the watchdog never warns about (lowercase exe names, e.g. "blender.exe"). */
   watchdogIgnored: string[];
+
+  // Sync (docs/PLAN.md §6m)
+  /** Sync chats, memory and shared settings with the user's other devices. */
+  syncEnabled: boolean;
+  /** The private Git repo the devices sync through (HTTPS clone URL). */
+  syncRepo: string;
+  /** This device's name, shown on the other one ('' = the computer's name). */
+  deviceName: string;
 }
 
 export const DEFAULT_SETTINGS: HarvSettings = {
@@ -104,7 +112,35 @@ export const DEFAULT_SETTINGS: HarvSettings = {
   restoreTabs: true,
   watchdog: true,
   watchdogIgnored: [],
+  syncEnabled: false,
+  syncRepo: '',
+  deviceName: '',
 };
+
+/**
+ * Settings that follow the user to their other devices (newest wins per key). The rest
+ * stay per device: folders and read-only paths (they differ per OS), size, startup, sensors, watchdog, sync.
+ */
+export const SHARED_SETTINGS = [
+  'confirmYellow',
+  'allowRules',
+  'motion',
+  'accent',
+  'backgroundBlur',
+  'scrim',
+  'glass',
+  'density',
+  'showTimes',
+  'showTags',
+  'sendKey',
+  'startModel',
+  'allowFable',
+  'compactRows',
+  'tempUnit',
+  'warnSession',
+  'warnWeekly',
+  'watchdogIgnored',
+] as const satisfies readonly (keyof HarvSettings)[];
 
 export type SettingsClientMessage = { type: 'settings.update'; patch: Partial<HarvSettings> };
 

@@ -40,6 +40,8 @@ import type { FileOp } from '@harv/shared';
 import { IS_WINDOWS, PLATFORM } from './platform.ts';
 import { TerminalManager } from './tools/terminal.ts';
 import { startWatchdog } from './watchdog/monitor.ts';
+import { SyncEngine } from './sync/engine.ts';
+import { SyncStore } from './sync/store.ts';
 
 const removed = stripBilledCredentials();
 ensureHarvHome();
@@ -128,9 +130,25 @@ const router = new Router(
   () => meter.weeklyPercent(),
   () => loadSettings().allowFable,
 );
-const chats = new ChatManager(store, gate, router, meter, broadcast, (status) =>
-  broadcast({ type: 'harv.status', status, detail: chats.statusDetail }),
+const chats = new ChatManager(
+  store,
+  gate,
+  router,
+  meter,
+  (msg) => {
+    broadcast(msg);
+    // A finished reply goes to the other device soon (sync, docs/PLAN.md §6m).
+    if (msg.type === 'chat.done') sync.soon();
+  },
+  (status) => broadcast({ type: 'harv.status', status, detail: chats.statusDetail }),
 );
+const syncStore = new SyncStore(join(HARV_HOME, 'harv.db'));
+const sync = new SyncEngine(HARV_HOME, store, routes, syncStore, {
+  chats: (changes) => chats.remote(changes),
+  settings: (settings) => broadcast({ type: 'settings', settings }),
+  status: (status) => broadcast({ type: 'sync.status', status }),
+  log: (message, data) => app.log.warn(data ?? {}, message),
+});
 // "Reopen tabs" off: Harv starts with no tabs (the chats stay in history).
 if (!loadSettings().restoreTabs) {
   for (const c of store.openChats()) store.setOpen(c.id, false);
@@ -345,6 +363,7 @@ app.get('/ws', { websocket: true }, (socket) => {
     projects: store.projects(),
     platform: PLATFORM,
     startedAt: STARTED_AT,
+    sync: sync.status(),
   });
 
   const unsubscribe = metrics.onSnapshot((snapshot) => send({ type: 'metrics.tick', metrics: snapshot }));
@@ -436,6 +455,9 @@ app.get('/ws', { websocket: true }, (socket) => {
       case 'settings.update':
         broadcast({ type: 'settings', settings: updateSettings(msg.patch) });
         break;
+      case 'sync.now':
+        void sync.now();
+        break;
       case 'history.search':
         send({ type: 'history', items: chats.history(msg.query), query: msg.query });
         break;
@@ -446,10 +468,12 @@ app.get('/ws', { websocket: true }, (socket) => {
 app.addHook('onClose', async () => {
   metrics.stop();
   meter.stop();
+  sync.stop();
   terminals.closeAll();
   chats.closeAll();
   store.close();
   actions.close();
+  syncStore.close();
 });
 
 // Claude Code subprocesses would otherwise keep the process alive on restart (tsx watch hangs).
@@ -491,3 +515,6 @@ refreshCatalog();
 
 // Plan usage: /usage now and every 10 minutes (no tokens), plus live rate-limit events.
 meter.start();
+
+// Sync with the user's other devices (Settings › Sync): pull and push now and every 2 minutes.
+sync.start();

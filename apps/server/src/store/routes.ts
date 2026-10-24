@@ -1,5 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import type { ChatUsage, EffortLevel, HarvUsage, RouteSource } from '@harv/shared';
+import type { RouteRow, SyncEvent } from '../sync/events.ts';
+
+const ROW = `SELECT uid, chat_id AS chatId, at, model, effort, source, reason, category, difficulty, stakes, feedback,
+                    input_tokens AS inputTokens, output_tokens AS outputTokens FROM routes`;
 
 const SCHEMA = `
   PRAGMA journal_mode = WAL;
@@ -47,19 +52,98 @@ export class RouteStore {
     if (!columns.some((c) => c.name === 'input_tokens')) {
       this.db.exec('ALTER TABLE routes ADD COLUMN input_tokens INTEGER; ALTER TABLE routes ADD COLUMN output_tokens INTEGER;');
     }
+    // Sync (M10b): rows both devices share, and which came from the other one (its turns count in Harv's stats here too).
+    if (!columns.some((c) => c.name === 'uid')) {
+      this.db.exec('ALTER TABLE routes ADD COLUMN uid TEXT; ALTER TABLE routes ADD COLUMN remote INTEGER NOT NULL DEFAULT 0;');
+    }
+    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS routes_by_uid ON routes(uid)');
+    const missing = this.db.prepare('SELECT id FROM routes WHERE uid IS NULL').all() as { id: number }[];
+    if (missing.length) {
+      const set = this.db.prepare('UPDATE routes SET uid = ? WHERE id = ?');
+      this.db.exec('BEGIN');
+      for (const { id } of missing) set.run(randomUUID(), id);
+      this.db.exec('COMMIT');
+    }
+  }
+
+  close(): void {
+    this.db.close();
+  }
+
+  /** Every local change, for sync (set while sync is on). */
+  onEvent?: (e: SyncEvent) => void;
+
+  /** This device's latest row for a chat (the other device's turns in the same chat don't count). */
+  private lastId(chatId: string): number | undefined {
+    return (
+      (
+        this.db.prepare('SELECT MAX(id) AS id FROM routes WHERE chat_id = ? AND remote = 0').get(chatId) as
+          { id: number | null } | undefined
+      )?.id ?? undefined
+    );
+  }
+
+  private changed(id: number | undefined) {
+    if (!this.onEvent || id === undefined) return;
+    const row = this.db.prepare(`${ROW} WHERE id = ?`).get(id) as RouteRow | undefined;
+    if (row) this.onEvent({ t: 'route', row });
   }
 
   add(e: RouteEntry): void {
-    this.db
+    const { lastInsertRowid } = this.db
       .prepare(
-        'INSERT INTO routes (chat_id, at, model, effort, source, reason, category, difficulty, stakes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO routes (chat_id, at, model, effort, source, reason, category, difficulty, stakes, uid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       )
-      .run(e.chatId, Date.now(), e.model, e.effort, e.source, e.reason, e.category ?? null, e.difficulty ?? null, e.stakes ?? null);
+      .run(
+        e.chatId,
+        Date.now(),
+        e.model,
+        e.effort,
+        e.source,
+        e.reason,
+        e.category ?? null,
+        e.difficulty ?? null,
+        e.stakes ?? null,
+        randomUUID(),
+      );
+    this.changed(Number(lastInsertRowid));
   }
 
   /** Feedback on a chat's latest decision ("harder" = the user asked for more). */
   markLast(chatId: string, feedback: string): void {
-    this.db.prepare('UPDATE routes SET feedback = ? WHERE id = (SELECT MAX(id) FROM routes WHERE chat_id = ?)').run(feedback, chatId);
+    const id = this.lastId(chatId);
+    this.db.prepare('UPDATE routes SET feedback = ? WHERE id = ?').run(feedback, id ?? null);
+    this.changed(id);
+  }
+
+  /** Every row as events: the opening snapshot. */
+  exportEvents(): SyncEvent[] {
+    return (this.db.prepare(`${ROW} WHERE remote = 0 ORDER BY id`).all() as unknown as RouteRow[]).map((row) => ({ t: 'route', row }));
+  }
+
+  /** A row from the other device (new, or with its tokens or feedback filled in). */
+  applyRoute(r: RouteRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO routes (uid, chat_id, at, model, effort, source, reason, category, difficulty, stakes, feedback, input_tokens, output_tokens, remote)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+         ON CONFLICT(uid) DO UPDATE SET feedback = excluded.feedback, input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens`,
+      )
+      .run(
+        r.uid,
+        r.chatId,
+        r.at,
+        r.model,
+        r.effort,
+        r.source,
+        r.reason,
+        r.category,
+        r.difficulty,
+        r.stakes,
+        r.feedback,
+        r.inputTokens,
+        r.outputTokens,
+      );
   }
 
   /** How often the user asked to try harder on this kind of task (same category and difficulty) since `sinceMs`. */
@@ -75,9 +159,11 @@ export class RouteStore {
 
   /** The tokens a chat's latest turn used. */
   finishLast(chatId: string, usage: ChatUsage): void {
+    const id = this.lastId(chatId);
     this.db
-      .prepare('UPDATE routes SET input_tokens = ?, output_tokens = ? WHERE id = (SELECT MAX(id) FROM routes WHERE chat_id = ?)')
-      .run(usage.inputTokens, usage.outputTokens, chatId);
+      .prepare('UPDATE routes SET input_tokens = ?, output_tokens = ? WHERE id = ?')
+      .run(usage.inputTokens, usage.outputTokens, id ?? null);
+    this.changed(id);
   }
 
   /** Harv's own usage: today's turns and tokens, and the last week's routing split. */

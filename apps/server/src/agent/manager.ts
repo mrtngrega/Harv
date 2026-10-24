@@ -19,6 +19,7 @@ import type { Router } from '../router/router.ts';
 import { parseOverride } from '../router/rules.ts';
 import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
+import type { RemoteChanges } from '../sync/engine.ts';
 import type { UsageMeter } from '../usage/meter.ts';
 import { buildContent, deleteAttachments } from './attachments.ts';
 import { sideQuestion } from './btw.ts';
@@ -545,9 +546,17 @@ export class ChatManager {
   private async start(tabId: string, message: string, choice: ModelChoice, effort: EffortLevel, files: Attachment[], note = '') {
     // A chat that just changed project starts a new session: it gets the conversation so far as context.
     const carried = this.carry.get(tabId);
+    const stale = this.store.takeStale(tabId);
     if (carried) {
       this.carry.delete(tabId);
       note = carried + note;
+    } else if (stale) {
+      // The chat went on on the user's other device, which this device's Claude session never saw.
+      const lines = this.store.snapshot(tabId)?.lines ?? [];
+      if (lines.at(-1)?.kind === 'you') lines.pop();
+      if (lines.length) {
+        note = `[This chat continued on the user's other device, so this is a new session here. The conversation so far, for context:]\n${formatTranscript(lines.slice(-30)).slice(-8000)}\n[End of the earlier conversation.]\n\n${note}`;
+      }
     }
     let decision: RouteDecision;
     let text: string;
@@ -705,6 +714,44 @@ export class ChatManager {
     deleteAttachments(tabId);
     this.broadcast({ type: 'chat.removed', tabId });
     this.publishHistory();
+    this.onStatus(this.status);
+  }
+
+  /**
+   * Changes from the user's other device (sync, docs/PLAN.md §6m): the dashboards catch up, and
+   * a Claude session that missed lines ends, so the next message starts one with the chat so far.
+   */
+  remote(changes: RemoteChanges): void {
+    const restart = (id: string) => {
+      if (this.busy(id)) this.switchAfterTurn.add(id);
+      else this.dropSession(id);
+    };
+    for (const id of changes.deleted) {
+      this.dequeueTab(id);
+      this.followUps.delete(id);
+      this.commands.delete(id);
+      this.gate.cancel(id);
+      this.dropSession(id);
+      this.router.forget(id);
+      this.lastRun.delete(id);
+      deleteAttachments(id);
+      this.broadcast({ type: 'chat.removed', tabId: id });
+    }
+    for (const id of changes.cleared) {
+      this.router.forget(id);
+      restart(id);
+      this.broadcast({ type: 'chat.cleared', tabId: id });
+    }
+    for (const id of changes.moved) {
+      restart(id);
+      this.broadcast({ type: 'chat.project', tabId: id, projectId: this.store.projectOf(id)?.id ?? null });
+    }
+    for (const [id, title] of changes.renamed) this.broadcast({ type: 'chat.renamed', tabId: id, title });
+    for (const [id, lines] of changes.lines) {
+      restart(id);
+      for (const line of lines) this.broadcast({ type: 'chat.line', tabId: id, line });
+    }
+    if (changes.history) this.publishHistory();
     this.onStatus(this.status);
   }
 

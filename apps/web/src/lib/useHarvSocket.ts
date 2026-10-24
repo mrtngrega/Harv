@@ -7,6 +7,7 @@ import {
   type MetricsSnapshot,
   type PlanUsage,
   type Project,
+  type SyncStatus,
 } from '@harv/shared';
 import { createStore } from './createStore.ts';
 import { onConnectionChange, onServerMessage, sendMessage } from './socket.ts';
@@ -32,6 +33,8 @@ const settings = createStore<HarvSettings>(DEFAULT_SETTINGS);
 const projects = createStore<{ list: Project[]; error: string | null }>({ list: [], error: null });
 /** Background photo version for cache-busting; null = none set, undefined = not known yet. */
 const background = createStore<{ version: number | null | undefined }>({ version: undefined });
+/** Sync with the user's other devices (null until the first hello). */
+const sync = createStore<SyncStatus | null>(null);
 
 onConnectionChange((connected) => connection.set((c) => ({ ...c, connected })));
 
@@ -45,6 +48,10 @@ onServerMessage((msg) => {
       settings.set({ ...DEFAULT_SETTINGS, ...msg.settings });
       background.set({ version: msg.background });
       projects.set({ list: msg.projects, error: null });
+      sync.set(msg.sync ?? null);
+      break;
+    case 'sync.status':
+      sync.set(msg.status);
       break;
     case 'projects':
       projects.set({ list: msg.projects, error: null });
@@ -83,6 +90,9 @@ export const useSettings = settings.use;
 export const useBackground = background.use;
 export const useProjects = projects.use;
 export const getProjects = () => projects.get().list;
+export const useSync = sync.use;
+/** Settings › Sync › Sync now. */
+export const syncNow = () => sendMessage({ type: 'sync.now' });
 
 export const projectActions = {
   add(path: string, name?: string) {

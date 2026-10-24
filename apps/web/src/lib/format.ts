@@ -114,3 +114,12 @@ export function dateGroup(at: number | undefined, now = Date.now()): string {
   if (at >= new Date(today.getFullYear(), 0, 1).getTime()) return 'Earlier this year';
   return 'A long time ago';
 }
+
+/** "just now", "3m ago", "2h ago", "3d ago". */
+export function ago(at: number, now = Date.now()): string {
+  const min = Math.floor((now - at) / 60_000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min}m ago`;
+  const hours = Math.floor(min / 60);
+  return hours < 48 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
+}

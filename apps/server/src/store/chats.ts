@@ -1,6 +1,52 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import type { ChatSnapshot, HistoryItem, LineKind, Project, StoredLine } from '@harv/shared';
+import type { SyncEvent } from '../sync/events.ts';
+
+type LineEvent = Extract<SyncEvent, { t: 'line' }>;
+type LineRow = {
+  kind: LineKind;
+  text: string;
+  tag: string | null;
+  reason: string | null;
+  files: string | null;
+  ref: string | null;
+  created_at: number;
+};
+
+const fromRow = (r: LineRow): StoredLine => ({
+  kind: r.kind,
+  text: r.text,
+  ...(r.tag ? { tag: r.tag } : {}),
+  ...(r.reason ? { reason: r.reason } : {}),
+  ...(r.files ? { files: JSON.parse(r.files) as string[] } : {}),
+  ...(r.ref ? { ref: r.ref } : {}),
+  at: r.created_at,
+});
+
+const lineEvent = (chat: string, uid: string, prev: string | null, line: StoredLine, at: number): LineEvent => ({
+  t: 'line',
+  chat,
+  uid,
+  prev,
+  kind: line.kind,
+  text: line.text,
+  ...(line.tag ? { tag: line.tag } : {}),
+  ...(line.reason ? { reason: line.reason } : {}),
+  ...(line.files?.length ? { files: line.files } : {}),
+  ...(line.ref ? { ref: line.ref } : {}),
+  at,
+});
+
+/** What a line event says, as a line. */
+const toLine = (e: LineEvent): StoredLine => ({
+  kind: e.kind,
+  text: e.text,
+  ...(e.tag ? { tag: e.tag } : {}),
+  ...(e.reason ? { reason: e.reason } : {}),
+  ...(e.files?.length ? { files: e.files } : {}),
+  ...(e.ref ? { ref: e.ref } : {}),
+});
 
 const SCHEMA = `
   PRAGMA foreign_keys = ON;
@@ -66,6 +112,56 @@ export class ChatStore {
       this.db.exec('ALTER TABLE chats ADD COLUMN title_locked INTEGER NOT NULL DEFAULT 0');
     }
     if (!chatColumns.some((c) => c.name === 'project_id')) this.db.exec('ALTER TABLE chats ADD COLUMN project_id TEXT');
+    // Sync (M10b): a line id both devices share, when a chat's name or project last changed, whether its
+    // Claude session missed lines from the other device, and a project known there only by name.
+    if (!columns.some((c) => c.name === 'uid')) this.db.exec('ALTER TABLE lines ADD COLUMN uid TEXT');
+    if (!chatColumns.some((c) => c.name === 'meta_at')) this.db.exec('ALTER TABLE chats ADD COLUMN meta_at INTEGER NOT NULL DEFAULT 0');
+    if (!chatColumns.some((c) => c.name === 'stale')) this.db.exec('ALTER TABLE chats ADD COLUMN stale INTEGER NOT NULL DEFAULT 0');
+    if (!chatColumns.some((c) => c.name === 'project_name')) this.db.exec('ALTER TABLE chats ADD COLUMN project_name TEXT');
+    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS lines_by_uid ON lines(uid)');
+    const missing = this.db.prepare('SELECT id FROM lines WHERE uid IS NULL').all() as { id: number }[];
+    if (missing.length) {
+      const set = this.db.prepare('UPDATE lines SET uid = ? WHERE id = ?');
+      this.db.exec('BEGIN');
+      for (const { id } of missing) set.run(randomUUID(), id);
+      this.db.exec('COMMIT');
+    }
+  }
+
+  /** Every local change, for sync (set while sync is on). Changes applied from the other device don't call it. */
+  onEvent?: (e: SyncEvent) => void;
+
+  private chatEvent(id: string): Extract<SyncEvent, { t: 'chat' }> | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT c.title, c.title_locked, c.created_at, c.meta_at, COALESCE(p.name, c.project_name) AS project
+         FROM chats c LEFT JOIN projects p ON p.id = c.project_id WHERE c.id = ?`,
+      )
+      .get(id) as { title: string; title_locked: number; created_at: number; meta_at: number; project: string | null } | undefined;
+    if (!row) return undefined;
+    return {
+      t: 'chat',
+      chat: id,
+      title: row.title,
+      locked: row.title_locked === 1,
+      project: row.project,
+      created: row.created_at,
+      at: row.meta_at || row.created_at,
+    };
+  }
+
+  /** The chat's name or project changed here. */
+  private touchMeta(id: string) {
+    this.db.prepare('UPDATE chats SET meta_at = ? WHERE id = ?').run(Date.now(), id);
+    const e = this.onEvent && this.chatEvent(id);
+    if (e) this.onEvent!(e);
+  }
+
+  /** The uid of a chat's newest shared line (notes that stay on this device have none). */
+  private lastUid(chatId: string): string | null {
+    const row = this.db.prepare('SELECT uid FROM lines WHERE chat_id = ? AND uid IS NOT NULL ORDER BY id DESC LIMIT 1').get(chatId) as
+      { uid: string } | undefined;
+    return row?.uid ?? null;
   }
 
   // ── Projects (project mode) ──
@@ -85,17 +181,25 @@ export class ChatStore {
     if (existing) return existing;
     const project = { id: randomUUID(), name, path };
     this.db.prepare('INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)').run(project.id, name, path, Date.now());
+    // Chats from the other device that work on a project of this name join it.
+    this.db
+      .prepare('UPDATE chats SET project_id = ?, project_name = NULL WHERE project_id IS NULL AND lower(project_name) = lower(?)')
+      .run(project.id, name);
     return project;
   }
 
   /** Forgets a project; its chats go back to plain assistant chats (the folder isn't touched). */
   removeProject(id: string): void {
-    this.db.prepare('UPDATE chats SET project_id = NULL WHERE project_id = ?').run(id);
+    // They remember the name, so adding the project again brings them back.
+    this.db
+      .prepare('UPDATE chats SET project_id = NULL, project_name = (SELECT name FROM projects WHERE id = ?) WHERE project_id = ?')
+      .run(id, id);
     this.db.prepare('DELETE FROM projects WHERE id = ?').run(id);
   }
 
   setProject(chatId: string, projectId: string | null): void {
-    this.db.prepare('UPDATE chats SET project_id = ? WHERE id = ?').run(projectId, chatId);
+    this.db.prepare('UPDATE chats SET project_id = ?, project_name = NULL WHERE id = ?').run(projectId, chatId);
+    this.touchMeta(chatId);
   }
 
   /** The project a chat works on, if any. */
@@ -110,7 +214,10 @@ export class ChatStore {
 
   ensureChat(id: string, title: string): void {
     const now = Date.now();
-    this.db.prepare('INSERT OR IGNORE INTO chats (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)').run(id, title, now, now);
+    const added = this.db
+      .prepare('INSERT OR IGNORE INTO chats (id, title, created_at, updated_at, meta_at) VALUES (?, ?, ?, ?, ?)')
+      .run(id, title, now, now, now);
+    if (added.changes && this.onEvent) this.onEvent(this.chatEvent(id)!);
   }
 
   title(id: string): string | undefined {
@@ -120,6 +227,7 @@ export class ChatStore {
   /** `byUser` locks the title: automatic naming never changes it after that. */
   setTitle(id: string, title: string, byUser = false): void {
     this.db.prepare('UPDATE chats SET title = ?, title_locked = MAX(title_locked, ?) WHERE id = ?').run(title, byUser ? 1 : 0, id);
+    this.touchMeta(id);
   }
 
   /** The user named this chat themselves. */
@@ -153,8 +261,15 @@ export class ChatStore {
 
   addLine(chatId: string, line: StoredLine): void {
     const now = Date.now();
+    const uid = randomUUID();
+    const prev = this.onEvent ? this.lastUid(chatId) : null;
+    this.insertLine(chatId, uid, line, now);
+    this.onEvent?.(lineEvent(chatId, uid, prev, line, now));
+  }
+
+  private insertLine(chatId: string, uid: string | null, line: StoredLine, at: number) {
     this.db
-      .prepare('INSERT INTO lines (chat_id, kind, text, tag, reason, files, ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .prepare('INSERT INTO lines (chat_id, kind, text, tag, reason, files, ref, created_at, uid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
         chatId,
         line.kind,
@@ -163,9 +278,10 @@ export class ChatStore {
         line.reason ?? null,
         line.files?.length ? JSON.stringify(line.files) : null,
         line.ref ?? null,
-        now,
+        at,
+        uid,
       );
-    this.db.prepare('UPDATE chats SET updated_at = ? WHERE id = ?').run(now, chatId);
+    this.db.prepare('UPDATE chats SET updated_at = MAX(updated_at, ?) WHERE id = ?').run(at, chatId);
   }
 
   snapshot(id: string): ChatSnapshot | null {
@@ -182,27 +298,8 @@ export class ChatStore {
       .prepare(
         'SELECT kind, text, tag, reason, files, ref, created_at FROM (SELECT * FROM lines WHERE chat_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id',
       )
-      .all(id, RESTORE_LINES) as {
-      kind: LineKind;
-      text: string;
-      tag: string | null;
-      reason: string | null;
-      files: string | null;
-      ref: string | null;
-      created_at: number;
-    }[];
-    return {
-      ...chat,
-      lines: rows.map((r) => ({
-        kind: r.kind,
-        text: r.text,
-        ...(r.tag ? { tag: r.tag } : {}),
-        ...(r.reason ? { reason: r.reason } : {}),
-        ...(r.files ? { files: JSON.parse(r.files) as string[] } : {}),
-        ...(r.ref ? { ref: r.ref } : {}),
-        at: r.created_at,
-      })),
-    };
+      .all(id, RESTORE_LINES) as LineRow[];
+    return { ...chat, lines: rows.map(fromRow) };
   }
 
   openChats(): ChatSnapshot[] {
@@ -260,9 +357,129 @@ export class ChatStore {
   clearLines(id: string): void {
     this.db.prepare('DELETE FROM lines WHERE chat_id = ?').run(id);
     this.db.prepare('UPDATE chats SET context = NULL WHERE id = ?').run(id);
+    this.onEvent?.({ t: 'clear', chat: id, at: Date.now() });
   }
 
   delete(id: string): void {
-    this.db.prepare('DELETE FROM chats WHERE id = ?').run(id);
+    const existed = this.db.prepare('DELETE FROM chats WHERE id = ?').run(id).changes > 0;
+    if (existed) this.onEvent?.({ t: 'delete', chat: id, at: Date.now() });
+  }
+
+  // ── Sync: changes from the user's other device (docs/PLAN.md §6m). None of these call onEvent. ──
+
+  /** Every chat with messages as events: the opening snapshot a device sends when sync starts. */
+  exportEvents(): SyncEvent[] {
+    const out: SyncEvent[] = [];
+    const ids = this.db
+      .prepare('SELECT id FROM chats c WHERE EXISTS (SELECT 1 FROM lines l WHERE l.chat_id = c.id) ORDER BY created_at')
+      .all() as { id: string }[];
+    for (const { id } of ids) {
+      out.push(this.chatEvent(id)!);
+      const rows = this.db
+        .prepare('SELECT uid, kind, text, tag, reason, files, ref, created_at FROM lines WHERE chat_id = ? AND uid IS NOT NULL ORDER BY id')
+        .all(id) as (LineRow & { uid: string })[];
+      let prev: string | null = null;
+      for (const r of rows) {
+        out.push(lineEvent(id, r.uid, prev, fromRow(r), r.created_at));
+        prev = r.uid;
+      }
+    }
+    return out;
+  }
+
+  /** A chat's name or project from the other device; the newer change wins. Says what changed here. */
+  applyChat(e: Extract<SyncEvent, { t: 'chat' }>): 'new' | 'renamed' | 'project' | null {
+    const row = this.db.prepare('SELECT title, meta_at, project_id, project_name FROM chats WHERE id = ?').get(e.chat) as
+      { title: string; meta_at: number; project_id: string | null; project_name: string | null } | undefined;
+    const local = e.project
+      ? (this.db.prepare('SELECT id FROM projects WHERE lower(name) = lower(?)').get(e.project) as { id: string } | undefined)
+      : undefined;
+    const projectId = local?.id ?? null;
+    const projectName = e.project && !local ? e.project : null;
+    if (!row) {
+      this.db
+        .prepare(
+          `INSERT INTO chats (id, title, open, title_locked, created_at, updated_at, meta_at, project_id, project_name)
+           VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(e.chat, e.title, e.locked ? 1 : 0, e.created, e.created, e.at, projectId, projectName);
+      return 'new';
+    }
+    if (e.at < row.meta_at) return null;
+    this.db
+      .prepare('UPDATE chats SET title = ?, title_locked = ?, meta_at = ?, project_id = ?, project_name = ? WHERE id = ?')
+      .run(e.title, e.locked ? 1 : 0, e.at, projectId, projectName, e.chat);
+    if (row.project_id !== projectId || row.project_name !== projectName) {
+      // A Claude session can't move folders: the next message here starts a new one.
+      this.db.prepare('UPDATE chats SET session_id = NULL, stale = 1 WHERE id = ?').run(e.chat);
+      return 'project';
+    }
+    return row.title !== e.title ? 'renamed' : null;
+  }
+
+  /**
+   * A line from the other device. It goes after its `prev` line, wherever that is (a fork
+   * too). If this device wrote something after `prev` meanwhile, both sides wrote while
+   * apart: the other device's side continues in a fork ("Title (notebook)"), so nothing is lost.
+   * Returns where it went, or null when it was already here.
+   */
+  applyLine(e: LineEvent, deviceName: string): { chat: string; line: StoredLine; forked?: string } | null {
+    if (this.db.prepare('SELECT 1 FROM lines WHERE uid = ?').get(e.uid)) return null;
+    let chat = e.chat;
+    let known = e.prev === null;
+    if (e.prev) {
+      const at = this.db.prepare('SELECT chat_id FROM lines WHERE uid = ?').get(e.prev) as { chat_id: string } | undefined;
+      if (at) {
+        chat = at.chat_id;
+        known = true;
+      }
+    }
+    if (!this.exists(chat)) {
+      this.db
+        .prepare('INSERT INTO chats (id, title, open, created_at, updated_at, meta_at) VALUES (?, ?, 0, ?, ?, 0)')
+        .run(chat, 'Synced chat', e.at, e.at);
+    }
+    let forked: string | undefined;
+    // An unknown `prev` (a line this device never got) can't show a conflict: the line just goes at the end.
+    if (known && this.lastUid(chat) !== e.prev) {
+      const from = this.db.prepare('SELECT title, project_id, project_name FROM chats WHERE id = ?').get(chat) as {
+        title: string;
+        project_id: string | null;
+        project_name: string | null;
+      };
+      forked = randomUUID();
+      this.db
+        .prepare(
+          `INSERT INTO chats (id, title, open, title_locked, created_at, updated_at, meta_at, project_id, project_name)
+           VALUES (?, ?, 0, 1, ?, ?, 0, ?, ?)`,
+        )
+        .run(forked, `${from.title} (${deviceName})`.slice(0, 60), e.at, e.at, from.project_id, from.project_name);
+      // A note without a uid: it stays on this device.
+      const text = `Both devices wrote in “${from.title}” while they were apart, so ${deviceName}’s side continues here.`;
+      this.insertLine(forked, null, { kind: 'notice', text }, e.at);
+      chat = forked;
+    }
+    const line = toLine(e);
+    this.insertLine(chat, e.uid, line, e.at);
+    // This device's Claude session didn't see that line: the next message here starts fresh with the chat so far.
+    this.db.prepare('UPDATE chats SET session_id = NULL, stale = 1 WHERE id = ?').run(chat);
+    return { chat, line: { ...line, at: e.at }, ...(forked ? { forked } : {}) };
+  }
+
+  /** /clear on the other device. */
+  applyClear(id: string): boolean {
+    if (!this.exists(id)) return false;
+    this.db.prepare('DELETE FROM lines WHERE chat_id = ?').run(id);
+    this.db.prepare('UPDATE chats SET context = NULL, session_id = NULL, stale = 0 WHERE id = ?').run(id);
+    return true;
+  }
+
+  applyDelete(id: string): boolean {
+    return this.db.prepare('DELETE FROM chats WHERE id = ?').run(id).changes > 0;
+  }
+
+  /** Whether the chat got lines from the other device since its Claude session last ran here (and clears the mark). */
+  takeStale(id: string): boolean {
+    return this.db.prepare('UPDATE chats SET stale = 0 WHERE id = ? AND stale = 1').run(id).changes > 0;
   }
 }

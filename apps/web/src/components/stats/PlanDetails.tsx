@@ -1,6 +1,7 @@
 import type { PlanMeter, PlanUsage } from '@harv/shared';
 import { useChat } from '../../lib/chatStore.ts';
-import { lineTime, pace, pct, PLAN_WINDOW_MS, resetTime, tokens, until } from '../../lib/format.ts';
+import { useSync } from '../../lib/useHarvSocket.ts';
+import { ago, lineTime, pace, pct, PLAN_WINDOW_MS, resetTime, tokens, until } from '../../lib/format.ts';
 import { BarList, Card, Rows } from './parts.tsx';
 
 function MeterCard({ m }: { m: PlanMeter }) {
@@ -20,12 +21,6 @@ function MeterCard({ m }: { m: PlanMeter }) {
       <Rows rows={rows} />
     </Card>
   );
-}
-
-/** "just now", "3m ago". */
-function ago(at: number, now = Date.now()): string {
-  const min = Math.floor((now - at) / 60_000);
-  return min < 1 ? 'just now' : `${min}m ago`;
 }
 
 /** Claude plan meters (from `/usage`) and Harv's own tracking, laid out like the mockup. */
@@ -92,6 +87,29 @@ export function PlanDetails({ usage }: { usage: PlanUsage | null }) {
           />
         </Card>
       )}
+
+      <SyncCard />
     </>
+  );
+}
+
+/** Sync with the user's other devices (Settings › Sync), when it's on. */
+function SyncCard() {
+  const sync = useSync();
+  if (!sync?.enabled) return null;
+  const peers = sync.peers.map((p) => p.name).join(', ');
+  const newest = Math.max(0, ...sync.peers.map((p) => p.lastChange ?? 0));
+  const state = sync.busy ? 'syncing…' : sync.error ? 'problem' : sync.lastSync ? 'synced' : 'waiting';
+  return (
+    <Card title="Sync" sub={peers ? `with ${peers}` : 'no other device yet'} value={state}>
+      <Rows
+        rows={[
+          ['Last sync', sync.lastSync ? ago(sync.lastSync) : undefined],
+          ['To send', sync.pending ? `${sync.pending} changes` : undefined],
+          ['Their last change', newest ? ago(newest) : undefined],
+        ]}
+      />
+      {sync.error && <p className="m-0 text-[11px] leading-snug text-warn">{sync.error}</p>}
+    </Card>
   );
 }

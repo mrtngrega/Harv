@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { COMPACT_ROWS, DEFAULT_SETTINGS, type HarvSettings } from '@harv/shared';
@@ -6,6 +6,12 @@ import { HARV_HOME } from './paths.ts';
 import { osPath } from './platform.ts';
 
 const settingsPath = () => join(HARV_HOME, 'settings.json');
+
+/** An HTTPS or SSH Git URL (never a local path or an option like `--upload-pack`). */
+const SYNC_REPO = /^(https:\/\/[\w.-]+(:\d+)?\/[\w./-]+|git@[\w.-]+:[\w./-]+)$/;
+
+// eslint-disable-next-line no-control-regex -- control characters don't belong in a device name
+const CONTROL = /[\u0000-\u001f]/g;
 
 type Raw = Partial<Record<keyof HarvSettings, unknown>>;
 
@@ -66,6 +72,13 @@ export function cleanSettings(raw: Raw, base: HarvSettings = DEFAULT_SETTINGS): 
           ),
         ]
       : base.watchdogIgnored,
+    syncEnabled: bool(raw.syncEnabled, base.syncEnabled),
+    syncRepo:
+      typeof raw.syncRepo === 'string' && (raw.syncRepo.trim() === '' || SYNC_REPO.test(raw.syncRepo.trim()))
+        ? raw.syncRepo.trim()
+        : base.syncRepo,
+    deviceName:
+      typeof raw.deviceName === 'string' ? raw.deviceName.replace(CONTROL, '').replace(/\s+/g, ' ').trim().slice(0, 40) : base.deviceName,
   };
 }
 
@@ -79,11 +92,30 @@ export function loadSettings(): HarvSettings {
   }
 }
 
-/** Applies a change from the dashboard and saves it. */
-export function updateSettings(patch: Raw): HarvSettings {
-  const next = cleanSettings(patch, loadSettings());
+const listeners = new Set<(before: HarvSettings, after: HarvSettings) => void>();
+
+/** Called after every change made on this device (sync sends the shared ones to the other device). */
+export function onSettingsChange(listener: (before: HarvSettings, after: HarvSettings) => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/** Applies a change from the dashboard and saves it. `quiet` (a change from the other device) tells no listener. */
+export function updateSettings(patch: Raw, quiet = false): HarvSettings {
+  const before = loadSettings();
+  const next = cleanSettings(patch, before);
   writeFileSync(settingsPath(), `${JSON.stringify(next, null, 2)}\n`);
+  if (!quiet) for (const listener of listeners) listener(before, next);
   return next;
+}
+
+/** When settings.json last changed (0 = never saved). */
+export function settingsTime(): number {
+  try {
+    return statSync(settingsPath()).mtimeMs;
+  } catch {
+    return 0;
+  }
 }
 
 /** Where new projects get their folder. */

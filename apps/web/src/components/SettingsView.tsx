@@ -1,6 +1,16 @@
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ACCENTS, COMPACT_ROWS, DEFAULT_SETTINGS, WARN_CHOICES, type CompactRow, type HarvSettings } from '@harv/shared';
-import { projectActions, updateSettings, useBackground, useConnection, useProjects, useSettings } from '../lib/useHarvSocket.ts';
+import { ago } from '../lib/format.ts';
+import {
+  projectActions,
+  syncNow,
+  updateSettings,
+  useBackground,
+  useConnection,
+  useProjects,
+  useSettings,
+  useSync,
+} from '../lib/useHarvSocket.ts';
 
 const ACCENT_NAMES: Record<string, string> = {
   '#A8C8E8': 'Ice blue',
@@ -230,6 +240,120 @@ function RestartButton() {
           : 'Loads changes to Harv’s own server code. Stop and start from the desktop shortcuts.'}
       </span>
     </div>
+  );
+}
+
+/** A one-line text setting with a Save button (Enter saves too). */
+function TextSetting({
+  id,
+  label,
+  value,
+  placeholder,
+  onSave,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  placeholder: string;
+  onSave: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? value;
+  const save = (e: FormEvent) => {
+    e.preventDefault();
+    onSave(shown.trim());
+    setDraft(null);
+  };
+  return (
+    <form onSubmit={save} className="flex items-center gap-2 text-xs">
+      <label htmlFor={id} className="w-24 flex-none text-muted">
+        {label}
+      </label>
+      <input
+        id={id}
+        value={shown}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder={placeholder}
+        spellCheck={false}
+        className="min-h-9 min-w-0 flex-1 rounded-lg border border-line bg-black/20 px-2.5 text-xs text-ink outline-none placeholder:text-faint focus:border-accent/60"
+      />
+      <button
+        type="submit"
+        disabled={draft === null || draft.trim() === value}
+        className="min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 text-xs hover:bg-white/10 disabled:cursor-default disabled:opacity-40"
+      >
+        Save
+      </button>
+    </form>
+  );
+}
+
+/** Sync with the user's other devices through their private Git repo (docs/PLAN.md §6m). */
+function Sync() {
+  const settings = useSettings();
+  const status = useSync();
+  const peers = status?.peers ?? [];
+  const line = status?.busy
+    ? 'Syncing…'
+    : status?.lastSync
+      ? `Last synced ${ago(status.lastSync)}${status.pending ? `, ${status.pending} changes still to send` : ''}.`
+      : 'Not synced yet.';
+  return (
+    <Section title="Sync">
+      <Toggle
+        on={settings.syncEnabled}
+        label="Sync with my other devices"
+        hint="Chats, Harv's memory and shared settings (look, chat, safety rules) go through your private Git repo, encrypted with a key only your devices have. Folders, sensors, terminals and the tab layout stay on each device. Every 2 minutes and after each reply."
+        onChange={(syncEnabled) => updateSettings({ syncEnabled })}
+      />
+      <TextSetting
+        id="harv-sync-repo"
+        label="Private repo"
+        value={settings.syncRepo}
+        placeholder="https://github.com/you/harv-sync.git"
+        onSave={(syncRepo) => updateSettings({ syncRepo })}
+      />
+      <TextSetting
+        id="harv-device-name"
+        label="This device"
+        value={settings.deviceName}
+        placeholder={status?.device.name ?? 'This computer'}
+        onSave={(deviceName) => updateSettings({ deviceName })}
+      />
+      {settings.syncEnabled && (
+        <div className="flex flex-col gap-1.5 text-[11px] text-faint">
+          {!settings.syncRepo ? (
+            <p className="m-0">Add the repo’s address to start. Use a private repo: never the public Harv one.</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={syncNow}
+                  disabled={status?.busy}
+                  className="min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 text-xs text-ink hover:bg-white/10 disabled:cursor-default disabled:opacity-40"
+                >
+                  Sync now
+                </button>
+                <span>{line}</span>
+              </div>
+              {peers.length > 0 && (
+                <p className="m-0">
+                  Other devices: {peers.map((p) => `${p.name}${p.lastChange ? ` (last change ${ago(p.lastChange)})` : ''}`).join(', ')}
+                </p>
+              )}
+            </>
+          )}
+          {status?.error && <p className="m-0 leading-snug text-warn">{status.error}</p>}
+          {status?.needsKey && (
+            <p className="m-0 leading-snug">
+              The key is the file ~/.harv/sync.key on the device that synced first. Copy it to the same place here (it never goes through
+              the repo), then press Sync now.
+            </p>
+          )}
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -722,6 +846,8 @@ export function SettingsView() {
         )}
         <RestartButton />
       </Section>
+
+      <Sync />
 
       <ProtectedFolders />
     </div>
