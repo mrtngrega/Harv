@@ -22,6 +22,7 @@ import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
 import type { UsageMeter } from '../usage/meter.ts';
 import { buildContent, deleteAttachments } from './attachments.ts';
+import { sideQuestion } from './btw.ts';
 import { commandName, hiddenReason } from './commands.ts';
 import { formatTranscript, type HandOff, type ProjectTools } from './chatTools.ts';
 import { projectsDir } from '../settings.ts';
@@ -89,6 +90,8 @@ export class ChatManager {
   private tags = new Map<string, { tag: string; reason: string }>();
   /** The model·effort each tab's last turn ran at, for "Try harder". */
   private lastRun = new Map<string, { model: string; effort: EffortLevel }>();
+  /** Answers a /btw side question (replaced in tests). */
+  ask = sideQuestion;
   /** Work waiting for a plan limit to reset, sent in order when it does. */
   private queue: Queued[] = [];
   private flushing = false;
@@ -337,6 +340,12 @@ export class ChatManager {
     // Leave `/opus`-style override words out of the title.
     this.store.ensureChat(tabId, titleFrom(parseOverride(message).text.trim() || message || (files[0]?.name ?? 'Attachment')));
     this.store.setOpen(tabId, true);
+    // /btw: a side question, answered right away even while Harv works (it never queues or interrupts).
+    const btw = /^\/btw(?:\s+([\s\S]*))?$/i.exec(message.trim());
+    if (btw && !files.length) {
+      if (isNew) this.publishHistory();
+      return this.btw(tabId, (btw[1] ?? '').trim());
+    }
     if (this.busy(tabId) || this.followUps.get(tabId)?.length) {
       // Like Claude Code: what's typed while Harv works waits its turn, and runs when this one ends.
       const list = this.followUps.get(tabId) ?? [];
@@ -380,6 +389,35 @@ export class ChatManager {
     if (isNew && (choice !== 'auto' || parseOverride(message).model)) {
       void this.router.name(parseOverride(message).text, files).then((title) => title && this.autoTitle(tabId, title));
     }
+  }
+
+  /** /btw: answered from a fork of this chat's session (see btw.ts); both lines go in the log, not in Claude's context. */
+  private async btw(tabId: string, question: string) {
+    this.addLine(tabId, { kind: 'you', text: question ? `/btw ${question}` : '/btw' });
+    if (!question) return this.notice(tabId, 'Ask a side question after it: /btw what does that error mean?');
+    if (this.meter.paused)
+      return this.notice(tabId, `Claude Pro limit reached, so /btw can’t answer until ${this.resetText().replace(/^when /, '')}.`);
+    const last = this.lastRun.get(tabId) ?? this.lastTagged(tabId) ?? AUTO_FALLBACK;
+    const answer = await this.ask(
+      question,
+      last.model,
+      {
+        store: this.store,
+        tabId,
+        gate: this.gate,
+        project: this.store.projectOf(tabId),
+        projects: this.projectTools,
+      },
+      this.store.getSession(tabId) ?? undefined,
+    );
+    if (!this.store.exists(tabId)) return;
+    if (!answer) return this.notice(tabId, 'Couldn’t answer that side question. Try again, or ask it as a normal message.');
+    this.addLine(tabId, {
+      kind: 'harv',
+      text: answer,
+      tag: `btw·${this.modelName(last.model).split(' ')[0]!.toLowerCase()}`,
+      reason: 'A side question (/btw): answered from this chat without interrupting it, and not added to it.',
+    });
   }
 
   /** A Claude Code slash command this chat offers (or one Harv refuses), as opposed to a `/opus`-style word or a path. */

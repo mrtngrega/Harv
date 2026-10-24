@@ -390,6 +390,37 @@ describe('messages typed while Harv works', () => {
   });
 });
 
+describe('/btw side questions', () => {
+  it('answers right away, even mid-reply, without queueing or touching the chat', async () => {
+    const { chats, sent } = setup();
+    const asked: { question: string; resume?: string }[] = [];
+    chats.ask = async (question, _model, _chat, resume) => {
+      asked.push({ question, resume });
+      return 'It means the file is locked.';
+    };
+    await chats.send('b', 'first', 'sonnet', 'medium');
+    const session = FakeSession.all.get('b')!;
+    session.hooks.onSessionId('sess-1');
+    await chats.send('b', '/btw what does EBUSY mean?', 'sonnet', 'medium');
+    expect(asked).toEqual([{ question: 'what does EBUSY mean?', resume: 'sess-1' }]);
+    expect(session.sent.map((s) => s.content)).toEqual(['first']);
+    expect(chats.openChats().find((c) => c.id === 'b')?.queued).toBeUndefined();
+    const lines = sent.flatMap((m) => (m.type === 'chat.line' && m.tabId === 'b' ? [m.line] : []));
+    expect(lines.map((l) => [l.kind, l.text])).toEqual([
+      ['you', '/btw what does EBUSY mean?'],
+      ['harv', 'It means the file is locked.'],
+    ]);
+    expect(lines[1]!.tag).toMatch(/^btw·/);
+  });
+
+  it('says how to use it when the question is missing', async () => {
+    const { chats, notices } = setup();
+    chats.ask = async () => 'never';
+    await chats.send('e', '/btw', 'sonnet', 'medium');
+    expect(notices('e').at(-1)).toMatch(/side question/);
+  });
+});
+
 describe('slash commands', () => {
   it('sends a Claude Code command as typed, without the router, at the last model', async () => {
     const { chats } = setup();
