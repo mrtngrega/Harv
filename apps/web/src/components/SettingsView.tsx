@@ -1,8 +1,6 @@
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ACCENTS, COMPACT_ROWS, DEFAULT_SETTINGS, WARN_CHOICES, type CompactRow, type HarvSettings } from '@harv/shared';
-import { projectActions, updateSettings, useBackground, useProjects, useSettings, useWatchdog } from '../lib/useHarvSocket.ts';
-import { lineTime } from '../lib/format.ts';
-import { askHarvAbout } from './WatchdogToast.tsx';
+import { projectActions, updateSettings, useBackground, useProjects, useSettings } from '../lib/useHarvSocket.ts';
 
 const ACCENT_NAMES: Record<string, string> = {
   '#A8C8E8': 'Ice blue',
@@ -376,10 +374,9 @@ function BackgroundPicker() {
   );
 }
 
-/** Settings › Watchdog: on/off, the programs it ignores, and what it said lately. */
+/** Settings › Watchdog: on/off and the programs it ignores (alerts show as toasts, not here). */
 function Watchdog() {
   const { watchdog, watchdogIgnored } = useSettings();
-  const recent = useWatchdog();
   return (
     <Section title="Watchdog">
       <Toggle
@@ -405,23 +402,6 @@ function Watchdog() {
             </span>
           ))}
         </div>
-      )}
-      {recent.length > 0 && (
-        <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs">
-          {recent.slice(0, 6).map((a) => (
-            <li key={a.id} className="flex min-w-0 items-center gap-2" title={a.detail}>
-              <span className="flex-none text-faint">{lineTime(a.at)}</span>
-              <span className={`min-w-0 flex-1 truncate ${a.severity === 'critical' ? 'text-warn' : 'text-muted'}`}>{a.title}</span>
-              <button
-                type="button"
-                onClick={() => askHarvAbout(a)}
-                className="flex-none cursor-pointer rounded px-1.5 text-accent hover:bg-accent/15"
-              >
-                ask
-              </button>
-            </li>
-          ))}
-        </ul>
       )}
     </Section>
   );

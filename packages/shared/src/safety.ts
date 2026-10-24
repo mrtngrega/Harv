@@ -44,8 +44,7 @@ export interface ApprovalRequest {
 
 export type SafetyClientMessage =
   /** `always`: approve, and don't ask again for this kind of command (Settings › Safety lists the rules). */
-  | { type: 'approval.answer'; id: string; approve: boolean; command?: string; always?: boolean }
-  | { type: 'action.undo'; id: string };
+  { type: 'approval.answer'; id: string; approve: boolean; command?: string; always?: boolean } | { type: 'action.undo'; id: string };
 
 export type SafetyServerMessage =
   | { type: 'approval.request'; approval: ApprovalRequest }

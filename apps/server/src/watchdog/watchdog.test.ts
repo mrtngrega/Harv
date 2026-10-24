@@ -141,7 +141,8 @@ describe('dangerous software', () => {
 
 describe('probe parsing', () => {
   it('reads nvidia-smi pmon', () => {
-    const out = '# gpu   pid  type  sm  mem\n# Idx   #    C/G   %   %\n    0   3136  C+G   1   0   -  brave.exe\n    0   3684  C+G   -   -   -  SystemSettings.\n';
+    const out =
+      '# gpu   pid  type  sm  mem\n# Idx   #    C/G   %   %\n    0   3136  C+G   1   0   -  brave.exe\n    0   3684  C+G   -   -   -  SystemSettings.\n';
     expect(parsePmon(out)).toEqual([{ pid: 3136, sm: 1 }]);
   });
 

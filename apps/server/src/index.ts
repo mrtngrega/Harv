@@ -74,7 +74,7 @@ const broadcast = (msg: ServerMessage) => clients.forEach((send) => send(msg));
 
 const metrics = new MetricsCollector(() => loadSettings().metricsMs);
 // The PC watchdog (Settings › Watchdog): overheating, background hogs, dangerous software.
-const { watchdog } = startWatchdog(metrics, (alert) => {
+startWatchdog(metrics, (alert) => {
   app.log.info({ kind: alert.kind, title: alert.title }, 'Watchdog');
   broadcast({ type: 'watchdog.alert', alert });
 });
@@ -336,7 +336,6 @@ app.get('/ws', { websocket: true }, (socket) => {
     ui: loadUi(),
     projects: store.projects(),
     startedAt: STARTED_AT,
-    watchdog: watchdog.recent,
   });
 
   const unsubscribe = metrics.onSnapshot((snapshot) => send({ type: 'metrics.tick', metrics: snapshot }));

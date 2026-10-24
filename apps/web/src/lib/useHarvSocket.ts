@@ -6,7 +6,6 @@ import {
   type MetricsSnapshot,
   type PlanUsage,
   type Project,
-  type WatchdogAlert,
 } from '@harv/shared';
 import { createStore } from './createStore.ts';
 import { onConnectionChange, onServerMessage, sendMessage } from './socket.ts';
@@ -28,8 +27,6 @@ const usage = createStore<PlanUsage | null>(null);
 const settings = createStore<HarvSettings>(DEFAULT_SETTINGS);
 /** Folders Harv works on as projects, and the last error adding one. */
 const projects = createStore<{ list: Project[]; error: string | null }>({ list: [], error: null });
-/** The PC watchdog's latest warnings, newest first (the server keeps 20). */
-const watchdog = createStore<WatchdogAlert[]>([]);
 /** Background photo version for cache-busting; null = none set, undefined = not known yet. */
 const background = createStore<{ version: number | null | undefined }>({ version: undefined });
 
@@ -45,10 +42,6 @@ onServerMessage((msg) => {
       settings.set({ ...DEFAULT_SETTINGS, ...msg.settings });
       background.set({ version: msg.background });
       projects.set({ list: msg.projects, error: null });
-      watchdog.set(msg.watchdog ?? []);
-      break;
-    case 'watchdog.alert':
-      watchdog.set((list) => [msg.alert, ...list].slice(0, 20));
       break;
     case 'projects':
       projects.set({ list: msg.projects, error: null });
@@ -84,7 +77,6 @@ export const useUsage = usage.use;
 export const useSettings = settings.use;
 export const useBackground = background.use;
 export const useProjects = projects.use;
-export const useWatchdog = watchdog.use;
 export const getProjects = () => projects.get().list;
 
 export const projectActions = {

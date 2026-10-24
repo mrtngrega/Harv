@@ -113,8 +113,6 @@ export class Watchdog {
   /** Temperatures that already warned, until they drop back. */
   private hot = new Set<string>();
   private lastWarnAt = 0;
-  /** The latest alerts, newest first (Settings › Watchdog, and the dashboard's first load). */
-  readonly recent: WatchdogAlert[] = [];
 
   constructor(private hooks: WatchdogHooks) {}
 
@@ -161,8 +159,6 @@ export class Watchdog {
     if (a.severity === 'warn') this.lastWarnAt = now;
     this.cooldown.set(key, now + cooldownMs);
     const alert: WatchdogAlert = { id: randomUUID(), at: now, ...a };
-    this.recent.unshift(alert);
-    this.recent.length = Math.min(this.recent.length, 20);
     this.hooks.emit(alert);
     return true;
   }

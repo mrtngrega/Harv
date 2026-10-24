@@ -24,7 +24,7 @@ import type { HarvSettings, SettingsClientMessage, SettingsServerMessage } from 
 import type { ToolClientMessage, ToolServerMessage, UiState } from './tools.ts';
 import type { Project, ProjectClientMessage, ProjectServerMessage } from './projects.ts';
 import type { Catalog, ChatClientMessage, ChatServerMessage, ChatSnapshot, HistoryItem } from './chat.ts';
-import type { WatchdogAlert, WatchdogServerMessage } from './watchdog.ts';
+import type { WatchdogServerMessage } from './watchdog.ts';
 
 /** Messages the server pushes to the dashboard over /ws. */
 export type ServerMessage =
@@ -51,8 +51,6 @@ export type ServerMessage =
       projects: Project[];
       /** When this server started (ms): a new value tells the dashboard Harv was restarted. */
       startedAt: number;
-      /** The PC watchdog's latest warnings, newest first. */
-      watchdog: WatchdogAlert[];
     }
   /** `detail` names the running tool while working. */
   | { type: 'harv.status'; status: HarvStatus; detail?: string }
