@@ -374,7 +374,8 @@ export function classifyCommand(command: string, description = '', ctx: Classify
 
 /** Still asked first inside a project. */
 const PROJECT_RED: [RegExp, string][] = [
-  [/\bgit\s+push\b/i, 'Pushes to a git remote.'],
+  // A normal push runs (the user wants work pushed without asking); rewriting or deleting remote history asks.
+  [/\bgit\s+push\b[^|;&\n]*(\s(-f|-d)\b|--force|--delete|--mirror|\s\+\S|\s:\S)/i, 'Rewrites or deletes history on the git remote.'],
   [/\bgit\s+(reset\s+--hard|clean\b|checkout\s+(--\s|\.(\s|$))|restore\s+(?!--staged))/i, 'Throws away uncommitted work.'],
   [
     /\b(npm|pnpm|yarn|bun)\s+(i|install|add|uninstall|remove|rm)\b[^|;&\n]*(\s-g\b|--global\b)/i,

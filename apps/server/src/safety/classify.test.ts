@@ -214,7 +214,11 @@ describe('project chats (trusted project folder)', () => {
 
   it('still asks before the risky kinds', () => {
     for (const c of [
-      'git push origin main',
+      'git push --force origin main',
+      'git push -f',
+      'git push origin --delete old',
+      'git push origin :old',
+      'git push origin +main',
       'git reset --hard HEAD~1',
       'git clean -fd',
       'npm install -g typescript',
@@ -267,7 +271,10 @@ describe('registered projects, from any chat', () => {
   });
 
   it('keeps the risky kinds and anything outside the project asking', () => {
-    expect(run(`cd "${bash}" && git push`)).toBe('red');
+    expect(run(`cd "${bash}" && git push`)).toBe('green');
+    expect(run(`cd "${bash}" && git push origin main`)).toBe('green');
+    expect(run(`cd "${bash}" && git push --force`)).toBe('red');
+    expect(run('git push')).toBe('red');
     expect(run(`cd "${bash}" && rm -rf "${userDir}"`)).toBe('red');
     expect(run(`cd "${bash}" && rm -rf ../..`)).toBe('red');
     expect(run(`cd "${userDir}" && npm test`)).toBe('red');

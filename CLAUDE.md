@@ -136,7 +136,7 @@ Every action Harv takes goes through a permission gate, implemented with Agent S
 
 - **Green (run immediately):** read stats or files, web search, open apps, create files inside Harv's own workspace.
 - **Yellow (back up, run, verify):** edit, move or rename user files. Back up first to `~/.harv/backups/<timestamp>/`, log the action, and offer Undo.
-- **Red (confirm first):** delete, install or uninstall, kill processes, run scripts, change system settings or the registry, send messages or email, `git push`. The flow: safety check (an exact preview of the impact plus a protected-path check), then backup, then a confirmation card in the dashboard (Approve, Deny, or edit), then run, then verify, then log.
+- **Red (confirm first):** delete, install or uninstall, kill processes, run scripts, change system settings or the registry, send messages or email, `git push` (inside a project folder only force pushes and deleting remote branches ask; a normal push runs, the user's wish). The flow: safety check (an exact preview of the impact plus a protected-path check), then backup, then a confirmation card in the dashboard (Approve, Deny, or edit), then run, then verify, then log.
 - **Blocked:** formatting drives, writing to `C:\Windows`, disabling antivirus or the firewall, reading stored credentials. Only the user can unblock these, in settings.
 
 Always on: a stop button with a hotkey that cancels the current action, user-defined read-only protected folders, and a full action log.

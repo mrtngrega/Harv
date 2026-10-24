@@ -22,7 +22,7 @@ Harv loads this in every project chat (a chat bound to a project folder), on top
 ## Git
 
 - Work on the default branch unless the project says otherwise. Commit in meaningful steps with clear messages.
-- Push after finished work and at the end of a session (pushing always asks the user first in Harv).
+- Push after finished work and always at the end of a session, without asking (in a project folder a normal push runs without an approval card; force pushes still ask).
 - Never commit secrets. Local secrets go in a gitignored `.env`; commit only an `.env.example`.
 
 ## End of session
@@ -31,7 +31,7 @@ When the user says goodbye or that they're done for now, wrap up without being a
 
 1. Make sure the work is in a good state: run the checks; never leave the main branch broken without a note.
 2. Update the docs (plan status, what's next, new gotchas).
-3. Commit and push.
+3. Commit everything and push, without asking first.
 4. Save to memory: where exactly you stopped, the next concrete step, open questions.
 5. Stop any dev servers you started.
 6. End with a short summary and the exact phrase to say next time to resume.
