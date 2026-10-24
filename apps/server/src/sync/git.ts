@@ -35,11 +35,11 @@ export class SyncRepo {
     }
   }
 
-  /** Clones the repo the first time (or again when the URL changed). */
-  async ensure(url: string): Promise<void> {
+  /** Clones the repo the first time (or again when the URL changed). True when the working copy is new. */
+  async ensure(url: string): Promise<boolean> {
     if (existsSync(join(this.dir, '.git'))) {
       const current = await this.git(['remote', 'get-url', 'origin']).catch(() => '');
-      if (current === url) return;
+      if (current === url) return false;
       rmSync(this.dir, { recursive: true, force: true });
     }
     mkdirSync(this.dir, { recursive: true });
@@ -51,6 +51,7 @@ export class SyncRepo {
     await this.git(['config', 'user.name', 'Harv']);
     await this.git(['config', 'user.email', 'harv@localhost']);
     await this.git(['config', 'commit.gpgsign', 'false']);
+    return true;
   }
 
   /** Brings in the other devices' commits. False when the repo is still empty. */

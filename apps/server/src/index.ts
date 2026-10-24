@@ -13,6 +13,7 @@ import { MetricsCollector } from './metrics/collector.ts';
 import { ensureLhmRunning } from './metrics/lhmLauncher.ts';
 import { stripBilledCredentials } from './env.ts';
 import { ensureHarvHome, HARV_HOME } from './paths.ts';
+import { isSensitivePath } from './safety/classify.ts';
 import { SafetyGate } from './safety/gate.ts';
 import { Router } from './router/router.ts';
 import { ActionStore } from './store/actions.ts';
@@ -42,6 +43,9 @@ import { TerminalManager } from './tools/terminal.ts';
 import { startWatchdog } from './watchdog/monitor.ts';
 import { SyncEngine } from './sync/engine.ts';
 import { SyncStore } from './sync/store.ts';
+
+/** The file API's answer for passwords, keys and logins: the same rule as Harv's own tools. */
+const SENSITIVE = 'Harv never opens or sends files with passwords, keys or logins (the same rule its own tools follow).';
 
 const removed = stripBilledCredentials();
 ensureHarvHome();
@@ -176,6 +180,8 @@ app.post<{ Querystring: { tab?: string; name?: string } }>('/api/attachments', a
   const { tab = '', name = '' } = req.query;
   if (!isValidTab(tab) || !name || !Buffer.isBuffer(req.body))
     return reply.code(400).send({ error: 'Expected ?tab=&name= and a file body' });
+  // A dropped file only comes with its name: still, a key or a .env file never goes to Claude.
+  if (isSensitivePath(name)) return reply.code(403).send({ error: SENSITIVE });
   return saveAttachment(tab, name, req.body);
 });
 
@@ -210,6 +216,7 @@ app.get<{ Querystring: { path?: string } }>('/api/files/list', async (req, reply
 app.get<{ Querystring: { path?: string } }>('/api/files/raw', async (req, reply) => {
   const path = cleanPath(req.query.path);
   if (!path) return reply.code(400).send({ error: 'Bad path' });
+  if (isSensitivePath(path)) return reply.code(403).send({ error: SENSITIVE });
   try {
     if (!statSync(path).isFile()) return reply.code(400).send({ error: 'Not a file' });
   } catch {
@@ -232,6 +239,7 @@ app.post<{ Body: { path?: string; tab?: string } }>('/api/files/attach', async (
   const path = cleanPath(req.body?.path);
   const tab = req.body?.tab ?? '';
   if (!path || !isValidTab(tab)) return reply.code(400).send({ error: 'Bad path or tab' });
+  if (isSensitivePath(path)) return reply.code(403).send({ error: SENSITIVE });
   try {
     const st = statSync(path);
     if (!st.isFile()) return reply.code(400).send({ error: 'Not a file' });

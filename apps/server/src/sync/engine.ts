@@ -21,6 +21,8 @@ const CHUNK_EVENTS = 2000;
 const CHUNK = /^(\d{12})-(\d{12})\.hrv$/;
 
 const hash = (s: string | null) => (s === null ? null : createHash('sha256').update(s).digest('hex').slice(0, 16));
+/** A memory name from the other device: letters, digits, spaces, dots, dashes, underscores; no path. */
+const SAFE_NAME = /^\w[\w .-]{0,99}$/;
 const pad = (n: number) => String(n).padStart(12, '0');
 const isDefault = (key: keyof HarvSettings, value: unknown) => JSON.stringify(DEFAULT_SETTINGS[key]) === JSON.stringify(value);
 
@@ -167,7 +169,10 @@ export class SyncEngine {
 
   /** Starts or stops writing local changes to the outbox. */
   private record(on: boolean) {
-    const add = (e: SyncEvent) => this.db.add(e);
+    const add = (e: SyncEvent) => {
+      this.db.add(e);
+      if (e.t === 'delete') this.db.set(`deleted:${e.chat}`, e.at);
+    };
     this.chats.onEvent = on ? add : undefined;
     this.routes.onEvent = on ? add : undefined;
   }
@@ -219,10 +224,12 @@ export class SyncEngine {
     this.busy = true;
     this.publish();
     try {
-      await this.repo.ensure(this.settings.load().syncRepo);
+      // A new working copy (first sync, or the repo's address changed) lacks chunks sealed but never pushed: seal them again.
+      if (await this.repo.ensure(this.settings.load().syncRepo)) this.db.set('written', this.db.get('pushed', 0));
       await this.repo.pull();
       const key = this.key();
       if (!key) return;
+      this.checkKey(key);
       // The snapshot goes first, so it doesn't send back what the other device just sent.
       if (!this.db.get('snapshot', false)) this.snapshot();
       // Local memory edits are noted before the other device's are applied, which would hide them.
@@ -258,6 +265,25 @@ export class SyncEngine {
     const made = newKey();
     saveKey(this.keyPath, made);
     return made;
+  }
+
+  /**
+   * A wrong key must never seal anything (the other device could never read it), so before
+   * writing, the key has to open a chunk that's already in the repo, from any device.
+   */
+  private checkKey(key: Buffer) {
+    for (const device of [this.id, ...this.peerIds()]) {
+      const first = this.chunkFiles(device)[0];
+      if (!first) continue;
+      try {
+        open(key, `${device}/${first.file}`, readFileSync(join(this.repo.dir, device, first.file)));
+        return;
+      } catch {
+        throw new Error(
+          'This device’s sync key doesn’t match the one the repo was made with, so nothing was sent. Copy ~/.harv/sync.key from the device that synced first.',
+        );
+      }
+    }
   }
 
   private peerIds(): string[] {
@@ -385,10 +411,16 @@ export class SyncEngine {
     if (settings) this.hooks.settings(settings);
   }
 
+  /** Deleted on either device: later changes to it are ignored. */
+  private deleted(chat: string): boolean {
+    return this.db.get<number | null>(`deleted:${chat}`, null) !== null;
+  }
+
   /** One event from the other device. Returns the new settings when a shared setting changed. */
   private apply(e: SyncEvent, deviceName: string, changes: RemoteChanges): HarvSettings | undefined {
     switch (e.t) {
       case 'chat': {
+        if (this.deleted(e.chat)) break;
         const what = this.chats.applyChat(e);
         if (what === 'renamed') changes.renamed.set(e.chat, e.title);
         if (what === 'project') changes.moved.add(e.chat);
@@ -396,6 +428,8 @@ export class SyncEngine {
         break;
       }
       case 'line': {
+        // Written on the other device while this one deleted the chat: deleting wins (that device deletes it too).
+        if (this.deleted(e.chat)) break;
         const done = this.chats.applyLine(e, deviceName);
         if (!done) break;
         changes.lines.set(done.chat, [...(changes.lines.get(done.chat) ?? []), done.line]);
@@ -410,6 +444,7 @@ export class SyncEngine {
         }
         break;
       case 'delete':
+        this.db.set(`deleted:${e.chat}`, e.at);
         if (this.chats.applyDelete(e.chat)) {
           changes.deleted.add(e.chat);
           changes.lines.delete(e.chat);
@@ -440,8 +475,9 @@ export class SyncEngine {
    * other one replaced, the newer one wins and the other is kept as a conflict note Harv merges later.
    */
   private applyMemory(e: Extract<SyncEvent, { t: 'memory' }>, deviceName: string) {
-    const name = toSlug(e.name);
-    if (!name || name !== e.name) return;
+    // Any plain file name, never a path: hand-made memories don't always look like Harv's own.
+    const name = e.name;
+    if (!SAFE_NAME.test(name) || name.includes('..') || /^(con|prn|aux|nul|com\d|lpt\d)$/i.test(name)) return;
     const path = join(this.memoryDir, `${name}.md`);
     const current = this.readMemory(name);
     const write = (content: string | null) => {
@@ -459,12 +495,14 @@ export class SyncEngine {
         const [loser, from, at] = remoteWins ? [current, this.name, localAt] : [e.content, deviceName, e.at];
         if (remoteWins) write(e.content);
         if (loser !== null) {
-          const note = `${name}-conflict-${toSlug(from) ?? 'device'}`.slice(0, 60);
-          writeFileSync(
-            join(this.memoryDir, `${note}.md`),
-            `Another version of the memory "${name}", from ${from} (${new Date(at).toISOString().slice(0, 16).replace('T', ' ')}), written while the devices were apart. Merge what's still true into "${name}", then forget this note.\n\n${loser}`,
-            'utf8',
-          );
+          const note = `${name}-conflict-${toSlug(from) ?? 'device'}`.slice(0, 100);
+          const when = new Date(at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+          const text = `Another version of the memory "${name}", from ${from} (${when}), written while the devices were apart. Merge what's still true into "${name}", then forget this note.\n\n${loser}`;
+          writeFileSync(join(this.memoryDir, `${note}.md`), text, 'utf8');
+          // The other device writes the same note itself, so it counts as sent here (and deleting it reaches the other one).
+          const sent = this.db.get<Record<string, string>>('memory', {});
+          sent[note] = hash(text)!;
+          this.db.set('memory', sent);
         }
       }
     }

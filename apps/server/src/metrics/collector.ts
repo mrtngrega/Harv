@@ -3,7 +3,7 @@ import type { MetricsSnapshot, ProcessUsage, VolumeMetrics } from '@harv/shared'
 import { IS_WINDOWS } from '../platform.ts';
 import { readingsFromLhm } from './fromLhm.ts';
 import { fetchLhm } from './lhm.ts';
-import { readLinuxGpu, readLinuxNetwork } from './linux.ts';
+import { readLinuxCpuClock, readLinuxGpu, readLinuxNetwork } from './linux.ts';
 import { readNvidiaSmi } from './nvidia.ts';
 import { readCpuMemFallback, readProcesses, readStaticInfo, readVolumes, type ProcessInfo, type StaticInfo } from './system.ts';
 
@@ -104,7 +104,13 @@ export class MetricsCollector {
         this.lastFallbackAt = Date.now();
       }
       const fb = this.fallbackCache;
-      cpu ??= { name: info.cpuName, load: fb.cpuLoad, perThread: fb.perThread, tempC: fb.tempC };
+      cpu ??= {
+        name: info.cpuName,
+        load: fb.cpuLoad,
+        perThread: fb.perThread,
+        tempC: fb.tempC,
+        ...(IS_WINDOWS ? {} : { clockMhz: readLinuxCpuClock() }),
+      };
       memory ??= {
         load: (fb.memUsed / fb.memTotal) * 100,
         usedBytes: fb.memUsed,

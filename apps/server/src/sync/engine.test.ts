@@ -315,4 +315,87 @@ describe('Git sync between two devices', { timeout: 60_000 }, () => {
     expect(texts(nb, 'old')).toEqual(['ancient history']);
     expect(nb.chats.history()).toHaveLength(1);
   });
+
+  it('never sends anything sealed with a wrong key, even with nothing new to read', async () => {
+    const [pc, nb] = await pair();
+    pc.chats.ensureChat('c1', 'Before');
+    pc.chats.addLine('c1', { kind: 'you', text: 'one' });
+    await pc.sync();
+    await nb.sync();
+    writeFileSync(join(nb.home, 'sync.key'), `${Buffer.alloc(32, 7).toString('base64')}\n`);
+    nb.chats.addLine('c1', { kind: 'you', text: 'with the wrong key' });
+    await nb.engine.now();
+    expect(nb.engine.status().error).toMatch(/key doesn’t match/);
+    expect(nb.engine.status().pending).toBeGreaterThan(0);
+    expect(existsSync(join(nb.home, 'sync', nb.engine.id))).toBe(false);
+    // With the right key back, the waiting change goes out and the PC can read it.
+    copyFileSync(join(pc.home, 'sync.key'), join(nb.home, 'sync.key'));
+    await nb.sync();
+    await pc.sync();
+    expect(texts(pc, 'c1')).toEqual(['one', 'with the wrong key']);
+  });
+
+  it('lets a conflict note be deleted right away on either device', async () => {
+    const [pc, nb] = await pair();
+    mkdirSync(pc.memory, { recursive: true });
+    writeFileSync(join(pc.memory, 'trip.md'), 'base\n');
+    await pc.sync();
+    await nb.sync();
+    writeFileSync(join(pc.memory, 'trip.md'), 'pc\n');
+    await new Promise((r) => setTimeout(r, 20));
+    writeFileSync(join(nb.memory, 'trip.md'), 'notebook\n');
+    await pc.sync();
+    await nb.sync();
+    await pc.sync();
+    // Deleted on the PC before the notebook's copy of the note ever arrived there.
+    rmSync(join(pc.memory, 'trip-conflict-pc.md'));
+    await pc.sync();
+    await nb.sync();
+    await pc.sync();
+    for (const d of [pc, nb]) expect(readdirSync(d.memory)).toEqual(['trip.md']);
+  });
+
+  it('lets a delete win over lines written on the other device while apart', async () => {
+    const [pc, nb] = await pair();
+    pc.chats.ensureChat('c1', 'Doomed');
+    pc.chats.addLine('c1', { kind: 'you', text: 'one' });
+    await pc.sync();
+    await nb.sync();
+    pc.chats.delete('c1');
+    nb.chats.addLine('c1', { kind: 'you', text: 'written while apart' });
+    nb.chats.setTitle('c1', 'Renamed while apart');
+    await pc.sync();
+    await nb.sync();
+    await pc.sync();
+    expect(pc.chats.exists('c1')).toBe(false);
+    expect(nb.chats.exists('c1')).toBe(false);
+    expect(pc.chats.history()).toEqual([]);
+  });
+
+  it('keeps changes that were sealed but not pushed when the repo address changes', async () => {
+    const [pc, nb] = await pair();
+    // A repo that refuses every push.
+    const refusing = join(root, `refusing-${n}.git`).replace(/\\/g, '/');
+    execFileSync('git', ['init', '--quiet', '--bare', '-b', 'main', refusing]);
+    writeFileSync(join(refusing, 'hooks', 'pre-receive'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    const good = pc.settings.load().syncRepo;
+    pc.settings.update({ syncRepo: refusing }, false);
+    pc.chats.ensureChat('c1', 'Kept');
+    pc.chats.addLine('c1', { kind: 'you', text: 'sealed, never pushed' });
+    await pc.engine.now();
+    expect(pc.engine.status().error).toBeTruthy();
+    pc.settings.update({ syncRepo: good }, false);
+    await pc.sync();
+    await nb.sync();
+    expect(texts(nb, 'c1')).toEqual(['sealed, never pushed']);
+  });
+
+  it('syncs hand-made memory names, but never a path', async () => {
+    const [pc, nb] = await pair();
+    mkdirSync(pc.memory, { recursive: true });
+    writeFileSync(join(pc.memory, 'My_Notes v2.md'), 'hand made\n');
+    await pc.sync();
+    await nb.sync();
+    expect(readFileSync(join(nb.memory, 'My_Notes v2.md'), 'utf8')).toBe('hand made\n');
+  });
 });

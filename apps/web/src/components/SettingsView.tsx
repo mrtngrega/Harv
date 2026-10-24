@@ -602,7 +602,8 @@ export function SettingsView() {
   return (
     <div className="animate-fade-in mx-auto grid w-full max-w-[920px] grid-cols-1 content-start gap-2.5 md:grid-cols-2">
       <p className="m-0 px-1 text-xs text-muted md:col-span-2">
-        Saved on this computer in ~/.harv/settings.json. Changes apply at once in every Harv window.
+        Saved in ~/.harv/settings.json and applied at once in every Harv window. With Sync on, the look, chat and safety settings follow you
+        to your other devices; folders, size and startup stay on this one.
       </p>
 
       <Section title="Look">

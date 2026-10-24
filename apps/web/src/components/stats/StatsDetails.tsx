@@ -96,7 +96,7 @@ export function StatsDetails({ m }: { m: MetricsSnapshot }) {
               [
                 'VRAM',
                 gpu.vramUsedMb !== undefined && gpu.vramTotalMb !== undefined
-                  ? `${(gpu.vramUsedMb / 1024).toFixed(1)} / ${(gpu.vramTotalMb / 1024).toFixed(0)} GB`
+                  ? `${(gpu.vramUsedMb / 1024).toFixed(1)} / ${(gpu.vramTotalMb / 1024).toFixed(gpu.vramTotalMb % 1024 ? 1 : 0)} GB`
                   : undefined,
               ],
               ['Power', watts(gpu.powerW)],

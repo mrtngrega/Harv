@@ -17,6 +17,17 @@ const num = (path: string): number | undefined => {
   return read(path) !== undefined && Number.isFinite(v) ? v : undefined;
 };
 
+/** The average current CPU clock in MHz, from cpufreq (/proc/cpuinfo when there's none). */
+export function readLinuxCpuClock(root = '/sys/devices/system/cpu', cpuinfo = () => read('/proc/cpuinfo')): number | undefined {
+  const khz = (existsSync(root) ? readdirSync(root) : [])
+    .filter((d) => /^cpu\d+$/.test(d))
+    .map((d) => num(join(root, d, 'cpufreq', 'scaling_cur_freq')))
+    .filter((v): v is number => v !== undefined && v > 0);
+  if (khz.length) return khz.reduce((a, b) => a + b, 0) / khz.length / 1000;
+  const mhz = [...(cpuinfo() ?? '').matchAll(/^cpu MHz\s*:\s*([\d.]+)/gm)].map((m) => Number(m[1])).filter((v) => v > 0);
+  return mhz.length ? mhz.reduce((a, b) => a + b, 0) / mhz.length : undefined;
+}
+
 /** Interfaces that aren't real traffic: loopback, containers, VM bridges. */
 const VIRTUAL = /^(lo|veth|docker|br-|virbr|vnet|podman|cni|flannel)/;
 

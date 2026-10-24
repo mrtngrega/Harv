@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { parseNetDev, readLinuxGpu, readLinuxNetwork } from './linux.ts';
+import { parseNetDev, readLinuxCpuClock, readLinuxGpu, readLinuxNetwork } from './linux.ts';
 import { linuxProgram, withoutOwnHelpers } from './system.ts';
 
 const netDev = (wifiRx: number, wifiTx: number) =>
@@ -85,5 +85,25 @@ describe('Linux process names', () => {
       path: '/usr/bin/kwin_wayland',
     });
     expect(linuxProgram({ pid: -1, name: 'kworker/0:1', path: '' })).toEqual({ name: 'kworker/0:1', path: '' });
+  });
+});
+
+describe('Linux CPU clock', () => {
+  const root = mkdtempSync(join(tmpdir(), 'harv-cpufreq-'));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  it('averages cpufreq, falling back to /proc/cpuinfo', () => {
+    for (const [cpu, khz] of [
+      ['cpu0', 1600000],
+      ['cpu1', 2400000],
+    ] as const) {
+      mkdirSync(join(root, cpu, 'cpufreq'), { recursive: true });
+      writeFileSync(join(root, cpu, 'cpufreq', 'scaling_cur_freq'), `${khz}\n`);
+    }
+    mkdirSync(join(root, 'cpufreq'));
+    expect(readLinuxCpuClock(root)).toBe(2000);
+    const cpuinfo = () => 'processor\t: 0\ncpu MHz\t\t: 1693.5\nprocessor\t: 1\ncpu MHz\t\t: 2306.5\n';
+    expect(readLinuxCpuClock(join(root, 'missing'), cpuinfo)).toBe(2000);
+    expect(readLinuxCpuClock(join(root, 'missing'), () => undefined)).toBeUndefined();
   });
 });

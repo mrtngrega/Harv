@@ -9,7 +9,10 @@ export async function uploadAttachment(tabId: string, file: File): Promise<Attac
     headers: { 'Content-Type': 'application/octet-stream' },
     body: file,
   });
-  if (!res.ok) throw new Error(`upload failed (${res.status})`);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `upload failed (${res.status})`);
+  }
   return (await res.json()) as Attachment;
 }
 
