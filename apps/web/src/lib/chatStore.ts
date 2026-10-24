@@ -73,6 +73,8 @@ export interface ChatState {
 const newId = () => crypto.randomUUID();
 /** One-message overrides at the start ("/opus /max …") don't belong in a tab title. */
 const OVERRIDE_WORDS = /^(\s*\/(opus|sonnet|haiku|fable|low|med|medium|high|xhigh|max)\b)+\s*/i;
+/** A new chat's first title, cut like the server cuts it so it doesn't change on reload. */
+export const titleFrom = (text: string) => (text.length > 40 ? `${text.slice(0, 39)}…` : text);
 const blankTab = (): Tab => ({ id: newId(), title: 'New chat', lines: [], busy: false, currentId: null });
 
 // The model/effort choice survives reloads (per browser; storage can be unavailable).
@@ -360,13 +362,9 @@ export const chat = {
     }));
   },
 
-  /** The chat's terminal in `dir`: a new one starts there, a running one changes folder. */
+  /** The chat's terminal in `dir`: the server starts it there, moves a running one there, or restarts an exited one there. */
   terminalAt(tabId: string, dir: string) {
-    if (getChatState().tools[tabId]?.includes('terminal')) {
-      sendMessage({ type: 'term.input', id: terminalId(tabId), data: `Set-Location -LiteralPath '${dir.replace(/'/g, "''")}'\r` });
-    } else {
-      terminalStart.set(tabId, dir);
-    }
+    terminalStart.set(tabId, dir);
     chat.setView(tabId, 'terminal');
   },
 
@@ -397,7 +395,7 @@ export const chat = {
     const files = attachments.map((a) => a.name);
     updateTab(tabId, (t) => ({
       ...t,
-      title: t.title === 'New chat' ? (text.replace(OVERRIDE_WORDS, '') || text || files[0] || 'Attachment').slice(0, 24) : t.title,
+      title: t.title === 'New chat' ? titleFrom(text.replace(OVERRIDE_WORDS, '') || text || files[0] || 'Attachment') : t.title,
       stored: true,
       lines: [...t.lines, line('you', text, files.length ? { files } : {})],
     }));

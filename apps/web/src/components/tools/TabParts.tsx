@@ -21,7 +21,8 @@ export function SpecialTab({
 }) {
   return (
     <div
-      className={`animate-fade-in flex max-w-[200px] items-center gap-0.5 rounded-t-[10px] border border-b-0 ${
+      data-tab="settings"
+      className={`animate-fade-in flex flex-none items-center gap-0.5 rounded-t-[10px] border border-b-0 ${
         active ? 'border-[rgb(220_232_245/0.18)] bg-white/10' : 'border-transparent'
       }`}
     >

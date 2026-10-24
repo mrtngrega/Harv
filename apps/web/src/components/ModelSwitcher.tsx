@@ -27,8 +27,9 @@ export function ModelSwitcher() {
   const efforts = current?.efforts.length ? current.efforts : EFFORT_LEVELS;
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <div role="group" aria-label="Model" className="flex gap-1 rounded-xl bg-black/20 p-[3px]">
+    <div className="flex max-w-full min-w-0 flex-wrap items-center gap-2">
+      {/* Scrolls sideways instead of spilling out of the header on a narrow window. */}
+      <div role="group" aria-label="Model" className="no-scrollbar flex max-w-full gap-1 overflow-x-auto rounded-xl bg-black/20 p-[3px]">
         <Segment on={model === 'auto'} label="AUTO" title="Harv picks the model and effort" onClick={() => chat.setModel('auto')} />
         {catalog ? (
           catalog.models.map((m) => (

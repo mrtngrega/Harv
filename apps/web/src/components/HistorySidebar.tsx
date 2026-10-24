@@ -80,7 +80,10 @@ export function HistorySidebar() {
 
   if (!open) {
     return (
-      <nav aria-label="Chat history (collapsed)" className="glass flex w-12 flex-none flex-col items-center gap-3 rounded-2xl py-2">
+      <nav
+        aria-label="Chat history (collapsed)"
+        className="glass flex w-full flex-none flex-row items-center gap-3 rounded-2xl px-2 py-2 lg:w-12 lg:flex-col lg:px-0"
+      >
         <button
           type="button"
           onClick={() => setOpen(true)}
@@ -101,7 +104,7 @@ export function HistorySidebar() {
   return (
     <nav
       aria-label="Chat history"
-      className="glass flex max-h-[calc(var(--app-h)-110px)] w-full flex-col gap-2.5 rounded-2xl p-3 sm:w-[230px] sm:flex-none"
+      className="glass flex max-h-64 w-full flex-col gap-2.5 rounded-2xl p-3 lg:max-h-[calc(var(--app-h)-110px)] lg:w-[230px] lg:flex-none"
     >
       <div className="flex items-center justify-between">
         <span className="text-[11px] tracking-[2px] text-muted">HISTORY</span>

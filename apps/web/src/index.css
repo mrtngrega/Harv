@@ -23,6 +23,18 @@
     0 12px 32px rgb(0 0 0 / 0.28);
 }
 
+/* Thin scrollbars that sit in the glass instead of the default grey ones (in the base layer, so utilities like no-scrollbar win). */
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(220 232 245 / 0.22) transparent;
+  }
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+}
+
 @utility animate-pulse-ring {
   animation: pulse-ring 2.2s ease-out infinite;
 }

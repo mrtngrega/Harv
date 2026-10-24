@@ -29,7 +29,7 @@ export function Card({
   children?: ReactNode;
 }) {
   return (
-    <section className="animate-fade-in flex flex-col gap-2 rounded-xl bg-black/20 px-3 py-2.5">
+    <section className="animate-fade-in @container flex flex-col gap-2 rounded-xl bg-black/20 px-3 py-2.5">
       <div className="flex items-baseline gap-2">
         <h3 className="m-0 text-[13px] font-semibold">{title}</h3>
         <span className="flex-1 truncate text-[11px] text-muted">{sub}</span>
@@ -50,11 +50,14 @@ export function Rows({ rows }: { rows: [string, string | undefined][] }) {
   const shown = rows.filter((r): r is [string, string] => r[1] !== undefined && r[1] !== '—');
   if (shown.length === 0) return null;
   return (
-    <dl className="m-0 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+    // Fixed equal columns and one line per row, so a value getting longer never moves or wraps the others.
+    <dl className="m-0 grid grid-cols-1 gap-x-4 gap-y-1 text-xs @[23rem]:grid-cols-[repeat(2,minmax(0,1fr))]">
       {shown.map(([k, v]) => (
-        <div key={k} className="flex justify-between gap-2">
-          <dt className="text-muted">{k}</dt>
-          <dd className="m-0 tabular-nums">{v}</dd>
+        <div key={k} className="flex min-w-0 justify-between gap-2">
+          <dt className="flex-none whitespace-nowrap text-muted">{k}</dt>
+          <dd className="m-0 min-w-0 truncate text-right whitespace-nowrap tabular-nums" title={v}>
+            {v}
+          </dd>
         </div>
       ))}
     </dl>

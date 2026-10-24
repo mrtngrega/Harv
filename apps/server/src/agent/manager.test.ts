@@ -244,3 +244,34 @@ describe('hand-off between chats', () => {
     FakeSession.all.get('q')!.finish();
   });
 });
+
+describe('chat names with a one-message override', () => {
+  it('still names a new chat sent as "/haiku …" on AUTO', async () => {
+    const store = new ChatStore(':memory:');
+    const routes = new RouteStore(':memory:');
+    const gate = new SafetyGate(new ActionStore(':memory:'), { broadcast: () => {}, notice: () => {}, onChange: () => {} });
+    const meter = new UsageMeter(
+      { onChange: () => {}, onResume: () => {} },
+      () => routes.summary(),
+      async () => undefined,
+    );
+    const classify = vi.fn(async (..._args: unknown[]) => ({
+      category: 'chat',
+      difficulty: 1 as const,
+      stakes: 'normal' as const,
+      ambiguous: false,
+      title: 'Test file cleanup',
+    }));
+    const chats = new ChatManager(
+      store,
+      gate,
+      new Router(routes, classify),
+      meter,
+      () => {},
+      () => {},
+    );
+    await chats.send('o', '/haiku /low delete the test file', 'auto', 'medium');
+    await vi.waitFor(() => expect(store.title('o')).toBe('Test file cleanup'));
+    FakeSession.all.get('o')!.finish();
+  });
+});

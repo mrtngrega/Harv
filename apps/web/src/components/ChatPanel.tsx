@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { formatSize, uploadAttachment } from '../lib/attachments.ts';
@@ -9,10 +9,12 @@ import { chat, getChatState, SETTINGS_TAB, useChat, type Line } from '../lib/cha
 import { useSafety } from '../lib/safetyStore.ts';
 import { ActionBadge, ApprovalCard } from './ApprovalCard.tsx';
 import { SettingsView } from './SettingsView.tsx';
-import { Explorer } from './tools/explorer/Explorer.tsx';
 import { SpecialTab, TOOL_ICONS, ViewMenu } from './tools/TabParts.tsx';
-import { TerminalView } from './tools/TerminalView.tsx';
 import { setDraftText, updatePending, useDrafts, useDraftTexts } from '../lib/drafts.ts';
+
+// The terminal (xterm) and the explorer load when first opened, keeping the dashboard's first load small.
+const TerminalView = lazy(() => import('./tools/TerminalView.tsx').then((m) => ({ default: m.TerminalView })));
+const Explorer = lazy(() => import('./tools/explorer/Explorer.tsx').then((m) => ({ default: m.Explorer })));
 
 function FileChip({ name, detail, onRemove }: { name: string; detail?: string; onRemove?: () => void }) {
   return (
@@ -148,6 +150,7 @@ export function ChatPanel() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const renameCancelled = useRef(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const active = tabs.find((t) => t.id === activeId) ?? null;
   /** The active chat's log, or one of its tools (the view menu). */
@@ -166,13 +169,15 @@ export function ChatPanel() {
   // Esc is the stop hotkey: it halts the active tab and denies its waiting approvals.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || !active?.busy) return;
+      if (e.key !== 'Escape' || !active?.busy || view !== 'chat') return;
+      // Esc that closes a menu, a dialog or a rename belongs to them.
+      if (document.querySelector('[role="menu"], [role="dialog"]') || (e.target as HTMLElement).closest?.('[role="tablist"] input')) return;
       e.preventDefault();
       chat.stop(active.id);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active?.busy, active?.id]);
+  }, [active?.busy, active?.id, view]);
 
   const attach = (files: Iterable<File>) => {
     const tabId = chat.ensureTab();
@@ -192,6 +197,16 @@ export function ChatPanel() {
     if (e.dataTransfer.files.length) attach(e.dataTransfer.files);
   };
 
+  // The active tab scrolls into view in the tab bar (by hand: scrollIntoView would also scroll the page).
+  useEffect(() => {
+    const bar = tabsRef.current;
+    const tab = bar?.querySelector<HTMLElement>(`[data-tab="${activeId}"]`);
+    if (!bar || !tab) return;
+    const left = tab.offsetLeft - bar.offsetLeft;
+    if (left < bar.scrollLeft) bar.scrollLeft = left - 8;
+    else if (left + tab.offsetWidth > bar.scrollLeft + bar.clientWidth) bar.scrollLeft = left + tab.offsetWidth - bar.clientWidth + 8;
+  }, [activeId, tabs.length]);
+
   // Keep the newest output in view while Harv streams.
   const lastText = active?.lines.at(-1)?.text;
   useEffect(() => {
@@ -205,6 +220,7 @@ export function ChatPanel() {
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
+    el.style.overflowY = el.scrollHeight > el.clientHeight ? 'auto' : 'hidden';
   }, [draft, nonChat]);
 
   const send = (e: FormEvent) => {
@@ -245,88 +261,100 @@ export function ChatPanel() {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
       }}
       onDrop={(e) => !nonChat && onDrop(e)}
-      className="glass relative flex max-h-[calc(var(--app-h)-110px)] min-w-0 flex-[999_1_520px] flex-col overflow-hidden rounded-2xl"
+      className="glass relative flex h-[calc(var(--app-h)-140px)] min-h-[420px] min-w-0 flex-1 flex-col overflow-hidden rounded-2xl lg:h-auto lg:max-h-[calc(var(--app-h)-110px)] lg:min-h-0"
     >
-      <div role="tablist" aria-label="Open chats" className="flex items-end gap-1 overflow-x-auto border-b border-line px-2 pt-2">
-        {tabs.map((t) => {
-          const on = t.id === activeId;
-          return (
-            <div
-              key={t.id}
-              className={`animate-fade-in flex max-w-[200px] items-center gap-0.5 rounded-t-[10px] border border-b-0 ${
-                on ? 'border-[rgb(220_232_245/0.18)] bg-white/10' : 'border-transparent'
-              }`}
-            >
-              {renaming === t.id ? (
-                <input
-                  aria-label="Chat name"
-                  autoFocus
-                  defaultValue={t.title}
-                  maxLength={60}
-                  onFocus={(e) => e.target.select()}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') e.currentTarget.blur();
-                    if (e.key === 'Escape') {
-                      e.stopPropagation();
-                      renameCancelled.current = true;
-                      e.currentTarget.blur();
-                    }
-                  }}
-                  onBlur={(e) => {
-                    // Enter and clicking away save; Escape doesn't.
-                    const name = e.target.value.trim();
-                    if (!renameCancelled.current && name && name !== t.title) chat.rename(t.id, name);
-                    renameCancelled.current = false;
-                    setRenaming(null);
-                  }}
-                  className="my-1 ml-1.5 min-h-7 w-[150px] rounded-md border border-accent/60 bg-black/30 px-1.5 text-xs text-ink outline-none"
-                />
-              ) : (
+      <div className="flex items-end gap-1 border-b border-line px-2 pt-2">
+        {/* Tabs shrink like Chrome's, then scroll sideways (mouse wheel too); + and the view menu stay put. */}
+        <div
+          ref={tabsRef}
+          role="tablist"
+          aria-label="Open chats"
+          onWheel={(e) => {
+            if (e.deltaY && e.currentTarget.scrollWidth > e.currentTarget.clientWidth) e.currentTarget.scrollLeft += e.deltaY;
+          }}
+          className="no-scrollbar flex min-w-0 flex-[0_1_auto] items-end gap-1 overflow-x-auto"
+        >
+          {tabs.map((t) => {
+            const on = t.id === activeId;
+            return (
+              <div
+                key={t.id}
+                data-tab={t.id}
+                className={`animate-fade-in flex min-w-[84px] flex-[0_1_200px] items-center gap-0.5 rounded-t-[10px] border border-b-0 ${
+                  on ? 'border-[rgb(220_232_245/0.18)] bg-white/10' : 'border-transparent'
+                }`}
+              >
+                {renaming === t.id ? (
+                  <input
+                    aria-label="Chat name"
+                    autoFocus
+                    defaultValue={t.title}
+                    maxLength={60}
+                    onFocus={(e) => e.target.select()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur();
+                      if (e.key === 'Escape') {
+                        e.stopPropagation();
+                        renameCancelled.current = true;
+                        e.currentTarget.blur();
+                      }
+                    }}
+                    onBlur={(e) => {
+                      // Enter and clicking away save; Escape doesn't.
+                      const name = e.target.value.trim();
+                      if (!renameCancelled.current && name && name !== t.title) chat.rename(t.id, name);
+                      renameCancelled.current = false;
+                      setRenaming(null);
+                    }}
+                    className="my-1 ml-1.5 min-h-7 w-[150px] rounded-md border border-accent/60 bg-black/30 px-1.5 text-xs text-ink outline-none"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={on}
+                    title={`${t.title} · right-click to rename`}
+                    onClick={() => chat.setActive(t.id)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setRenaming(t.id);
+                    }}
+                    onKeyDown={(e) => {
+                      // F2 renames too, for the keyboard.
+                      if (e.key === 'F2') setRenaming(t.id);
+                    }}
+                    className={`flex min-h-9 cursor-pointer items-center gap-1.5 truncate pr-1 pl-3 text-xs ${on ? 'text-ink' : 'text-muted'}`}
+                  >
+                    {t.busy && <span aria-hidden="true" className="animate-blink size-1.5 flex-none rounded-full bg-accent" />}
+                    {views[t.id] && views[t.id] !== 'chat' && (
+                      <span aria-hidden="true" className="flex-none text-accent">
+                        {TOOL_ICONS[views[t.id]!]}
+                      </span>
+                    )}
+                    <span className="truncate">{t.title}</span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  role="tab"
-                  aria-selected={on}
-                  title={`${t.title} · right-click to rename`}
-                  onClick={() => chat.setActive(t.id)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setRenaming(t.id);
-                  }}
-                  onKeyDown={(e) => {
-                    // F2 renames too, for the keyboard.
-                    if (e.key === 'F2') setRenaming(t.id);
-                  }}
-                  className={`flex min-h-9 cursor-pointer items-center gap-1.5 truncate pr-1 pl-3 text-xs ${on ? 'text-ink' : 'text-muted'}`}
+                  onClick={() => chat.closeTab(t.id)}
+                  aria-label={`Close ${t.title}`}
+                  className="mr-1 size-7 cursor-pointer rounded-md text-[13px] text-muted hover:bg-white/10"
                 >
-                  {t.busy && <span aria-hidden="true" className="animate-blink size-1.5 flex-none rounded-full bg-accent" />}
-                  {views[t.id] && views[t.id] !== 'chat' && (
-                    <span aria-hidden="true" className="flex-none text-accent">
-                      {TOOL_ICONS[views[t.id]!]}
-                    </span>
-                  )}
-                  <span className="truncate">{t.title}</span>
+                  ×
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={() => chat.closeTab(t.id)}
-                aria-label={`Close ${t.title}`}
-                className="mr-1 size-7 cursor-pointer rounded-md text-[13px] text-muted hover:bg-white/10"
-              >
-                ×
-              </button>
-            </div>
-          );
-        })}
-        {settingsOpen && (
-          <SpecialTab
-            icon={TOOL_ICONS.settings}
-            title="Settings"
-            active={inSettings}
-            onSelect={chat.openSettings}
-            onClose={chat.closeSettings}
-          />
-        )}
+              </div>
+            );
+          })}
+          {settingsOpen && (
+            <SpecialTab
+              icon={TOOL_ICONS.settings}
+              title="Settings"
+              active={inSettings}
+              onSelect={chat.openSettings}
+              onClose={chat.closeSettings}
+            />
+          )}
+        </div>
         <button
           type="button"
           aria-label="New chat"
@@ -338,7 +366,10 @@ export function ChatPanel() {
         </button>
         <div className="flex-1" />
         {view === 'chat' && active?.context && (
-          <div className="px-2 pb-2.5 text-[11px] whitespace-nowrap text-muted" title="Tokens Harv sent with the last message in this chat">
+          <div
+            className="hidden px-2 pb-2.5 text-[11px] whitespace-nowrap text-muted xl:block"
+            title="Tokens Harv sent with the last message in this chat"
+          >
             context · {tokens(active.context)} tokens
           </div>
         )}
@@ -350,9 +381,13 @@ export function ChatPanel() {
           <SettingsView />
         </div>
       ) : active && view === 'terminal' ? (
-        <TerminalView key={active.id} chatId={active.id} />
+        <Suspense fallback={<p className="m-auto text-muted">Starting the terminal…</p>}>
+          <TerminalView key={active.id} chatId={active.id} />
+        </Suspense>
       ) : active && view === 'files' ? (
-        <Explorer key={active.id} id={active.id} />
+        <Suspense fallback={<p className="m-auto text-muted">Opening the explorer…</p>}>
+          <Explorer key={active.id} id={active.id} />
+        </Suspense>
       ) : (
         <div
           ref={logRef}
@@ -436,8 +471,9 @@ export function ChatPanel() {
               e.preventDefault();
               attach(e.clipboardData.files);
             }}
-            placeholder={`type a command or ask anything · /model · /attach · ${sendKey === 'enter' ? 'Shift+Enter' : 'Enter'} for a new line`}
-            className="max-h-40 min-h-11 min-w-0 flex-1 resize-none bg-transparent py-3 text-sm leading-5 outline-none placeholder:text-faint"
+            placeholder="ask anything · /help"
+            title={`${sendKey === 'enter' ? 'Enter sends, Shift+Enter' : 'Ctrl+Enter sends, Enter'} makes a new line. /help lists the commands.`}
+            className="max-h-40 min-h-11 min-w-0 flex-1 resize-none overflow-y-hidden bg-transparent py-3 text-sm leading-5 outline-none placeholder:text-faint"
           />
           <input
             ref={fileInputRef}
@@ -452,10 +488,11 @@ export function ChatPanel() {
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
+            aria-label="Attach files"
             title="Attach files (or drop them on the chat, or paste a screenshot)"
             className="min-h-11 cursor-pointer rounded-[10px] border border-[rgb(220_232_245/0.2)] bg-white/5 px-3.5 text-xs hover:bg-white/10"
           >
-            + ATTACH
+            +<span className="hidden sm:inline"> ATTACH</span>
           </button>
           {active?.busy ? (
             <button

@@ -73,6 +73,27 @@ describe('terminal restore', () => {
     second.closeAll();
   });
 
+  it('"Open in Terminal" moves a running shell, and restarts an exited one, in that folder', { timeout: 40_000 }, async () => {
+    const id = 'terminal-cd';
+    let out = '';
+    const terms = new TerminalManager({ data: (_, d) => (out += d), exit: () => {} }, dir);
+    terms.attach(id, tmpdir());
+    await waitFor(() => out.includes('PS '));
+    const target = mkdtempSync(join(tmpdir(), 'harv-cd-'));
+    const name = target.split(/[\\/]/).at(-1)!.toLowerCase();
+    terms.attach(id, target);
+    await waitFor(() => out.toLowerCase().includes(`${name}>`));
+    terms.input(id, 'exit\r');
+    await new Promise((r) => setTimeout(r, 1500));
+    out = '';
+    terms.attach(id, tmpdir());
+    await waitFor(() => out.includes('PS '));
+    expect(out.toLowerCase()).not.toContain(`${name}>`);
+    terms.close(id);
+    terms.closeAll();
+    rmSync(target, { recursive: true, force: true });
+  });
+
   it('forgets saved terminals of chats that are gone', async () => {
     const terms = new TerminalManager({ data: () => {}, exit: () => {} }, dir);
     terms.attach('terminal-keep');

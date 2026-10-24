@@ -254,8 +254,8 @@ export class ChatManager {
       return;
     }
     await this.start(tabId, message, choice, effort, files);
-    // Manual mode never asks the classifier, so a new chat gets its short name from one cheap call.
-    if (isNew && choice !== 'auto') {
+    // Manual mode and a one-message model override (/haiku …) skip the classifier, so a new chat gets its short name from one cheap call.
+    if (isNew && (choice !== 'auto' || parseOverride(message).model)) {
       void this.router.name(parseOverride(message).text, files).then((title) => title && this.autoTitle(tabId, title));
     }
   }

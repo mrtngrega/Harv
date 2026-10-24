@@ -16,7 +16,7 @@ export function App() {
 
   return (
     <div
-      className={`relative min-h-full overflow-hidden ${motion ? '' : 'still'} ${density === 'compact' ? 'compact' : ''}`}
+      className={`relative min-h-full overflow-clip ${motion ? '' : 'still'} ${density === 'compact' ? 'compact' : ''}`}
       style={
         {
           '--color-accent': accent,
@@ -37,7 +37,8 @@ export function App() {
 
       <div className="relative flex min-h-[var(--app-h)] flex-col gap-3.5 p-4">
         <Header conn={conn} />
-        <main className="flex flex-1 flex-wrap items-stretch gap-3.5">
+        {/* Three columns that shrink from 1024px up; stacked below that. */}
+        <main className="flex flex-1 flex-col items-stretch gap-3.5 lg:min-h-0 lg:flex-row">
           <HistorySidebar />
           <ChatPanel />
           <StatsPanel />

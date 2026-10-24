@@ -103,7 +103,15 @@ export class TerminalManager {
   attach(id: string, cwd?: string, cols = 100, rows = 30): TerminalReplay | undefined {
     if (!TerminalManager.validId(id)) return undefined;
     const running = this.terms.get(id);
-    if (running) return { restored: running.restored, data: running.buffer };
+    if (running && running.exited && cwd) {
+      // "Open in Terminal" on a shell that has exited: start a fresh one there.
+      this.terms.delete(id);
+      this.kill(running);
+    } else if (running) {
+      // "Open in Terminal" on a running shell: move it to that folder.
+      if (cwd && existsSync(cwd)) running.pty.write(`Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}'\r`);
+      return { restored: running.restored, data: running.buffer };
+    }
 
     const { log, meta } = this.files(id);
     let restored: string[] = [];
