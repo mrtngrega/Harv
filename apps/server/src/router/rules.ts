@@ -65,6 +65,16 @@ export function instantRules(text: string, files: Attachment[]): RuleResult {
 const NEW_TASK =
   /\b(new (task|question|topic)|different (thing|question)|something else|unrelated|now (write|build|make|create|find|research|plan))\b/i;
 
+/** Asking for real work ("now add tests for it", "fix the login bug"), not just reacting to the last answer. */
+const WORK_REQUEST =
+  /\b(do|build|implement|fix|add|make|write|create|refactor|change|update|remove|rename|design|research|plan|review|debug|analy[sz]e|compare|set up|install|migrate|rewrite|test|optimi[sz]e|convert|generate)\b/i;
+
+/** A message that asks for work on its own, so a cheap pick from small talk mustn't carry over to it. */
+export function asksForWork(text: string): boolean {
+  const t = text.trim();
+  return t.length > 25 && WORK_REQUEST.test(t);
+}
+
 /** How long a tab's last decision counts for follow-ups. */
 export const FOLLOWUP_WINDOW_MS = 20 * 60 * 1000;
 

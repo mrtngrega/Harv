@@ -62,6 +62,17 @@ export class RouteStore {
     this.db.prepare('UPDATE routes SET feedback = ? WHERE id = (SELECT MAX(id) FROM routes WHERE chat_id = ?)').run(feedback, chatId);
   }
 
+  /** How often the user asked to try harder on this kind of task (same category and difficulty) since `sinceMs`. */
+  harderStats(category: string, difficulty: number, sinceMs: number): { turns: number; harder: number } {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS turns, SUM(feedback = 'harder') AS harder FROM routes
+         WHERE lower(category) = lower(?) AND difficulty = ? AND at >= ? AND source IN ('classifier', 'followup', 'rule')`,
+      )
+      .get(category, difficulty, sinceMs) as { turns: number; harder: number | null };
+    return { turns: row.turns, harder: row.harder ?? 0 };
+  }
+
   /** The tokens a chat's latest turn used. */
   finishLast(chatId: string, usage: ChatUsage): void {
     this.db

@@ -1,17 +1,34 @@
 import { AUTO_FALLBACK, type Attachment, type ChatUsage, type RouteDecision, type RouteSource } from '@harv/shared';
 import type { RouteStore } from '../store/routes.ts';
 import { classify as haikuClassify } from './classifier.ts';
-import { instantRules, isFollowUp, parseOverride } from './rules.ts';
+import { asksForWork, instantRules, isFollowUp, parseOverride } from './rules.ts';
 import { atLeast, pickFor, stepUp, tag, type Classification, type Pick } from './table.ts';
 
 type Classify = (text: string, files: Attachment[], context?: string, title?: string) => Promise<Classification | null>;
 
 interface TabState {
   /** The decision for the task in progress (small talk doesn't replace it). */
-  task?: { pick: Pick; why: string; at: number };
+  task?: { pick: Pick; why: string; at: number; c?: Classification };
   /** The last turn ended in an error, so the next follow-up steps up. */
   failed?: boolean;
 }
+
+/** What the router knows about the chat a message is in. */
+export interface RouteContext {
+  /** A project chat: real dev work, so at least PROJECT_FLOOR. */
+  project?: boolean;
+  /** The last few lines of the chat, so the classifier judges a follow-up in context. */
+  recent?: string;
+}
+
+/** The least a project chat's work runs at (small talk excepted): the user wants the best result first. */
+export const PROJECT_FLOOR: Pick = { model: 'sonnet', effort: 'high' };
+/** Below this, a short "now do X" in an ongoing chat is classified again instead of reusing the pick. */
+const WORK_FLOOR: Pick = { model: 'sonnet', effort: 'high' };
+/** "Try harder" on at least this many similar tasks, and this share of them, starts that kind one step higher. */
+const LEARN_MIN_HARDER = 2;
+const LEARN_SHARE = 0.25;
+const LEARN_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
  * AUTO: picks model·effort for each message. Instant rules first, then a cheap
@@ -45,6 +62,7 @@ export class Router {
     message: string,
     files: Attachment[] = [],
     title?: string,
+    ctx: RouteContext = {},
   ): Promise<{ decision: RouteDecision; text: string; title?: string }> {
     const s = this.state(tabId);
     const override = parseOverride(message);
@@ -55,15 +73,21 @@ export class Router {
       return { decision: this.record(tabId, pick, 'override', 'you asked for it'), text };
     }
 
-    const auto = await this.auto(s, text, files, title);
+    const auto = await this.auto(s, text, files, title, ctx);
     let { pick, source, why } = auto;
+    if (ctx.project && why !== 'small talk' && atLeast(pick, PROJECT_FLOOR) !== pick) {
+      pick = PROJECT_FLOOR;
+      why = `${why}; project work runs at least ${tag(PROJECT_FLOOR)}`;
+    }
     if (override.effort) {
       pick = { ...pick, effort: override.effort };
       source = 'override';
       why = `effort you asked for; ${why}`;
     }
-    if (why !== 'small talk') s.task = { pick, why, at: Date.now() };
-    return { decision: this.record(tabId, pick, source, why, auto.c), text, ...(auto.c?.title ? { title: auto.c.title } : {}) };
+    if (why !== 'small talk') s.task = { pick, why, at: Date.now(), ...(auto.c ? { c: auto.c } : {}) };
+    // A follow-up reuses the task's classification for the log, but only a fresh one names the chat.
+    const named = auto.source === 'followup' ? undefined : auto.c?.title;
+    return { decision: this.record(tabId, pick, source, why, auto.c), text, ...(named ? { title: named } : {}) };
   }
 
   private async auto(
@@ -71,22 +95,35 @@ export class Router {
     text: string,
     files: Attachment[],
     title?: string,
+    ctx: RouteContext = {},
   ): Promise<{ pick: Pick; source: RouteSource; why: string; c?: Classification }> {
     const rule = instantRules(text, files);
     if (rule?.kind === 'decide') return { pick: rule.pick, source: 'rule', why: rule.why };
 
-    if (!rule && s.task && isFollowUp(text, files, s.task.at)) {
+    // A follow-up keeps the task's pick, unless it asks for new work and that pick is a cheap one (from a light start).
+    const cheap = s.task && atLeast(s.task.pick, WORK_FLOOR) !== s.task.pick;
+    if (!rule && s.task && isFollowUp(text, files, s.task.at) && !(cheap && asksForWork(text))) {
+      const why = s.task.why.replace(/^same task \((.*)\)$/, '$1');
       const up = s.failed ? stepUp(s.task.pick, this.allowFable()) : null;
-      if (up) return { pick: up, source: 'followup', why: `stepped up after the last turn failed (${s.task.why})` };
-      return { pick: s.task.pick, source: 'followup', why: `same task (${s.task.why})` };
+      if (up) return { pick: up, source: 'followup', why: `stepped up after the last turn failed (${why})`, c: s.task.c };
+      return { pick: s.task.pick, source: 'followup', why: `same task (${why})`, c: s.task.c };
     }
 
-    const c = await this.classify(text, files, s.task?.why, title);
+    const c = await this.classify(text, files, ctx.recent ?? s.task?.why, title);
     if (!c) {
       const pick = rule ? atLeast(AUTO_FALLBACK, rule.pick) : AUTO_FALLBACK;
       return { pick, source: 'fallback', why: 'the classifier didn’t answer, so the default' };
     }
     const table = pickFor(c, this.weeklyUsed(), this.allowFable());
+    // Learned from "Try harder": this kind of task keeps needing more, so start it a step higher.
+    const seen = this.log.harderStats(c.category, c.difficulty, Date.now() - LEARN_WINDOW_MS);
+    if (seen.harder >= LEARN_MIN_HARDER && seen.harder / seen.turns >= LEARN_SHARE) {
+      const up = stepUp(table.pick, this.allowFable());
+      if (up) {
+        table.pick = up;
+        table.why += `, a step up (you asked to try harder on ${seen.harder} similar tasks)`;
+      }
+    }
     if (rule && atLeast(table.pick, rule.pick) !== table.pick) {
       return { pick: rule.pick, source: 'rule', why: `${table.why}; at least ${tag(rule.pick)} for ${rule.why}`, c };
     }

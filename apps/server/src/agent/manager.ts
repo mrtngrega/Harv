@@ -498,7 +498,10 @@ export class ChatManager {
         // A new chat's title is just its first message, not a name worth keeping.
         const current = this.store.title(tabId);
         const named = current && current !== titleFrom(parseOverride(message).text.trim() || message) ? current : undefined;
-        const routed = await this.router.route(tabId, message, files, named);
+        const routed = await this.router.route(tabId, message, files, named, {
+          project: !!this.store.projectOf(tabId),
+          recent: this.recentForRouter(tabId),
+        });
         ({ decision, text } = routed);
         if (routed.title) this.autoTitle(tabId, routed.title);
       } else {
@@ -515,6 +518,20 @@ export class ChatManager {
     } finally {
       this.setRouting(tabId, false);
     }
+  }
+
+  /**
+   * The last few lines before the message being routed (it's already the chat's last line),
+   * cut short, so the classifier sees what a "now do that" refers to without costing much.
+   */
+  private recentForRouter(tabId: string): string | undefined {
+    const lines = (this.store.snapshot(tabId)?.lines ?? []).filter((l) => l.kind === 'you' || l.kind === 'harv');
+    if (lines.at(-1)?.kind === 'you') lines.pop();
+    const recent = lines.slice(-4).map((l) => {
+      const text = l.text.replace(/\s+/g, ' ').trim();
+      return `${l.kind === 'you' ? 'User' : 'Harv'}: ${text.length > 220 ? `${text.slice(0, 219)}…` : text}`;
+    });
+    return recent.length ? recent.join('\n') : undefined;
   }
 
   /** "Try harder": the last message again, one step up the ladder. */

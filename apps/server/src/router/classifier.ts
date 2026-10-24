@@ -59,7 +59,7 @@ export async function classify(text: string, files: Attachment[], context?: stri
   const timer = setTimeout(() => abort.abort(), TIMEOUT_MS);
   const message = [
     title ? `Current chat title: "${title}"` : '',
-    context ? `Earlier in this chat: ${context}` : '',
+    context ? `Earlier in this chat (for context only; route the new message):\n${context}` : '',
     files.length ? `Attached files: ${files.map((f) => `${f.name} (${Math.round(f.size / 1024)} KB)`).join(', ')}` : '',
     `Message:\n${text.length > MAX_CHARS ? `${text.slice(0, MAX_CHARS)}…` : text}`,
   ]

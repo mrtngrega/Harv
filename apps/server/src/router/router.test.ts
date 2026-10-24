@@ -166,3 +166,51 @@ describe('router', () => {
     expect(log.split().find((r) => r.model === 'sonnet' && r.effort === 'high')).toMatchObject({ harder: 1 });
   });
 });
+
+describe('router fixes (2026-10-24)', () => {
+  it('classifies a short "now do X" again when the chat started light', async () => {
+    const classify = vi.fn(async (text: string) =>
+      text.startsWith('we continue') ? c(2, { category: 'chat' }) : c(4, { category: 'code' }),
+    );
+    const { router } = newRouter(classify);
+    expect(tag((await router.route('w', 'we continue on harv project, where did we end')).decision)).toBe('haiku·medium');
+    const r = await router.route('w', 'do the startup prompt then gimme your ideas');
+    expect(classify).toHaveBeenCalledTimes(2);
+    expect(r.decision).toMatchObject({ model: 'opus', source: 'classifier' });
+    // Reactions to the answer still reuse the pick.
+    expect((await router.route('w', 'and the other tab too?')).decision.source).toBe('followup');
+  });
+
+  it('keeps reusing a strong pick for follow-up work, saving the classifier call', async () => {
+    const classify = vi.fn(async () => c(3, { category: 'code' }));
+    const { router } = newRouter(classify);
+    await router.route('k', 'Refactor the settings loader to validate every field');
+    expect((await router.route('k', 'now add tests for the new validation too')).decision).toMatchObject({ source: 'followup' });
+    expect(classify).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives project work at least sonnet·high, but not small talk', async () => {
+    const { router } = newRouter(vi.fn(async () => c(1)));
+    expect(tag((await router.route('p', 'what does this function return', [], undefined, { project: true })).decision)).toBe('sonnet·high');
+    expect(tag((await router.route('p2', 'thanks', [], undefined, { project: true })).decision)).toBe('haiku·low');
+    expect(tag((await router.route('p3', 'what does this function return')).decision)).toBe('haiku·low');
+  });
+
+  it('passes the last lines of the chat to the classifier', async () => {
+    const classify = vi.fn(async () => c(2));
+    const { router } = newRouter(classify);
+    await router.route('r', 'Plan the release notes for version two', [], undefined, { recent: 'User: hi\nHarv: hello' });
+    expect(classify).toHaveBeenCalledWith('Plan the release notes for version two', [], 'User: hi\nHarv: hello', undefined);
+  });
+
+  it('learns from "Try harder": a kind of task that keeps needing more starts a step up', async () => {
+    const { router } = newRouter(vi.fn(async () => c(2, { category: 'writing' })));
+    for (const tab of ['a', 'b']) {
+      const first = await router.route(tab, 'Write a short note to my landlord about the heating');
+      router.harder(tab, first.decision);
+    }
+    const next = await router.route('c', 'Write a short note to my neighbour about the party');
+    expect(tag(next.decision)).toBe('sonnet·medium');
+    expect(next.decision.reason).toMatch(/try harder on 2 similar tasks/);
+  });
+});
