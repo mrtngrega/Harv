@@ -420,6 +420,12 @@ export const chat = {
     updateTab(tabId, (t) => ({ ...t, lines: [...t.lines, line(kind, text)] }));
   },
 
+  /** A note in the chat that's showing, if one is (not saved; Settings stays put). */
+  noticeInActive(text: string) {
+    const { activeId, tabs } = store.get();
+    if (activeId && tabs.some((t) => t.id === activeId)) updateTab(activeId, (t) => ({ ...t, lines: [...t.lines, line('notice', text)] }));
+  },
+
   stop(tabId: string) {
     sendMessage({ type: 'chat.stop', tabId });
   },

@@ -37,4 +37,14 @@ export interface PlanUsage {
   harv: HarvUsage;
 }
 
-export type UsageServerMessage = { type: 'usage.update'; usage: PlanUsage };
+/** A plan meter got close to its limit (the dashboard shows a toast and a note in the chat). */
+export interface UsageWarning {
+  kind: 'session' | 'weekly';
+  label: string;
+  percent: number;
+  /** The threshold crossed (75, 90, 95...). */
+  threshold: number;
+  resetsAt: number | null;
+}
+
+export type UsageServerMessage = { type: 'usage.update'; usage: PlanUsage } | { type: 'usage.warning'; warning: UsageWarning };

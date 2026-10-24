@@ -107,6 +107,7 @@ export class ChatManager {
     const save = (line: StoredLine) => 'tabId' in msg && this.store.addLine(msg.tabId, line);
     switch (msg.type) {
       case 'chat.started':
+        this.meter.turnStarted();
         this.tags.set(msg.tabId, { tag: `${msg.model.split(' ')[0]!.toLowerCase()}·${msg.effort}`, reason: msg.reason });
         break;
       case 'chat.assistant':

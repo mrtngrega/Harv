@@ -22,6 +22,12 @@ function MeterCard({ m }: { m: PlanMeter }) {
   );
 }
 
+/** "just now", "3m ago". */
+function ago(at: number, now = Date.now()): string {
+  const min = Math.floor((now - at) / 60_000);
+  return min < 1 ? 'just now' : `${min}m ago`;
+}
+
 /** Claude plan meters (from `/usage`) and Harv's own tracking, laid out like the mockup. */
 export function PlanDetails({ usage }: { usage: PlanUsage | null }) {
   const { tabs, activeId } = useChat();
@@ -35,7 +41,14 @@ export function PlanDetails({ usage }: { usage: PlanUsage | null }) {
 
   return (
     <>
-      <div className="mt-1 border-t border-line px-1 pt-2.5 text-[11px] tracking-[2px] text-muted">CLAUDE PLAN</div>
+      <div className="mt-1 flex items-baseline justify-between border-t border-line px-1 pt-2.5 text-[11px] text-muted">
+        <span className="tracking-[2px]">CLAUDE PLAN</span>
+        {usage?.fetchedAt && (
+          <span className="text-faint" title="Checked every 2 minutes while you chat, every 10 when idle, and after each reply">
+            updated {ago(usage.fetchedAt)}
+          </span>
+        )}
+      </div>
 
       {usage?.pausedUntil && (
         <div className="rounded-xl border border-warn/40 bg-black/20 p-3 text-xs leading-relaxed text-ink">

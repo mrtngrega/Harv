@@ -1,12 +1,16 @@
 import { query, type SDKRateLimitInfo, type SDKUsageReport } from '@anthropic-ai/claude-agent-sdk';
-import type { HarvUsage, PlanMeter, PlanUsage } from '@harv/shared';
+import type { HarvUsage, PlanMeter, PlanUsage, UsageWarning } from '@harv/shared';
 import { buildOptions, SUBSCRIPTION_KEY_SOURCES } from '../agent/options.ts';
 
 type Limits = NonNullable<NonNullable<SDKUsageReport['rate_limits']>['limits']>;
 
-/** How often the meter refreshes on its own, and at most after turns. */
-const POLL_MS = 10 * 60 * 1000;
-const MIN_GAP_MS = 60 * 1000;
+/** How often the meter refreshes on its own: often while the user is chatting, rarely when idle. */
+const ACTIVE_POLL_MS = 2 * 60 * 1000;
+const IDLE_POLL_MS = 10 * 60 * 1000;
+/** A turn in this window counts as chatting. */
+const ACTIVE_WINDOW_MS = 10 * 60 * 1000;
+/** The quickest a turn's end can trigger another `/usage` (each one starts a Claude Code process for ~1 s). */
+const MIN_GAP_MS = 20 * 1000;
 /** Re-check this long after a reset time, so the server has rolled the window over. */
 const RESET_SLACK_MS = 15 * 1000;
 /** When a limit hits without a known reset time, look again after this long. */
@@ -81,6 +85,31 @@ export interface MeterEvents {
   onChange: (usage: PlanUsage) => void;
   /** A paused limit has reset: queued work can go. */
   onResume: () => void;
+  /** A meter crossed one of the warning thresholds (once per threshold per window). */
+  onWarning?: (warning: UsageWarning) => void;
+}
+
+/** Percentages that trigger a "getting close" warning; empty lists turn warnings off. */
+export interface WarnThresholds {
+  session: number[];
+  weekly: number[];
+}
+
+export const DEFAULT_WARN: WarnThresholds = { session: [75, 90, 95], weekly: [75, 90] };
+
+/**
+ * The thresholds a meter has newly crossed: the highest one only, so a jump
+ * from 70% to 96% gives one warning, not three. `warned` remembers what was
+ * said per window (its reset time), and is updated.
+ */
+export function newWarning(m: PlanMeter, thresholds: WarnThresholds, warned: Set<string>): UsageWarning | null {
+  const kind = m.kind === 'session' ? 'session' : m.kind === 'weekly_all' ? 'weekly' : null;
+  if (!kind || m.percent >= 100) return null;
+  const window = `${kind}:${m.resetsAt ?? 'unknown'}`;
+  const crossed = thresholds[kind].filter((t) => m.percent >= t && !warned.has(`${window}:${t}`));
+  if (crossed.length === 0) return null;
+  for (const t of crossed) warned.add(`${window}:${t}`);
+  return { kind, label: m.label, percent: Math.round(m.percent), threshold: Math.max(...crossed), resetsAt: m.resetsAt };
 }
 
 /**
@@ -97,17 +126,42 @@ export class UsageMeter {
   private poll: NodeJS.Timeout | null = null;
   private soon: NodeJS.Timeout | null = null;
   private resumeTimer: NodeJS.Timeout | null = null;
+  private lastActivity = 0;
+  /** Warnings already given ("session:<reset>:90"). */
+  private warned = new Set<string>();
   queued = 0;
 
   constructor(
     private events: MeterEvents,
     private harv: () => HarvUsage,
     private fetch: () => Promise<SDKUsageReport | undefined> = fetchReport,
+    private thresholds: () => WarnThresholds = () => DEFAULT_WARN,
   ) {}
 
   start(): void {
     void this.refresh();
-    this.poll = setInterval(() => void this.refresh(), POLL_MS);
+    this.schedule();
+  }
+
+  /** The next refresh on its own: in 2 minutes while the user is chatting, else 10. */
+  private schedule() {
+    if (this.poll) clearTimeout(this.poll);
+    const active = Date.now() - this.lastActivity < ACTIVE_WINDOW_MS;
+    this.poll = setTimeout(
+      () => {
+        void this.refresh();
+        this.schedule();
+      },
+      active ? ACTIVE_POLL_MS : IDLE_POLL_MS,
+    );
+    this.poll.unref?.();
+  }
+
+  /** A turn began: the user is chatting, so check more often. */
+  turnStarted(): void {
+    const wasIdle = Date.now() - this.lastActivity >= ACTIVE_WINDOW_MS;
+    this.lastActivity = Date.now();
+    if (wasIdle && this.poll) this.schedule();
   }
 
   stop(): void {
@@ -138,8 +192,9 @@ export class UsageMeter {
     this.events.onChange(this.snapshot());
   }
 
-  /** After a turn: refresh soon, but not more than once a minute. */
+  /** After a turn: refresh soon, but not more than every 20 seconds. */
   turnFinished(): void {
+    this.lastActivity = Date.now();
     if (this.soon) return;
     const wait = Math.max(3000, this.lastFetch + MIN_GAP_MS - Date.now());
     this.soon = setTimeout(() => {
@@ -160,6 +215,7 @@ export class UsageMeter {
           this.extraUsageOn = parsed.extraUsageOn;
           this.fetchedAt = Date.now();
           this.checkLimits();
+          this.checkWarnings();
         }
       } catch {
         // Keep the last reading; the next poll tries again.
@@ -179,7 +235,17 @@ export class UsageMeter {
       if (info.resetsAt) meter.resetsAt = info.resetsAt * 1000;
     }
     if (info.status === 'rejected') this.pause(info.resetsAt ? info.resetsAt * 1000 : (meter?.resetsAt ?? null));
+    else this.checkWarnings();
     this.publish();
+  }
+
+  /** Tells the dashboard when a meter gets close to its limit. */
+  private checkWarnings() {
+    const thresholds = this.thresholds();
+    for (const m of this.meters) {
+      const warning = newWarning(m, thresholds, this.warned);
+      if (warning) this.events.onWarning?.(warning);
+    }
   }
 
   /** A limit was hit. Until `until` (epoch ms), messages queue instead of being sent. */

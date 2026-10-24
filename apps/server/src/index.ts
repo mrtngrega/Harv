@@ -84,6 +84,7 @@ const meter = new UsageMeter(
       chats.refreshStatus();
     },
     onResume: () => void chats.flushQueue(),
+    onWarning: (warning) => broadcast({ type: 'usage.warning', warning }),
   },
   () => routes.summary(),
 );

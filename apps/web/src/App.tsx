@@ -3,6 +3,7 @@ import { Header } from './components/Header.tsx';
 import { HistorySidebar } from './components/HistorySidebar.tsx';
 import { ChatPanel } from './components/ChatPanel.tsx';
 import { StatsPanel } from './components/StatsPanel.tsx';
+import { UsageToast } from './components/UsageToast.tsx';
 import { useBackground, useConnection, useSettings } from './lib/useHarvSocket.ts';
 
 export function App() {
@@ -30,6 +31,7 @@ export function App() {
           <StatsPanel />
         </main>
       </div>
+      <UsageToast />
     </div>
   );
 }
