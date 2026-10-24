@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "dev": "concurrently -n server,web -c cyan,magenta \"npm run dev -w @harv/server\" \"npm run dev -w @harv/web\"",
+    "harv": "concurrently -k -n server,web -c cyan,magenta \"npm run start -w @harv/server\" \"npm run dev -w @harv/web\"",
     "build": "npm run build -w @harv/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",

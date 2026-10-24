@@ -1,4 +1,6 @@
+import { spawn } from 'node:child_process';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { basename, join } from 'node:path';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
@@ -277,6 +279,33 @@ app.post<{ Querystring: { dir?: string; name?: string } }>('/api/files/upload', 
 
 // Lets the dashboard retry starting the sensors (e.g. after the UAC prompt was declined).
 app.post('/api/sensors/start', async () => ({ result: await ensureLhmRunning() }));
+
+// Stopping and restarting Harv (scripts/harv.ps1, the desktop shortcuts and Settings' Restart button).
+const HARV_SCRIPT = fileURLToPath(new URL('../../../scripts/harv.ps1', import.meta.url));
+const shutdown = (reason: string) => {
+  app.log.info({ reason }, 'Shutting down');
+  setTimeout(() => {
+    void app.close().finally(() => process.exit(0));
+    setTimeout(() => process.exit(0), 3000).unref();
+  }, 200);
+};
+app.post('/api/shutdown', async () => {
+  shutdown('asked to stop');
+  return { ok: true };
+});
+app.post('/api/restart', async () => {
+  // `start` detaches the script from Harv's process tree, so stopping Harv doesn't stop it; it waits, then starts Harv again.
+  // Passed verbatim: Node would otherwise escape start's empty "" window title and break the command.
+  const command = `start "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${HARV_SCRIPT}" -Action restart -Delay 2 -NoBrowser`;
+  spawn('cmd.exe', ['/d', '/s', '/c', `"${command}"`], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+    windowsVerbatimArguments: true,
+  }).unref();
+  shutdown('restarting');
+  return { ok: true };
+});
 
 app.get('/ws', { websocket: true }, (socket) => {
   const send = (msg: ServerMessage) => socket.send(JSON.stringify(msg));

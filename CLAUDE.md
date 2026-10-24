@@ -62,8 +62,18 @@ Harv runs only on the user's Claude subscription, which reaches Claude through t
 
 - Use Harv only within Anthropic's terms for personal use: never host or share it, never read or store Claude credentials, keep the Claude Code binary unmodified, and brand it "Harv", never "Claude Code". See `docs/PLAN.md` §1.
 
+## Developing Harv from inside Harv
+
+The user develops Harv from a Harv project chat, exactly like the Claude Code sessions that built it (same rules, same memory). That chat runs *inside* the Harv it's changing, so:
+
+- **Never stop or restart Harv yourself.** Don't kill node/tsx/vite, don't touch ports 4317/5173, don't run `scripts/harv.ps1`, `npm run dev` or `npm run harv`, and skip "stop the dev servers" when wrapping up. Any of these ends your own session mid-reply.
+- Harv runs with `npm run harv`: the **server doesn't auto-restart**. Changes under `apps/web` show up at once (Vite hot reload). Changes under `apps/server` or `packages/shared` only take effect after a restart: finish the work, run the checks, commit, then ask the user to press **Settings › Startup › Restart Harv** (or the "Restart Harv" desktop shortcut). The chat comes back after the restart (tabs and sessions are restored); verify the change then.
+- Verify without restarting where you can: `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, and `node scripts/ui-check/…` against the running dashboard (see `scripts/ui-check/README.md`). `node scripts/ui-check/usage.mjs` shows the plan meters; tell the user at 75% and 90% of the session.
+- If Vite seems to serve old code after an edit, ask the user to restart Harv (a known Windows watcher hiccup).
+
 ## Commands
 
+- `npm run harv`: how Harv normally runs (server without auto-restart, plus the dashboard). Started, stopped and restarted by `scripts/harv.ps1 start|stop|restart` (desktop shortcuts "Harv", "Stop Harv", "Restart Harv", made by `scripts/install-shortcuts.ps1`; logs in `~/.harv/logs`). Stop asks the server to shut down cleanly (`POST /api/shutdown`) before cleaning up its ports; Settings' Restart button calls `POST /api/restart`, which runs the script detached.
 - `npm run dev`: server (tsx watch, http://127.0.0.1:4317) and web (Vite, http://127.0.0.1:5173). Vite proxies `/api` and `/ws` to the server.
 - `npm test`: Vitest across workspaces. Run one test file with `npx vitest run apps/server/src/env.test.ts`, or one test by name with `npx vitest run -t "removes API credentials"`.
 - `npm run typecheck` (`tsc --noEmit` in each workspace), `npm run lint` (ESLint flat config), `npm run format` (Prettier).

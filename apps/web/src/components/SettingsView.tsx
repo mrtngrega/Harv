@@ -201,6 +201,32 @@ function WorkFolder() {
   );
 }
 
+/** Restarts the Harv server (to load changes to its own code); the page reconnects by itself. */
+function RestartButton() {
+  const [state, setState] = useState<'idle' | 'asking' | 'restarting'>('idle');
+  if (state === 'restarting') return <p className="m-0 text-[11px] text-accent">Restarting… the page reconnects in a few seconds.</p>;
+  return (
+    <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+      <button
+        type="button"
+        onClick={() => {
+          if (state === 'idle') return setState('asking');
+          setState('restarting');
+          void fetch('/api/restart', { method: 'POST' }).catch(() => {});
+        }}
+        className="min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 hover:bg-white/10"
+      >
+        {state === 'asking' ? 'Yes, restart now' : 'Restart Harv'}
+      </button>
+      <span className="text-[11px] text-faint">
+        {state === 'asking'
+          ? 'Any reply in progress stops. Tabs, drafts and terminals come back.'
+          : 'Loads changes to Harv’s own server code. Stop and start from the desktop shortcuts.'}
+      </span>
+    </div>
+  );
+}
+
 function Projects() {
   const { list, error } = useProjects();
   const { projectsDir } = useSettings();
@@ -622,6 +648,7 @@ export function SettingsView() {
           hint="Starts LibreHardwareMonitor with Harv (Windows asks for permission). Off, temperatures and fans stay hidden until you press Start sensors."
           onChange={(startSensors) => updateSettings({ startSensors })}
         />
+        <RestartButton />
       </Section>
 
       <ProtectedFolders />

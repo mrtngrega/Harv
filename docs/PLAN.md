@@ -200,6 +200,12 @@ The user's wish: Harv is the only AI they use, half of it for dev sessions like 
 - **As built:** `projects` table + `chats.project_id` in `harv.db`; `ChatManager.setProject` (a session can't move folders, so the next message starts a new session with the last ~30 lines as context, `carry`); Harv tools `start_project` (folder in Settings › Projects › "New projects in", default `~/Projects`; `git init -b main`; starter `CLAUDE.md`), `open_project`, `list_projects`; dashboard: a chat's ≡ menu has a Project section, ▣ badge on project tabs and history rows, Settings › Projects (add/forget folders, projects folder); a project chat's terminal and explorer open in the project. Claude Code's agent tools (TodoWrite, Task/Agent, plan mode, BashOutput/KillShell) are green only in project chats. Writing Claude Code memory notes (`~/.claude/projects/*/memory/*.md`) is allowed; the rest of `.claude` stays blocked.
 - **Verified live (Haiku·low, Harv repo):** `npm --version` ran with no card, the project's CLAUDE.md was in context, the auto-memory directory is `~/.claude/projects/C--My-files-Code-Harv/memory` (the same as the Claude Code dev sessions), and it calls itself Harv (the preset says "Claude Code", so the append states Harv's identity first).
 
+## 6g. Running Harv day to day, and developing it from inside (2026-10-24)
+
+- `npm run harv` (server without auto-restart + dashboard), started/stopped/restarted by `scripts/harv.ps1` (clean shutdown through `POST /api/shutdown`, then port cleanup; logs in `~/.harv/logs`, including `harv-script.log`). Desktop shortcuts "Harv", "Restart Harv", "Stop Harv" (`scripts/install-shortcuts.ps1`, icons from `scripts/make-icons.py`). Settings › Startup › Restart Harv (`POST /api/restart` runs the script detached through `cmd start`, verbatim arguments). Verified: stop (clean, "asked to stop"), start, restart from the script and from the endpoint.
+- The user now develops Harv from a Harv project chat (prompt in `docs/harv-handoff.md`). Rules for that are in CLAUDE.md "Developing Harv from inside Harv": never stop/restart Harv from inside; server changes need the user's Restart.
+- UI check scripts moved into the repo: `scripts/ui-check/` (CDP-driven headless Chrome screenshots, layout-shift watcher, usage meters).
+
 ## 7. Risks and open questions
 
 - **Terms can change.** Re-check the legal page and the Agent SDK credit status before each milestone release.
