@@ -44,9 +44,19 @@ export function topProcesses(
   };
 }
 
-export async function readProcesses(): Promise<{ byCpu: ProcessUsage[]; byMem: ProcessUsage[] }> {
+/** One running process, as the watchdog sees it. */
+export interface ProcessInfo {
+  pid: number;
+  name: string;
+  /** Share of the whole CPU, 0–100. */
+  cpu: number;
+  path: string | null;
+}
+
+export async function readProcesses(): Promise<{ byCpu: ProcessUsage[]; byMem: ProcessUsage[]; all: ProcessInfo[] }> {
   const { list } = await si.processes();
-  return topProcesses(list);
+  const all = list.filter((p) => !IDLE.has(p.name)).map((p) => ({ pid: p.pid, name: p.name, cpu: p.cpu, path: p.path || null }));
+  return { ...topProcesses(list), all };
 }
 
 export async function readVolumes(): Promise<VolumeMetrics[]> {

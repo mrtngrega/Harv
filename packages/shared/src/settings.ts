@@ -66,6 +66,12 @@ export interface HarvSettings {
   startSensors: boolean;
   /** Bring back the tabs, tools and drafts after a restart, like Chrome. */
   restoreTabs: boolean;
+
+  // Watchdog
+  /** Warn about overheating, background apps hogging the CPU/GPU, and dangerous software. */
+  watchdog: boolean;
+  /** Programs the watchdog never warns about (lowercase exe names, e.g. "blender.exe"). */
+  watchdogIgnored: string[];
 }
 
 export const DEFAULT_SETTINGS: HarvSettings = {
@@ -93,6 +99,8 @@ export const DEFAULT_SETTINGS: HarvSettings = {
   projectsDir: '',
   startSensors: true,
   restoreTabs: true,
+  watchdog: true,
+  watchdogIgnored: [],
 };
 
 export type SettingsClientMessage = { type: 'settings.update'; patch: Partial<HarvSettings> };

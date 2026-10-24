@@ -3,7 +3,7 @@ import type { MetricsSnapshot, ProcessUsage, VolumeMetrics } from '@harv/shared'
 import { readingsFromLhm } from './fromLhm.ts';
 import { fetchLhm } from './lhm.ts';
 import { readNvidiaSmi } from './nvidia.ts';
-import { readCpuMemFallback, readProcesses, readStaticInfo, readVolumes, type StaticInfo } from './system.ts';
+import { readCpuMemFallback, readProcesses, readStaticInfo, readVolumes, type ProcessInfo, type StaticInfo } from './system.ts';
 
 const TICK_MS = 1000;
 const FALLBACK_TICK_MS = 2000;
@@ -19,6 +19,7 @@ type Listener = (snapshot: MetricsSnapshot) => void;
  */
 export class MetricsCollector {
   private listeners = new Set<Listener>();
+  private processListeners = new Set<(list: ProcessInfo[]) => void>();
   private timers: ReturnType<typeof setTimeout>[] = [];
   private staticInfo: StaticInfo | null = null;
   private processes: { byCpu: ProcessUsage[]; byMem: ProcessUsage[] } = { byCpu: [], byMem: [] };
@@ -32,6 +33,12 @@ export class MetricsCollector {
   onSnapshot(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** Every running process, each time the list refreshes (~5 s; the watchdog reads it). */
+  onProcesses(listener: (list: ProcessInfo[]) => void): () => void {
+    this.processListeners.add(listener);
+    return () => this.processListeners.delete(listener);
   }
 
   /** `tickMs`: how often a snapshot is pushed (the user's "stats update" setting); read before every tick. */
@@ -63,7 +70,9 @@ export class MetricsCollector {
   }
 
   private async refreshProcesses() {
-    this.processes = await readProcesses();
+    const { byCpu, byMem, all } = await readProcesses();
+    this.processes = { byCpu, byMem };
+    for (const listener of this.processListeners) listener(all);
   }
 
   private async refreshVolumes() {

@@ -54,6 +54,14 @@ export function cleanSettings(raw: Raw, base: HarvSettings = DEFAULT_SETTINGS): 
     projectsDir: folder(raw.projectsDir, base.projectsDir),
     startSensors: bool(raw.startSensors, base.startSensors),
     restoreTabs: bool(raw.restoreTabs, base.restoreTabs),
+    watchdog: bool(raw.watchdog, base.watchdog),
+    watchdogIgnored: Array.isArray(raw.watchdogIgnored)
+      ? [
+          ...new Set(
+            raw.watchdogIgnored.filter((n): n is string => typeof n === 'string' && n.trim() !== '').map((n) => n.trim().toLowerCase()),
+          ),
+        ]
+      : base.watchdogIgnored,
   };
 }
 

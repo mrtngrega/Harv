@@ -6,6 +6,7 @@ import {
   type MetricsSnapshot,
   type PlanUsage,
   type Project,
+  type WatchdogAlert,
 } from '@harv/shared';
 import { createStore } from './createStore.ts';
 import { onConnectionChange, onServerMessage, sendMessage } from './socket.ts';
@@ -23,9 +24,12 @@ const connection = createStore<HarvConnection>({ connected: false, status: 'idle
 const metrics = createStore<MetricsSnapshot | null>(null);
 const catalog = createStore<Catalog | null>(null);
 const usage = createStore<PlanUsage | null>(null);
+// Missing keys fall back to the defaults (a server older than the dashboard after a hot reload).
 const settings = createStore<HarvSettings>(DEFAULT_SETTINGS);
 /** Folders Harv works on as projects, and the last error adding one. */
 const projects = createStore<{ list: Project[]; error: string | null }>({ list: [], error: null });
+/** The PC watchdog's latest warnings, newest first (the server keeps 20). */
+const watchdog = createStore<WatchdogAlert[]>([]);
 /** Background photo version for cache-busting; null = none set, undefined = not known yet. */
 const background = createStore<{ version: number | null | undefined }>({ version: undefined });
 
@@ -38,9 +42,13 @@ onServerMessage((msg) => {
       if (msg.metrics) metrics.set(msg.metrics);
       if (msg.catalog) catalog.set(msg.catalog);
       usage.set(msg.usage);
-      settings.set(msg.settings);
+      settings.set({ ...DEFAULT_SETTINGS, ...msg.settings });
       background.set({ version: msg.background });
       projects.set({ list: msg.projects, error: null });
+      watchdog.set(msg.watchdog ?? []);
+      break;
+    case 'watchdog.alert':
+      watchdog.set((list) => [msg.alert, ...list].slice(0, 20));
       break;
     case 'projects':
       projects.set({ list: msg.projects, error: null });
@@ -61,7 +69,7 @@ onServerMessage((msg) => {
       usage.set(msg.usage);
       break;
     case 'settings':
-      settings.set(msg.settings);
+      settings.set({ ...DEFAULT_SETTINGS, ...msg.settings });
       break;
     case 'background':
       background.set({ version: msg.version });
@@ -76,6 +84,7 @@ export const useUsage = usage.use;
 export const useSettings = settings.use;
 export const useBackground = background.use;
 export const useProjects = projects.use;
+export const useWatchdog = watchdog.use;
 export const getProjects = () => projects.get().list;
 
 export const projectActions = {

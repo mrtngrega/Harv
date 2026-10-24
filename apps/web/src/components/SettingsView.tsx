@@ -1,6 +1,8 @@
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ACCENTS, COMPACT_ROWS, DEFAULT_SETTINGS, WARN_CHOICES, type CompactRow, type HarvSettings } from '@harv/shared';
-import { projectActions, updateSettings, useBackground, useProjects, useSettings } from '../lib/useHarvSocket.ts';
+import { projectActions, updateSettings, useBackground, useProjects, useSettings, useWatchdog } from '../lib/useHarvSocket.ts';
+import { lineTime } from '../lib/format.ts';
+import { askHarvAbout } from './WatchdogToast.tsx';
 
 const ACCENT_NAMES: Record<string, string> = {
   '#A8C8E8': 'Ice blue',
@@ -374,6 +376,57 @@ function BackgroundPicker() {
   );
 }
 
+/** Settings › Watchdog: on/off, the programs it ignores, and what it said lately. */
+function Watchdog() {
+  const { watchdog, watchdogIgnored } = useSettings();
+  const recent = useWatchdog();
+  return (
+    <Section title="Watchdog">
+      <Toggle
+        on={watchdog}
+        label="Watch my PC"
+        hint="Warns when something overheats for minutes, a program without a window hogs the CPU or GPU for 5+ minutes, Windows Defender finds a threat or is off, or a known miner or remote-control tool runs. Quiet by design: no Claude usage, at most one ordinary warning per 10 minutes."
+        onChange={(on) => updateSettings({ watchdog: on })}
+      />
+      {watchdogIgnored.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-faint">Never warns about</span>
+          {watchdogIgnored.map((app) => (
+            <span key={app} className="inline-flex items-center gap-1 rounded-md border border-line bg-white/5 py-0.5 pr-0.5 pl-2">
+              {app}
+              <button
+                type="button"
+                aria-label={`Warn about ${app} again`}
+                onClick={() => updateSettings({ watchdogIgnored: watchdogIgnored.filter((x) => x !== app) })}
+                className="size-5 cursor-pointer rounded text-muted hover:bg-white/10"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {recent.length > 0 && (
+        <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs">
+          {recent.slice(0, 6).map((a) => (
+            <li key={a.id} className="flex min-w-0 items-center gap-2" title={a.detail}>
+              <span className="flex-none text-faint">{lineTime(a.at)}</span>
+              <span className={`min-w-0 flex-1 truncate ${a.severity === 'critical' ? 'text-warn' : 'text-muted'}`}>{a.title}</span>
+              <button
+                type="button"
+                onClick={() => askHarvAbout(a)}
+                className="flex-none cursor-pointer rounded px-1.5 text-accent hover:bg-accent/15"
+              >
+                ask
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  );
+}
+
 function ProtectedFolders() {
   const { protectedPaths } = useSettings();
   const [draft, setDraft] = useState('');
@@ -634,6 +687,8 @@ export function SettingsView() {
           onChange={(confirmYellow) => updateSettings({ confirmYellow })}
         />
       </Section>
+
+      <Watchdog />
 
       <Section title="Startup">
         <Toggle
