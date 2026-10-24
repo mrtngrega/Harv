@@ -98,7 +98,7 @@ Since 2026-10-24 (evening) the user develops Harv in **Claude Code** again ("it 
   - Model changes use `q.setModel()`. Effort changes use `q.applyFlagSettings({ effortLevel })`, so context is kept.
   - `manager.ts` maps tabs to sessions, derives `idle`/`thinking`/`working`, asks the router for AUTO turns, and handles "Try harder" (`chat.harder`: re-asks one ladder step up).
   - `catalog.ts` reads `accountInfo()`, `supportedModels()` and `supportedCommands()` without sending a prompt, so it uses no plan usage.
-  - Messages sent while a chat is busy queue and run when the turn ends; `/name` runs a Claude Code command or skill as typed, and `commands.ts` refuses billed or terminal-only ones (`docs/PLAN.md` §6g).
+  - Messages sent while a chat is busy queue and run when the turn ends; `/name` runs a Claude Code command or skill as typed, and `commands.ts` refuses billed or terminal-only ones (`docs/PLAN.md` §6g). `/btw` is Harv's own (`btw.ts`: a forked one-turn query, answered even mid-reply, never queued); `/clear` empties the tab and its saved lines (`chat.cleared`); queued messages have "send now" (`chat.sendNow`).
   - `options.ts` builds every query:
     - an explicit `env` with no API key
     - `cwd` set to `~/.harv/workspace`
@@ -117,6 +117,7 @@ Since 2026-10-24 (evening) the user develops Harv in **Claude Code** again ("it 
 - `apps/server/src/safety`: the permission gate (see "Harv's safety model" below and `docs/PLAN.md` §4).
   - `classify.ts` gives each tool call a tier, `gate.ts` enforces it from the SDK hooks, `backup.ts` handles backups and Undo, and `paths.ts` has path helpers, the workspace path and `~/.harv/settings.json` (`protectedPaths`).
   - The action log is `store/actions.ts` (an `actions` table in `harv.db`). Tool lines in the chat carry the tool_use id (`ref`), which is also the action id.
+  - Read-only PowerShell (pipelines, script blocks, safe .NET calls) is green via `isReadOnlyPowerShell`; credential stores are `SENSITIVE_PATHS` (blocked even for reads). Approval cards offer **Approve all for this reply** (`gate.trustedTurns`, cleared on `chat.done`) and **Don't ask again** (`allowRules` in settings, from `ruleOf`/`rulesFor`; a covered command becomes yellow). See `docs/PLAN.md` §6k.
   - Any change here needs `classify.test.ts` / `gate.test.ts` cases. When in doubt, a command is red.
 - `index.ts` refuses any request whose `Origin` isn't the dashboard (any web page can reach 127.0.0.1, including the `/ws` upgrade), and any request the browser marks `Sec-Fetch-Site: cross-site/same-site` (the file API can read any file).
 - `apps/server/src/tools`: each chat's tools (`docs/PLAN.md` §6d). `terminal.ts` (node-pty PowerShell per chat, id `terminal-<chatId>`, started on `term.attach`, scrollback replay, saved to `~/.harv/terminals` via a headless xterm and restored after a restart); `files.ts`/`fileOps.ts` (the file explorer's file system work; routes `/api/files/*` in `index.ts`). The browser tab was removed for now (restore from commit a3d96e0).

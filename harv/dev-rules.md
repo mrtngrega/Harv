@@ -27,7 +27,7 @@ Harv loads this in every project chat (a chat bound to a project folder), on top
 
 ## End of session
 
-When the user says goodbye or that they're done for now, wrap up without being asked:
+The keyword is **"bye"**: when the user says bye (or clearly signs off another way), wrap up without being asked:
 
 1. Make sure the work is in a good state: run the checks; never leave the main branch broken without a note.
 2. Update the docs (plan status, what's next, new gotchas).
