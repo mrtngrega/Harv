@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useProjects } from '../lib/useHarvSocket.ts';
-import type { HistoryItem } from '@harv/shared';
+import type { HistoryItem, Project } from '@harv/shared';
 import { chat, useChat, useHistory } from '../lib/chatStore.ts';
 
 const DAY = 86_400_000;
@@ -20,8 +20,6 @@ function groupByDay(items: HistoryItem[], now = new Date()): { label: string; it
 
 function HistoryRow({ item, active }: { item: HistoryItem; active: boolean }) {
   const [confirming, setConfirming] = useState(false);
-  const { list } = useProjects();
-  const project = list.find((p) => p.id === item.projectId)?.name;
 
   if (confirming) {
     return (
@@ -53,7 +51,6 @@ function HistoryRow({ item, active }: { item: HistoryItem; active: boolean }) {
           {item.open && <span aria-label="open" className="size-1.5 flex-none rounded-full bg-accent/70" />}
           <span className="truncate">{item.title}</span>
         </span>
-        {project && <span className="w-full truncate text-[11px] text-accent/80">▣ {project}</span>}
         {item.snippet && <span className="w-full truncate text-[11px] text-faint">{item.snippet}</span>}
       </button>
       <button
@@ -68,11 +65,39 @@ function HistoryRow({ item, active }: { item: HistoryItem; active: boolean }) {
   );
 }
 
+/**
+ * One row per project (the user's wish): its chats stay out of the dated history.
+ * Clicking it goes to the project's open tab, else its latest chat, else a new chat in it.
+ */
+function ProjectRow({ project, latest, active }: { project: Project; latest?: HistoryItem; active: boolean }) {
+  const { tabs } = useChat();
+  const open = () => {
+    const tab = tabs.find((t) => t.projectId === project.id);
+    if (tab) chat.setActive(tab.id);
+    else if (latest) chat.openFromHistory(latest.id);
+    else chat.setProject(chat.newTab(), project.id);
+  };
+  return (
+    <button
+      type="button"
+      onClick={open}
+      title={project.path}
+      className={`flex min-h-9 w-full cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-left text-xs transition-colors hover:bg-white/5 ${active ? 'bg-white/10' : ''}`}
+    >
+      <span aria-hidden="true" className="flex-none text-accent/80">
+        ▣
+      </span>
+      <span className="truncate">{project.name}</span>
+    </button>
+  );
+}
+
 export function HistorySidebar() {
   // Starts collapsed (the user's wish); the ‹ › buttons match the stats panel's.
   const [open, setOpen] = useState(false);
   const { items, query } = useHistory();
-  const { activeId } = useChat();
+  const { activeId, tabs } = useChat();
+  const { list: projects } = useProjects();
   const [draft, setDraft] = useState(query);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -100,7 +125,15 @@ export function HistorySidebar() {
     );
   }
 
-  const groups = groupByDay(items);
+  // Project chats live under their project's row, not in the dated list.
+  const groups = groupByDay(items.filter((i) => !i.projectId));
+  const latest = new Map<string, HistoryItem>();
+  for (const item of items) if (item.projectId && !latest.has(item.projectId)) latest.set(item.projectId, item);
+  const q = query.trim().toLowerCase();
+  const shownProjects = projects
+    .filter((p) => !q || latest.has(p.id) || p.name.toLowerCase().includes(q))
+    .sort((a, b) => (latest.get(b.id)?.updatedAt ?? 0) - (latest.get(a.id)?.updatedAt ?? 0) || a.name.localeCompare(b.name));
+  const activeProject = tabs.find((t) => t.id === activeId)?.projectId;
 
   return (
     <nav
@@ -128,20 +161,28 @@ export function HistorySidebar() {
         className="min-h-9 rounded-[9px] border border-line bg-black/20 px-2.5 text-xs outline-none placeholder:text-faint focus:border-accent/60"
       />
       <div className="-mx-1 flex flex-col gap-2 overflow-y-auto px-1">
-        {groups.length === 0 ? (
-          <p className="px-2 pt-4 text-xs leading-relaxed text-faint">
-            {query ? 'No chats match.' : 'No chats yet. Saved chats will show up here.'}
-          </p>
-        ) : (
-          groups.map((g) => (
-            <div key={g.label} className="flex flex-col gap-0.5">
-              <div className="px-2 pt-1 pb-0.5 text-[11px] text-muted">{g.label}</div>
-              {g.items.map((item) => (
-                <HistoryRow key={item.id} item={item} active={item.id === activeId} />
-              ))}
-            </div>
-          ))
+        {shownProjects.length > 0 && (
+          <div className="flex flex-col gap-0.5">
+            <div className="px-2 pt-1 pb-0.5 text-[11px] text-muted">Projects</div>
+            {shownProjects.map((p) => (
+              <ProjectRow key={p.id} project={p} latest={latest.get(p.id)} active={p.id === activeProject} />
+            ))}
+          </div>
         )}
+        {groups.length === 0
+          ? !shownProjects.length && (
+              <p className="px-2 pt-4 text-xs leading-relaxed text-faint">
+                {query ? 'No chats match.' : 'No chats yet. Saved chats will show up here.'}
+              </p>
+            )
+          : groups.map((g) => (
+              <div key={g.label} className="flex flex-col gap-0.5">
+                <div className="px-2 pt-1 pb-0.5 text-[11px] text-muted">{g.label}</div>
+                {g.items.map((item) => (
+                  <HistoryRow key={item.id} item={item} active={item.id === activeId} />
+                ))}
+              </div>
+            ))}
       </div>
     </nav>
   );
