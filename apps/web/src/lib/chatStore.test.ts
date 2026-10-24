@@ -10,6 +10,21 @@ function openTab(): string {
 
 const tab = (id: string) => getChatState().tabs.find((t) => t.id === id)!;
 
+describe('tab order', () => {
+  it('moves a tab before or after another', () => {
+    const [a, b, c] = [openTab(), openTab(), openTab()];
+    const order = () => getChatState().tabs.map((t) => t.id).filter((id) => [a, b, c].includes(id));
+    expect(order()).toEqual([a, b, c]);
+    chat.moveTab(c, a, false);
+    expect(order()).toEqual([c, a, b]);
+    chat.moveTab(c, b, true);
+    expect(order()).toEqual([a, b, c]);
+    chat.moveTab(a, a, true);
+    chat.moveTab('missing', a, true);
+    expect(order()).toEqual([a, b, c]);
+  });
+});
+
 describe('chat stream handling', () => {
   it('builds a reply from started → delta → tool → delta → done', () => {
     const tabId = openTab();

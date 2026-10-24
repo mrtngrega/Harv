@@ -346,6 +346,19 @@ export const chat = {
     return tab.id;
   },
 
+  /** Moves a tab next to another one (before it, or after it when `after`). The order is saved with the layout. */
+  moveTab(id: string, targetId: string, after: boolean) {
+    if (id === targetId) return;
+    store.set((s) => {
+      const moving = s.tabs.find((t) => t.id === id);
+      if (!moving || !s.tabs.some((t) => t.id === targetId)) return s;
+      const rest = s.tabs.filter((t) => t.id !== id);
+      const at = rest.findIndex((t) => t.id === targetId) + (after ? 1 : 0);
+      const tabs = [...rest.slice(0, at), moving, ...rest.slice(at)];
+      return tabs.every((t, i) => t === s.tabs[i]) ? s : { ...s, tabs };
+    });
+  },
+
   closeTab(id: string) {
     // The server ends the chat's terminal too.
     sendMessage({ type: 'chat.close', tabId: id });

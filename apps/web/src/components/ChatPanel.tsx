@@ -148,6 +148,9 @@ export function ChatPanel() {
   const [dragging, setDragging] = useState(false);
   /** The tab whose name is being edited (right-click or F2 on it). */
   const [renaming, setRenaming] = useState<string | null>(null);
+  // Tab being dragged, and where it would land (before or after `id`).
+  const [dragTab, setDragTab] = useState<string | null>(null);
+  const [dropAt, setDropAt] = useState<{ id: string; after: boolean } | null>(null);
   const renameCancelled = useRef(false);
   const logRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -280,8 +283,41 @@ export function ChatPanel() {
               <div
                 key={t.id}
                 data-tab={t.id}
+                draggable={renaming !== t.id}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('application/x-harv-tab', t.id);
+                  e.dataTransfer.effectAllowed = 'move';
+                  setDragTab(t.id);
+                }}
+                onDragEnd={() => {
+                  setDragTab(null);
+                  setDropAt(null);
+                }}
+                onDragOver={(e) => {
+                  if (!dragTab || !e.dataTransfer.types.includes('application/x-harv-tab')) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const after = e.clientX > r.left + r.width / 2;
+                  if (dropAt?.id !== t.id || dropAt.after !== after) setDropAt({ id: t.id, after });
+                }}
+                onDrop={(e) => {
+                  const id = e.dataTransfer.getData('application/x-harv-tab');
+                  if (!id) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (dropAt) chat.moveTab(id, dropAt.id, dropAt.after);
+                  setDragTab(null);
+                  setDropAt(null);
+                }}
                 className={`animate-fade-in flex min-w-[84px] flex-[0_1_200px] items-center gap-0.5 rounded-t-[10px] border border-b-0 ${
                   on ? 'border-[rgb(220_232_245/0.18)] bg-white/10' : 'border-transparent'
+                } ${dragTab === t.id ? 'opacity-40' : ''} ${
+                  dragTab && dragTab !== t.id && dropAt?.id === t.id
+                    ? dropAt.after
+                      ? 'shadow-[2px_0_0_0_var(--color-accent)]'
+                      : 'shadow-[-2px_0_0_0_var(--color-accent)]'
+                    : ''
                 }`}
               >
                 {renaming === t.id ? (
