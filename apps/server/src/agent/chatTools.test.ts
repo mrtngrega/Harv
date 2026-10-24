@@ -34,7 +34,9 @@ describe('chat tools', () => {
   it('leaves the current chat out of the recent list', () => {
     const store = new ChatStore(':memory:');
     store.ensureChat('a', 'This one');
+    store.addLine('a', { kind: 'you', text: 'hi' });
     store.ensureChat('b', 'Other one');
+    store.addLine('b', { kind: 'you', text: 'hi' });
     const context = recentChatsContext(store, 'a');
     expect(context).toContain('"Other one"');
     expect(context).not.toContain('"This one"');

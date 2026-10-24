@@ -61,9 +61,11 @@ describe('ChatStore', () => {
   it('searches titles and line text, with a snippet', () => {
     const s = fresh();
     s.ensureChat('a', 'GPU temps');
+    s.addLine('a', { kind: 'you', text: 'how hot?' });
     s.ensureChat('b', 'Shopping');
     s.addLine('b', { kind: 'harv', text: 'Buy a new thermal paste for the GPU cooler.' });
     s.ensureChat('c', 'Unrelated');
+    s.addLine('c', { kind: 'you', text: 'hello' });
 
     const hits = s.history('gpu');
     expect(hits.map((h) => h.id).sort()).toEqual(['a', 'b']);
@@ -73,8 +75,20 @@ describe('ChatStore', () => {
   it('treats % and _ in searches literally', () => {
     const s = fresh();
     s.ensureChat('a', '100% done');
+    s.addLine('a', { kind: 'you', text: 'x' });
     s.ensureChat('b', '100 done');
+    s.addLine('b', { kind: 'you', text: 'x' });
     expect(s.history('100%').map((h) => h.id)).toEqual(['a']);
+  });
+
+  it('leaves chats without messages out of history (tabs used only for their terminal or files)', () => {
+    const s = fresh();
+    s.ensureChat('talk', 'Weather');
+    s.addLine('talk', { kind: 'you', text: 'rain?' });
+    s.ensureChat('term', 'Terminal');
+    s.setOpen('term', false);
+    expect(s.history().map((h) => h.id)).toEqual(['talk']);
+    expect(s.history('terminal')).toEqual([]);
   });
 
   it('deletes a chat with its lines', () => {

@@ -210,6 +210,10 @@ export class ChatStore {
     return ids.map((r) => this.snapshot(r.id)!).filter(Boolean);
   }
 
+  /**
+   * The history sidebar's list: only chats with messages, so a tab used just for its
+   * terminal or file explorer (saved when renamed or put in a project) stays out.
+   */
   history(query = ''): HistoryItem[] {
     const q = query.trim();
     type Row = { id: string; title: string; updated_at: number; open: number; match: string | null; project_id: string | null };
@@ -219,13 +223,19 @@ export class ChatStore {
             `SELECT c.id, c.title, c.updated_at, c.open, c.project_id,
                     (SELECT l.text FROM lines l WHERE l.chat_id = c.id AND l.text LIKE ? ESCAPE '\\' LIMIT 1) AS match
              FROM chats c
-             WHERE c.title LIKE ? ESCAPE '\\'
-                OR EXISTS (SELECT 1 FROM lines l WHERE l.chat_id = c.id AND l.text LIKE ? ESCAPE '\\')
+             WHERE EXISTS (SELECT 1 FROM lines l WHERE l.chat_id = c.id)
+               AND (c.title LIKE ? ESCAPE '\\'
+                OR EXISTS (SELECT 1 FROM lines l WHERE l.chat_id = c.id AND l.text LIKE ? ESCAPE '\\'))
              ORDER BY c.updated_at DESC LIMIT 100`,
           )
           .all(likePattern(q), likePattern(q), likePattern(q)) as Row[])
       : (this.db
-          .prepare('SELECT id, title, updated_at, open, project_id, NULL AS match FROM chats ORDER BY updated_at DESC LIMIT 200')
+          .prepare(
+            `SELECT c.id, c.title, c.updated_at, c.open, c.project_id, NULL AS match
+             FROM chats c
+             WHERE EXISTS (SELECT 1 FROM lines l WHERE l.chat_id = c.id)
+             ORDER BY c.updated_at DESC LIMIT 200`,
+          )
           .all() as Row[]);
     return rows.map((r) => ({
       id: r.id,
