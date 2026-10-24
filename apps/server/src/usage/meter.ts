@@ -135,6 +135,8 @@ export class UsageMeter {
   private lastActivity = 0;
   /** Warnings already given ("session:<reset>:90"). */
   private warned = new Set<string>();
+  /** Meters seen at least once since Harv started. Marks already passed at first sight stay silent. */
+  private seen = new Set<string>();
   queued = 0;
 
   constructor(
@@ -250,6 +252,12 @@ export class UsageMeter {
     const thresholds = this.thresholds();
     for (const m of this.meters) {
       const warning = newWarning(m, thresholds, this.warned);
+      // First reading since start (e.g. after a restart): the marks below it were announced
+      // earlier, or passed while Harv was off. Remember them, but don't announce them again.
+      if (!this.seen.has(m.kind)) {
+        this.seen.add(m.kind);
+        continue;
+      }
       if (warning) this.events.onWarning?.(warning);
     }
   }

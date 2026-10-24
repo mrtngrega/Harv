@@ -153,6 +153,18 @@ describe('usage warnings and refresh pace', () => {
     expect(events.onWarning).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'weekly', threshold: 75 }));
   });
 
+  it('stays quiet about marks already passed when Harv starts', async () => {
+    let percent = 82;
+    const { meter, events } = newMeter(async () => report(percent, 10));
+    await meter.refresh();
+    percent = 83;
+    await meter.refresh();
+    expect(events.onWarning).not.toHaveBeenCalled();
+    percent = 91;
+    await meter.refresh();
+    expect(events.onWarning).toHaveBeenCalledOnce();
+  });
+
   it('checks every 2 minutes while chatting and every 10 when idle', async () => {
     vi.useFakeTimers({ now: Date.parse('2026-10-24T12:00:00Z') });
     const fetch = vi.fn(async () => report(10, 10));
