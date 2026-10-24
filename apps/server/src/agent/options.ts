@@ -2,13 +2,13 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { HookCallbackMatcher, HookEvent, Options } from '@anthropic-ai/claude-agent-sdk';
-import { HARV_VERSION, type EffortLevel } from '@harv/shared';
+import { HARV_VERSION, type EffortLevel, type Project } from '@harv/shared';
 import { ENABLED_TOOLS } from '../safety/classify.ts';
 import type { SafetyGate } from '../safety/gate.ts';
 import { WORKSPACE } from '../safety/paths.ts';
 import { workDir } from '../settings.ts';
 import type { ChatStore } from '../store/chats.ts';
-import { harvServer, recentChatsContext, type Delegate } from './chatTools.ts';
+import { harvServer, recentChatsContext, type Delegate, type ProjectTools } from './chatTools.ts';
 import { memoryContext } from './memory.ts';
 
 /** Login sources that mean the user's subscription (never per-token API billing). */
@@ -29,6 +29,10 @@ function subscriptionEnv(): Record<string, string | undefined> {
 
 /** Harv's shared rulebook (repo root `harv/persona.md`); dev sessions follow the same file. */
 const PERSONA_PATH = fileURLToPath(new URL('../../../../harv/persona.md', import.meta.url));
+/** How the user likes project work done (repo root `harv/dev-rules.md`), loaded in project chats. */
+const DEV_RULES_PATH = fileURLToPath(new URL('../../../../harv/dev-rules.md', import.meta.url));
+
+const readText = (path: string, fallback = '') => (existsSync(path) ? readFileSync(path, 'utf8').trim() : fallback);
 
 /** The chat tab a session belongs to: its tools to see the other chats, and the safety gate. */
 export interface ChatContext {
@@ -37,6 +41,50 @@ export interface ChatContext {
   gate: SafetyGate;
   /** Hands a task to another chat (the hand_off tool). */
   delegate?: Delegate;
+  /** The project this chat works on: the session then runs as Claude Code in that folder (project mode). */
+  project?: Project;
+  /** Harv's start_project / open_project / list_projects tools. */
+  projects?: ProjectTools;
+}
+
+/** The part about the user's other chats, shared by both kinds of chat. */
+function otherChats(chat: ChatContext): string {
+  return [
+    '## Your other chats',
+    [
+      "Each chat tab is a separate conversation, but they're all you: the same rules, the same memory, one shared history. If another chat saves or forgets a memory, you'll get a note about it with the user's next message.",
+      "When the user refers to another tab or something you discussed before that isn't in this conversation, use list_chats to find it and read_chat to read it. Don't read other chats unprompted; it uses the user's plan.",
+      "When the user asks another tab (or a new one) to do something, use hand_off with a complete request: the other chat can't see this conversation. By default you wait and get its answer; pass wait: false for long jobs the user wants running on their own. A message that starts with [Handed over from …] came from another of your chats, not straight from the user: do it like a normal request, and your reply goes back to that chat.",
+      'Recent chats:',
+      recentChatsContext(chat.store, chat.tabId),
+    ].join('\n'),
+  ].join('\n\n');
+}
+
+/**
+ * What a project chat adds on top of Claude Code's own system prompt: Harv's persona,
+ * the dev rules, Harv's memory about the user and the other chats.
+ */
+function projectPrompt(chat: ChatContext, project: Project): string {
+  const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  return [
+    '# You are Harv',
+    "Identity: you are Harv, the user's personal assistant, built on Claude and here working with Claude Code's tools and instructions. When asked who or what you are, you're Harv. Never call yourself Claude Code.",
+    readText(PERSONA_PATH),
+    '## Project mode',
+    [
+      `- This chat works on the project "${project.name}" in ${project.path}. You have Claude Code's full instructions and tools: follow them for all the engineering work, exactly as Claude Code would. You're still Harv (the persona above), running in Harv's dashboard on the user's Windows PC, and replies render as Markdown.`,
+      "- The project's CLAUDE.md (loaded above when there is one) is the source of truth for this project. Keep it and the project's docs up to date.",
+      "- Your project memory is Claude Code's auto-memory for this folder (see above). The user's Claude Code sessions on this folder share it, so keep it current: where things stand, decisions, the user's rules. What Harv knows about the user in general is below; change that with remember/forget.",
+      "- Harv's safety gate checks every action. In this project folder, editing files and normal dev commands (npm, tests, builds, git add/commit, scripts in the project) run without asking; git is the undo, and deletes are backed up. It still asks the user (an approval card) for git push, throwing away uncommitted work, installing software for the whole PC, stopping programs, system or registry changes, anything outside the project folder, and commands it can't see into (variables in paths, nested shells). Blocked things stay blocked. So prefer plain, direct commands, and if something is denied, don't work around it.",
+      `- The user's home folder is ${homedir()}. Today is ${today}.`,
+    ].join('\n'),
+    '## How the user likes project work done',
+    readText(DEV_RULES_PATH),
+    '## What Harv knows about the user',
+    memoryContext(),
+    otherChats(chat),
+  ].join('\n\n');
 }
 
 /** Built fresh for each new session, so persona edits and new memories apply to the next chat. */
@@ -62,18 +110,7 @@ function systemPrompt(chat?: ChatContext): string {
     ].join('\n'),
     '## Your memory',
     memoryContext(),
-    ...(chat
-      ? [
-          '## Your other chats',
-          [
-            "Each chat tab is a separate conversation, but they're all you: the same rules, the same memory, one shared history. If another chat saves or forgets a memory, you'll get a note about it with the user's next message.",
-            "When the user refers to another tab or something you discussed before that isn't in this conversation, use list_chats to find it and read_chat to read it. Don't read other chats unprompted; it uses the user's plan.",
-            "When the user asks another tab (or a new one) to do something, use hand_off with a complete request: the other chat can't see this conversation. By default you wait and get its answer; pass wait: false for long jobs the user wants running on their own. A message that starts with [Handed over from …] came from another of your chats, not straight from the user: do it like a normal request, and your reply goes back to that chat.",
-            'Recent chats:',
-            recentChatsContext(chat.store, chat.tabId),
-          ].join('\n'),
-        ]
-      : []),
+    ...(chat ? [otherChats(chat)] : []),
   ].join('\n\n');
 }
 
@@ -128,22 +165,34 @@ export function buildOptions(
   { resume, chat }: { resume?: string; chat?: ChatContext } = {},
 ): Options {
   mkdirSync(WORKSPACE, { recursive: true });
+  const project = chat?.project && existsSync(chat.project.path) ? chat.project : undefined;
   return {
     model,
     effort,
     abortController,
     resume,
     env: subscriptionEnv(),
-    cwd: WORKSPACE,
-    // Isolation: don't load the user's Claude Code settings, CLAUDE.md files or MCP servers.
-    settingSources: [],
+    ...(project
+      ? {
+          // Project mode: Claude Code itself, in the project folder, with the project's CLAUDE.md and settings,
+          // Claude Code's prompt (including its auto-memory) and tools, and Harv on top.
+          cwd: project.path,
+          settingSources: ['project', 'local'],
+          systemPrompt: { type: 'preset', preset: 'claude_code', append: projectPrompt(chat!, project) },
+          tools: { type: 'preset', preset: 'claude_code' },
+        }
+      : {
+          cwd: WORKSPACE,
+          // Isolation: don't load the user's Claude Code settings, CLAUDE.md files or MCP servers.
+          settingSources: [],
+          systemPrompt: systemPrompt(chat),
+          tools: ENABLED_TOOLS,
+        }),
     strictMcpConfig: true,
-    mcpServers: chat ? { harv: harvServer(chat.store, chat.tabId, chat.delegate) } : {},
-    systemPrompt: systemPrompt(chat),
-    tools: ENABLED_TOOLS,
+    mcpServers: chat ? { harv: harvServer(chat.store, chat.tabId, chat.delegate, chat.projects) } : {},
     permissionMode: 'default',
     canUseTool: async (name, input, { toolUseID }) =>
-      chat ? chat.gate.canUseTool(name, input, toolUseID) : { behavior: 'deny', message: 'No tools here.' },
+      chat ? chat.gate.canUseTool(name, input, toolUseID, chat.tabId) : { behavior: 'deny', message: 'No tools here.' },
     hooks: gateHooks(chat),
     includePartialMessages: true,
   };

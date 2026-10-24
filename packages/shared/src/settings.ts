@@ -58,6 +58,8 @@ export interface HarvSettings {
   // Workspace
   /** The user's default folder: where terminals and the explorer open, and where Harv works on files unless told otherwise. '' = none. */
   workDir: string;
+  /** Where new projects get their folder ('' = a Projects folder in the user's home). */
+  projectsDir: string;
 
   // Startup
   /** Start LibreHardwareMonitor (UAC prompt) when Harv starts. */
@@ -88,6 +90,7 @@ export const DEFAULT_SETTINGS: HarvSettings = {
   warnSession: [75, 90, 95],
   warnWeekly: [75, 90],
   workDir: '',
+  projectsDir: '',
   startSensors: true,
   restoreTabs: true,
 };

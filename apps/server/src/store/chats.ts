@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import type { ChatSnapshot, HistoryItem, LineKind, StoredLine } from '@harv/shared';
+import type { ChatSnapshot, HistoryItem, LineKind, Project, StoredLine } from '@harv/shared';
 
 const SCHEMA = `
   PRAGMA foreign_keys = ON;
@@ -26,6 +27,12 @@ const SCHEMA = `
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS lines_by_chat ON lines(chat_id, id);
+  CREATE TABLE IF NOT EXISTS projects (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    path       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    created_at INTEGER NOT NULL
+  );
 `;
 
 /** Lines kept per chat when restoring a tab (older ones stay in the database). */
@@ -58,6 +65,43 @@ export class ChatStore {
     if (!chatColumns.some((c) => c.name === 'title_locked')) {
       this.db.exec('ALTER TABLE chats ADD COLUMN title_locked INTEGER NOT NULL DEFAULT 0');
     }
+    if (!chatColumns.some((c) => c.name === 'project_id')) this.db.exec('ALTER TABLE chats ADD COLUMN project_id TEXT');
+  }
+
+  // ── Projects (project mode) ──
+
+  projects(): Project[] {
+    return this.db.prepare('SELECT id, name, path FROM projects ORDER BY name COLLATE NOCASE').all() as unknown as Project[];
+  }
+
+  project(id: string | null | undefined): Project | undefined {
+    if (!id) return undefined;
+    return this.db.prepare('SELECT id, name, path FROM projects WHERE id = ?').get(id) as Project | undefined;
+  }
+
+  /** The project for a folder, adding it if it's new. */
+  addProject(name: string, path: string): Project {
+    const existing = this.db.prepare('SELECT id, name, path FROM projects WHERE path = ?').get(path) as Project | undefined;
+    if (existing) return existing;
+    const project = { id: randomUUID(), name, path };
+    this.db.prepare('INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)').run(project.id, name, path, Date.now());
+    return project;
+  }
+
+  /** Forgets a project; its chats go back to plain assistant chats (the folder isn't touched). */
+  removeProject(id: string): void {
+    this.db.prepare('UPDATE chats SET project_id = NULL WHERE project_id = ?').run(id);
+    this.db.prepare('DELETE FROM projects WHERE id = ?').run(id);
+  }
+
+  setProject(chatId: string, projectId: string | null): void {
+    this.db.prepare('UPDATE chats SET project_id = ? WHERE id = ?').run(projectId, chatId);
+  }
+
+  /** The project a chat works on, if any. */
+  projectOf(chatId: string): Project | undefined {
+    const row = this.db.prepare('SELECT project_id FROM chats WHERE id = ?').get(chatId) as { project_id: string | null } | undefined;
+    return this.project(row?.project_id);
   }
 
   close(): void {
@@ -125,10 +169,15 @@ export class ChatStore {
   }
 
   snapshot(id: string): ChatSnapshot | null {
-    const row = this.db.prepare('SELECT id, title, context FROM chats WHERE id = ?').get(id) as
-      { id: string; title: string; context: number | null } | undefined;
+    const row = this.db.prepare('SELECT id, title, context, project_id FROM chats WHERE id = ?').get(id) as
+      { id: string; title: string; context: number | null; project_id: string | null } | undefined;
     if (!row) return null;
-    const chat = { id: row.id, title: row.title, ...(row.context ? { context: row.context } : {}) };
+    const chat = {
+      id: row.id,
+      title: row.title,
+      ...(row.context ? { context: row.context } : {}),
+      ...(row.project_id ? { projectId: row.project_id } : {}),
+    };
     const rows = this.db
       .prepare(
         'SELECT kind, text, tag, reason, files, ref, created_at FROM (SELECT * FROM lines WHERE chat_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id',
@@ -163,11 +212,11 @@ export class ChatStore {
 
   history(query = ''): HistoryItem[] {
     const q = query.trim();
-    type Row = { id: string; title: string; updated_at: number; open: number; match: string | null };
+    type Row = { id: string; title: string; updated_at: number; open: number; match: string | null; project_id: string | null };
     const rows = q
       ? (this.db
           .prepare(
-            `SELECT c.id, c.title, c.updated_at, c.open,
+            `SELECT c.id, c.title, c.updated_at, c.open, c.project_id,
                     (SELECT l.text FROM lines l WHERE l.chat_id = c.id AND l.text LIKE ? ESCAPE '\\' LIMIT 1) AS match
              FROM chats c
              WHERE c.title LIKE ? ESCAPE '\\'
@@ -175,13 +224,16 @@ export class ChatStore {
              ORDER BY c.updated_at DESC LIMIT 100`,
           )
           .all(likePattern(q), likePattern(q), likePattern(q)) as Row[])
-      : (this.db.prepare('SELECT id, title, updated_at, open, NULL AS match FROM chats ORDER BY updated_at DESC LIMIT 200').all() as Row[]);
+      : (this.db
+          .prepare('SELECT id, title, updated_at, open, project_id, NULL AS match FROM chats ORDER BY updated_at DESC LIMIT 200')
+          .all() as Row[]);
     return rows.map((r) => ({
       id: r.id,
       title: r.title,
       updatedAt: r.updated_at,
       open: r.open === 1,
       ...(r.match ? { snippet: snippetAround(r.match, q) } : {}),
+      ...(r.project_id ? { projectId: r.project_id } : {}),
     }));
   }
 

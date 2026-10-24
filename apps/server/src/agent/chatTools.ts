@@ -1,5 +1,5 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
-import type { HistoryItem, StoredLine } from '@harv/shared';
+import type { HistoryItem, Project, StoredLine } from '@harv/shared';
 import { z } from 'zod';
 import type { ChatStore } from '../store/chats.ts';
 import { memoryTools, text } from './memory.ts';
@@ -67,8 +67,17 @@ export interface HandOff {
 /** Runs a hand-off from this chat and returns what to tell the model. */
 export type Delegate = (req: HandOff, signal?: AbortSignal) => Promise<string>;
 
-/** Harv's own MCP server for one chat tab: memory tools, tools to look at the other chats, and handing work to them. */
-export function harvServer(store: ChatStore, tabId: string, delegate?: Delegate) {
+/** Project mode: what Harv's project tools do (ChatManager implements them). */
+export interface ProjectTools {
+  list(): Project[];
+  /** Creates the folder in the user's projects folder, git init, a starter CLAUDE.md, and moves this chat into it. */
+  start(tabId: string, name: string, description: string): Promise<string>;
+  /** Moves this chat into a known project (by name) or a folder (by path). */
+  open(tabId: string, nameOrPath: string): Promise<string>;
+}
+
+/** Harv's own MCP server for one chat tab: memory tools, tools to look at the other chats, handing work to them, and projects. */
+export function harvServer(store: ChatStore, tabId: string, delegate?: Delegate, projects?: ProjectTools) {
   return createSdkMcpServer({
     name: 'harv',
     version: '1.0.0',
@@ -123,6 +132,29 @@ export function harvServer(store: ChatStore, tabId: string, delegate?: Delegate)
                 const signal = (extra as { signal?: AbortSignal } | undefined)?.signal;
                 return text(await delegate({ to, title, message, wait: wait ?? true }, signal));
               },
+            ),
+          ]
+        : []),
+      ...(projects
+        ? [
+            tool('list_projects', 'List the projects Harv knows (name and folder).', {}, async () => {
+              const list = projects.list();
+              return text(list.length ? list.map((p) => `- ${p.name}: ${p.path}`).join('\n') : 'No projects yet.');
+            }),
+            tool(
+              'start_project',
+              'Start a new project when the user says so ("we\'re starting a new project…"): makes its folder in the user\'s projects folder, runs git init, writes a starter CLAUDE.md, and turns this chat into a project chat there (from the next message you work as Claude Code in that folder). Fails if the folder exists: then ask the user, or use open_project.',
+              {
+                name: z.string().min(1).describe('Folder name: what the user called it, or a short lowercase-hyphen name like weather-app'),
+                description: z.string().describe('What the project is, in a sentence or two (goes into CLAUDE.md)'),
+              },
+              async ({ name, description }) => text(await projects.start(tabId, name, description)),
+            ),
+            tool(
+              'open_project',
+              `Turn this chat into a project chat for an existing project, when the user wants to work on it ("let's work on X"): give the project's name (see list_projects) or a folder path (it gets added). From the next message you work as Claude Code in that folder.`,
+              { project: z.string().min(1).describe('Project name or full folder path') },
+              async ({ project }) => text(await projects.open(tabId, project)),
             ),
           ]
         : []),

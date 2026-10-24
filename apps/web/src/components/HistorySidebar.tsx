@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useProjects } from '../lib/useHarvSocket.ts';
 import type { HistoryItem } from '@harv/shared';
 import { chat, useChat, useHistory } from '../lib/chatStore.ts';
 
@@ -19,6 +20,8 @@ function groupByDay(items: HistoryItem[], now = new Date()): { label: string; it
 
 function HistoryRow({ item, active }: { item: HistoryItem; active: boolean }) {
   const [confirming, setConfirming] = useState(false);
+  const { list } = useProjects();
+  const project = list.find((p) => p.id === item.projectId)?.name;
 
   if (confirming) {
     return (
@@ -50,6 +53,7 @@ function HistoryRow({ item, active }: { item: HistoryItem; active: boolean }) {
           {item.open && <span aria-label="open" className="size-1.5 flex-none rounded-full bg-accent/70" />}
           <span className="truncate">{item.title}</span>
         </span>
+        {project && <span className="w-full truncate text-[11px] text-accent/80">▣ {project}</span>}
         {item.snippet && <span className="w-full truncate text-[11px] text-faint">{item.snippet}</span>}
       </button>
       <button

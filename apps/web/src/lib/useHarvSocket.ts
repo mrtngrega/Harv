@@ -1,4 +1,12 @@
-import { DEFAULT_SETTINGS, type Catalog, type HarvSettings, type HarvStatus, type MetricsSnapshot, type PlanUsage } from '@harv/shared';
+import {
+  DEFAULT_SETTINGS,
+  type Catalog,
+  type HarvSettings,
+  type HarvStatus,
+  type MetricsSnapshot,
+  type PlanUsage,
+  type Project,
+} from '@harv/shared';
 import { createStore } from './createStore.ts';
 import { onConnectionChange, onServerMessage, sendMessage } from './socket.ts';
 
@@ -16,6 +24,8 @@ const metrics = createStore<MetricsSnapshot | null>(null);
 const catalog = createStore<Catalog | null>(null);
 const usage = createStore<PlanUsage | null>(null);
 const settings = createStore<HarvSettings>(DEFAULT_SETTINGS);
+/** Folders Harv works on as projects, and the last error adding one. */
+const projects = createStore<{ list: Project[]; error: string | null }>({ list: [], error: null });
 /** Background photo version for cache-busting; null = none set, undefined = not known yet. */
 const background = createStore<{ version: number | null | undefined }>({ version: undefined });
 
@@ -30,6 +40,13 @@ onServerMessage((msg) => {
       usage.set(msg.usage);
       settings.set(msg.settings);
       background.set({ version: msg.background });
+      projects.set({ list: msg.projects, error: null });
+      break;
+    case 'projects':
+      projects.set({ list: msg.projects, error: null });
+      break;
+    case 'project.error':
+      projects.set((p) => ({ ...p, error: msg.message }));
       break;
     case 'harv.status':
       connection.set((c) => ({ ...c, status: msg.status, detail: msg.detail }));
@@ -58,6 +75,16 @@ export const useCatalog = catalog.use;
 export const useUsage = usage.use;
 export const useSettings = settings.use;
 export const useBackground = background.use;
+export const useProjects = projects.use;
+export const getProjects = () => projects.get().list;
+
+export const projectActions = {
+  add(path: string, name?: string) {
+    projects.set((p) => ({ ...p, error: null }));
+    sendMessage({ type: 'project.add', path, ...(name ? { name } : {}) });
+  },
+  remove: (id: string) => sendMessage({ type: 'project.remove', id }),
+};
 
 /** Saves a settings change on the server, which echoes it to every window. */
 export function updateSettings(patch: Partial<HarvSettings>): void {

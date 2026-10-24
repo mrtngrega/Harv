@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ACCENTS, COMPACT_ROWS, DEFAULT_SETTINGS, WARN_CHOICES, type CompactRow, type HarvSettings } from '@harv/shared';
-import { updateSettings, useBackground, useSettings } from '../lib/useHarvSocket.ts';
+import { projectActions, updateSettings, useBackground, useProjects, useSettings } from '../lib/useHarvSocket.ts';
 
 const ACCENT_NAMES: Record<string, string> = {
   '#A8C8E8': 'Ice blue',
@@ -197,6 +197,92 @@ function WorkFolder() {
         </button>
       </form>
       {draft !== null && draft.trim() !== workDir && <p className="m-0 text-[11px] text-faint">Not saved yet: press Save.</p>}
+    </Section>
+  );
+}
+
+function Projects() {
+  const { list, error } = useProjects();
+  const { projectsDir } = useSettings();
+  const [path, setPath] = useState('');
+  const [root, setRoot] = useState<string | null>(null);
+  const add = (e: FormEvent) => {
+    e.preventDefault();
+    if (!path.trim()) return;
+    projectActions.add(path.trim());
+    setPath('');
+  };
+  const input =
+    'min-h-9 min-w-0 flex-1 rounded-lg border border-line bg-black/20 px-2.5 text-xs text-ink outline-none placeholder:text-faint focus:border-accent/60';
+  const button = 'min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 text-xs hover:bg-white/10';
+  return (
+    <Section title="Projects">
+      <p className="m-0 text-[11px] text-faint">
+        In a project chat Harv works like Claude Code in that folder, with its CLAUDE.md and memory. Tell Harv "we're starting a new
+        project" or "let's work on …", or pick a project in a chat's ≡ menu.
+      </p>
+      {list.length > 0 && (
+        <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs">
+          {list.map((p) => (
+            <li key={p.id} className="flex items-center gap-2">
+              <span className="text-accent">▣</span>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate">{p.name}</span>
+                <span className="truncate text-[11px] text-faint" title={p.path}>
+                  {p.path}
+                </span>
+              </span>
+              <button
+                type="button"
+                aria-label={`Forget ${p.name}`}
+                title="Forget this project (the folder and chats stay)"
+                onClick={() => projectActions.remove(p.id)}
+                className="size-7 flex-none cursor-pointer rounded text-muted hover:bg-white/10"
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form onSubmit={add} className="flex gap-2">
+        <label htmlFor="harv-project-path" className="sr-only">
+          Project folder to add
+        </label>
+        <input
+          id="harv-project-path"
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+          placeholder="C:\path\to\a\project"
+          className={input}
+        />
+        <button type="submit" className={button}>
+          Add
+        </button>
+      </form>
+      {error && <p className="m-0 text-[11px] text-warn">{error}</p>}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (root !== null) updateSettings({ projectsDir: root.trim() });
+          setRoot(null);
+        }}
+        className="flex items-center gap-2 pt-1 text-xs"
+      >
+        <label htmlFor="harv-projects-dir" className="w-24 flex-none text-muted">
+          New projects in
+        </label>
+        <input
+          id="harv-projects-dir"
+          value={root ?? projectsDir}
+          onChange={(e) => setRoot(e.target.value)}
+          placeholder="your home\Projects"
+          className={input}
+        />
+        <button type="submit" className={button}>
+          Save
+        </button>
+      </form>
     </Section>
   );
 }
@@ -511,6 +597,8 @@ export function SettingsView() {
       </Section>
 
       <WorkFolder />
+
+      <Projects />
 
       <Section title="Safety">
         <Toggle

@@ -18,6 +18,8 @@ export interface GateHooks {
   notice: (tabId: string, message: string) => void;
   /** The number of waiting approvals changed (Harv's status shows "waiting"). */
   onChange: () => void;
+  /** The project folder a chat works in (project mode trusts it), if any. */
+  projectOf?: (tabId: string) => string | undefined;
 }
 
 type Decision = { approve: boolean; command?: string; why?: string };
@@ -100,7 +102,8 @@ export class SafetyGate {
 
   /** The PreToolUse hook. Red calls wait here until the user answers the approval card. */
   async preToolUse(tabId: string, tool: string, input: Record<string, unknown>, id: string, signal: AbortSignal): Promise<HookJSONOutput> {
-    const verdict = classify(tool, input);
+    const ctx = { project: this.hooks.projectOf?.(tabId) };
+    const verdict = classify(tool, input, ctx);
     const at = Date.now();
     // Red always asks; yellow asks too when the user turned on "confirm changes" in Settings.
     const asks = verdict.tier === 'red' || (verdict.tier === 'yellow' && loadSettings().confirmYellow);
@@ -149,7 +152,7 @@ export class SafetyGate {
     let runInput = input;
     if (decision.command !== undefined && decision.command !== input.command) {
       // The user edited the command: it gets checked again, and only blocked things are refused.
-      const edited = classify(tool, { ...input, command: decision.command });
+      const edited = classify(tool, { ...input, command: decision.command }, ctx);
       if (edited.tier === 'blocked') {
         this.actions.update(id, { status: 'blocked', result: edited.reason });
         this.publish(id);
@@ -200,8 +203,8 @@ export class SafetyGate {
   }
 
   /** Backstop for Claude Code's own permission prompts: never let a red call through without an approval. */
-  async canUseTool(tool: string, input: Record<string, unknown>, id: string): Promise<PermissionResult> {
-    const verdict = classify(tool, input);
+  async canUseTool(tool: string, input: Record<string, unknown>, id: string, tabId?: string): Promise<PermissionResult> {
+    const verdict = classify(tool, input, { project: tabId ? this.hooks.projectOf?.(tabId) : undefined });
     if (verdict.tier === 'blocked') return { behavior: 'deny', message: verdict.reason };
     if (verdict.tier === 'red' && !this.approved.has(id)) return { behavior: 'deny', message: 'This needs the user’s approval first.' };
     return { behavior: 'allow', updatedInput: input };

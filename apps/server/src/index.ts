@@ -1,4 +1,4 @@
-import { createReadStream, readFileSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
@@ -75,6 +75,8 @@ const gate = new SafetyGate(actions, {
   broadcast,
   notice: (tabId, message) => chats.notice(tabId, message),
   onChange: () => chats.refreshStatus(),
+  // Project chats: the project folder is trusted (docs/PLAN.md §6f).
+  projectOf: (tabId) => store.projectOf(tabId)?.path,
 });
 const routes = new RouteStore(join(HARV_HOME, 'harv.db'));
 const meter = new UsageMeter(
@@ -100,7 +102,11 @@ const terminals = new TerminalManager(
     exit: (id, code) => broadcast({ type: 'term.exit', id, code }),
   },
   join(HARV_HOME, 'terminals'),
-  () => workDir(),
+  // A project chat's terminal opens in the project.
+  (id) => {
+    const project = store.projectOf(id.slice('terminal-'.length));
+    return project && existsSync(project.path) ? project.path : workDir();
+  },
 );
 
 const router = new Router(
@@ -289,6 +295,7 @@ app.get('/ws', { websocket: true }, (socket) => {
     settings: loadSettings(),
     background: backgroundVersion(),
     ui: loadUi(),
+    projects: store.projects(),
   });
 
   const unsubscribe = metrics.onSnapshot((snapshot) => send({ type: 'metrics.tick', metrics: snapshot }));
@@ -337,6 +344,19 @@ app.get('/ws', { websocket: true }, (socket) => {
       case 'action.undo':
         gate.undo(msg.id);
         break;
+      case 'project.add': {
+        const error = typeof msg.path === 'string' ? chats.addProject(msg.path, msg.name) : 'No folder given.';
+        if (error) send({ type: 'project.error', message: error });
+        break;
+      }
+      case 'project.remove':
+        chats.removeProject(msg.id);
+        break;
+      case 'chat.setProject': {
+        const error = chats.setProject(msg.tabId, msg.projectId);
+        if (error) send({ type: 'project.error', message: error });
+        break;
+      }
       case 'ui.save':
         saveUi(msg.state);
         break;

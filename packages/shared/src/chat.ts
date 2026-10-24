@@ -77,6 +77,8 @@ export interface ChatSnapshot {
   lines: StoredLine[];
   /** Tokens the last turn sent (the conversation's context size). */
   context?: number;
+  /** The project this chat works on (project mode), if any. */
+  projectId?: string;
 }
 
 export interface HistoryItem {
@@ -86,6 +88,7 @@ export interface HistoryItem {
   open: boolean;
   /** Matching text when the list is a search result. */
   snippet?: string;
+  projectId?: string;
 }
 
 export type ChatClientMessage =

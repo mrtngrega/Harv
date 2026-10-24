@@ -15,11 +15,13 @@ export type * from './safety.ts';
 export type * from './usage.ts';
 export * from './settings.ts';
 export * from './tools.ts';
+export type * from './projects.ts';
 import type { MetricsSnapshot } from './metrics.ts';
 import type { ActionEntry, ApprovalRequest, SafetyClientMessage, SafetyServerMessage } from './safety.ts';
 import type { PlanUsage, UsageServerMessage } from './usage.ts';
 import type { HarvSettings, SettingsClientMessage, SettingsServerMessage } from './settings.ts';
 import type { ToolClientMessage, ToolServerMessage, UiState } from './tools.ts';
+import type { Project, ProjectClientMessage, ProjectServerMessage } from './projects.ts';
 import type { Catalog, ChatClientMessage, ChatServerMessage, ChatSnapshot, HistoryItem } from './chat.ts';
 
 /** Messages the server pushes to the dashboard over /ws. */
@@ -43,6 +45,8 @@ export type ServerMessage =
       background: number | null;
       /** The dashboard's saved layout (~/.harv/ui.json). */
       ui: UiState;
+      /** Folders Harv works on as projects. */
+      projects: Project[];
     }
   /** `detail` names the running tool while working. */
   | { type: 'harv.status'; status: HarvStatus; detail?: string }
@@ -52,7 +56,9 @@ export type ServerMessage =
   | SafetyServerMessage
   | UsageServerMessage
   | SettingsServerMessage
-  | ToolServerMessage;
+  | ToolServerMessage
+  | ProjectServerMessage;
 
 /** Messages the dashboard sends to the server over /ws. */
-export type ClientMessage = { type: 'ping' } | ChatClientMessage | SafetyClientMessage | SettingsClientMessage | ToolClientMessage;
+export type ClientMessage =
+  { type: 'ping' } | ChatClientMessage | SafetyClientMessage | SettingsClientMessage | ToolClientMessage | ProjectClientMessage;

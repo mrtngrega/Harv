@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ChatView, ToolKind } from '@harv/shared';
 import { chat, useChat } from '../../lib/chatStore.ts';
+import { useProjects } from '../../lib/useHarvSocket.ts';
 
 export const TOOL_ICONS: Record<ChatView | 'settings', string> = { chat: '≡', terminal: '›_', files: '▤', settings: '⚙' };
 
@@ -61,7 +62,10 @@ const VIEWS: { view: ChatView; label: string }[] = [
  * its log and its tools (file explorer, terminal). Each chat has its own.
  */
 export function ViewMenu({ tabId }: { tabId: string }) {
-  const { views, tools } = useChat();
+  const { views, tools, tabs } = useChat();
+  const { list: projects } = useProjects();
+  const projectId = tabs.find((t) => t.id === tabId)?.projectId;
+  const project = projects.find((p) => p.id === projectId);
   const view = views[tabId] ?? 'chat';
   const open = tools[tabId] ?? [];
   const [shown, setShown] = useState(false);
@@ -106,6 +110,7 @@ export function ViewMenu({ tabId }: { tabId: string }) {
         <span aria-hidden="true" className="text-accent">
           {TOOL_ICONS[view]}
         </span>
+        {project && <span className="max-w-28 truncate text-accent">{project.name} ·</span>}
         <span>{current.label.toLowerCase()}</span>
         <span aria-hidden="true" className="text-[9px]">
           ▾
@@ -117,7 +122,7 @@ export function ViewMenu({ tabId }: { tabId: string }) {
             ref={menu}
             role="menu"
             aria-label="Show in this chat"
-            className="fixed z-40 flex w-[210px] flex-col gap-0.5 rounded-xl border border-[rgb(220_232_245/0.16)] bg-[rgb(16_24_34/0.94)] p-1.5 shadow-[0_12px_32px_rgb(0_0_0/0.4)] backdrop-blur-[22px]"
+            className="fixed z-40 flex max-h-[70vh] w-[230px] flex-col gap-0.5 overflow-y-auto rounded-xl border border-[rgb(220_232_245/0.16)] bg-[rgb(16_24_34/0.94)] p-1.5 shadow-[0_12px_32px_rgb(0_0_0/0.4)] backdrop-blur-[22px]"
             style={{ left: at.left, top: at.top }}
           >
             {VIEWS.map((item) => {
@@ -156,6 +161,39 @@ export function ViewMenu({ tabId }: { tabId: string }) {
                 </div>
               );
             })}
+            <div className="mx-1 my-1 border-t border-line" />
+            <div
+              className="px-2.5 pt-0.5 pb-1 text-[11px] text-faint"
+              title="In a project, Harv works like Claude Code in that folder, with its CLAUDE.md and memory"
+            >
+              Project
+            </div>
+            {[{ id: null as string | null, name: 'None (assistant)' }, ...projects].map((p) => (
+              <button
+                key={p.id ?? 'none'}
+                type="button"
+                role="menuitemradio"
+                aria-checked={(projectId ?? null) === p.id}
+                title={'path' in p ? String(p.path) : 'A normal Harv chat'}
+                onClick={() => {
+                  setShown(false);
+                  chat.setProject(tabId, p.id);
+                }}
+                className={`flex min-h-8 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-white/10 focus:bg-white/10 focus:outline-none ${
+                  (projectId ?? null) === p.id ? 'text-ink' : 'text-muted'
+                }`}
+              >
+                <span aria-hidden="true" className="w-5 text-center text-accent">
+                  {(projectId ?? null) === p.id ? '●' : p.id ? '▣' : '○'}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{p.name}</span>
+              </button>
+            ))}
+            {projects.length === 0 && (
+              <p className="m-0 px-2.5 pb-1 text-[11px] text-faint">
+                Tell Harv "we're starting a new project", or add folders in Settings.
+              </p>
+            )}
           </div>,
           document.body,
         )}

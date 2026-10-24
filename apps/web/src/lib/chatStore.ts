@@ -48,6 +48,8 @@ export interface Tab {
   context?: number;
   /** The server has this chat (it came from there, or a message was sent): otherwise it's a blank tab only the dashboard knows. */
   stored?: boolean;
+  /** The project this chat works on (project mode), if any. */
+  projectId?: string;
 }
 
 /** The Settings tab's id in `activeId`; it sits in the tab bar after the chats. */
@@ -120,6 +122,7 @@ export const useHistory = history.use;
 const fromSnapshot = (chat: ChatSnapshot): Tab => ({
   id: chat.id,
   stored: true,
+  ...(chat.projectId ? { projectId: chat.projectId } : {}),
   title: chat.title,
   busy: false,
   currentId: null,
@@ -301,6 +304,12 @@ onServerMessage((msg) => {
     }
     history.set({ items: msg.history, query: '' });
     if (history.get().query) sendMessage({ type: 'history.search', query: history.get().query });
+  } else if (msg.type === 'chat.project') {
+    // The server now knows this chat (a project needs a saved chat).
+    updateTab(msg.tabId, (t) => {
+      const { projectId: _old, ...rest } = t;
+      return { ...rest, stored: true, ...(msg.projectId ? { projectId: msg.projectId } : {}) };
+    });
   } else if (msg.type.startsWith('chat.') || msg.type === 'history') {
     applyChatEvent(msg as ChatServerMessage);
   }
@@ -319,6 +328,11 @@ export const chat = {
     saveSelection(store.get().model, effort);
   },
   setActive: (activeId: string) => store.set((s) => ({ ...s, activeId })),
+
+  /** Makes a chat a project chat (Harv works there as Claude Code), or a plain chat again with null. */
+  setProject(tabId: string, projectId: string | null) {
+    sendMessage({ type: 'chat.setProject', tabId, projectId });
+  },
 
   /** Opens a new chat (optionally straight into one of its tools) and returns its id. */
   newTab(view: ChatView = 'chat'): string {

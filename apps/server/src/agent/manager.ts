@@ -1,4 +1,8 @@
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { win32 } from 'node:path';
+import { promisify } from 'node:util';
 import {
   type Attachment,
   type Catalog,
@@ -15,8 +19,32 @@ import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
 import type { UsageMeter } from '../usage/meter.ts';
 import { buildContent, deleteAttachments } from './attachments.ts';
-import type { HandOff } from './chatTools.ts';
+import { formatTranscript, type HandOff, type ProjectTools } from './chatTools.ts';
+import { projectsDir } from '../settings.ts';
+import type { ProjectServerMessage } from '@harv/shared';
 import { ChatSession } from './session.ts';
+
+/** The first CLAUDE.md of a project Harv starts; the project chat fills it in as decisions are made. */
+export function starterClaudeMd(name: string, description: string): string {
+  return [
+    `# ${name}`,
+    '',
+    description.trim() || 'A new project.',
+    '',
+    '## Status',
+    '',
+    `Started ${new Date().toISOString().slice(0, 10)}. Nothing built yet.`,
+    '',
+    '## Stack',
+    '',
+    'Not decided yet.',
+    '',
+    '## Commands',
+    '',
+    'None yet.',
+    '',
+  ].join('\n');
+}
 
 const titleFrom = (text: string) => (text.length > 40 ? `${text.slice(0, 39)}…` : text);
 
@@ -46,6 +74,10 @@ type Queued =
  */
 export class ChatManager {
   private sessions = new Map<string, ChatSession>();
+  /** Chats that just moved into or out of a project: the conversation so far, given to the new session with the next message. */
+  private carry = new Map<string, string>();
+  /** Chats whose project changed mid-turn: their session ends when the turn does. */
+  private switchAfterTurn = new Set<string>();
   /** Tag and routing reason of the turn currently running per tab ("sonnet·medium"). */
   private tags = new Map<string, { tag: string; reason: string }>();
   /** The model·effort each tab's last turn ran at, for "Try harder". */
@@ -68,7 +100,7 @@ export class ChatManager {
     private gate: SafetyGate,
     private router: Router,
     private meter: UsageMeter,
-    private broadcast: (msg: ChatServerMessage) => void,
+    private broadcast: (msg: ChatServerMessage | ProjectServerMessage) => void,
     private onStatus: (status: HarvStatus) => void,
   ) {}
 
@@ -128,6 +160,7 @@ export class ChatManager {
         this.router.finished(msg.tabId, msg.ok, msg.stopped, msg.usage);
         if (msg.usage?.inputTokens) this.store.setContext(msg.tabId, msg.usage.inputTokens);
         this.meter.turnFinished();
+        this.turnEnded(msg.tabId);
         if (msg.stopped) save({ kind: 'notice', text: 'Stopped.' });
         if (msg.error) save({ kind: 'error', text: msg.error });
         if (this.limited.delete(msg.tabId)) {
@@ -228,6 +261,7 @@ export class ChatManager {
       this.gate,
       this.store.getSession(tabId) ?? undefined,
       (req, signal) => this.delegate(tabId, req, signal),
+      { project: this.store.projectOf(tabId), projects: this.projectTools },
     );
     this.sessions.set(tabId, session);
     return session;
@@ -350,6 +384,12 @@ export class ChatManager {
 
   /** Routes a message and runs it. `note` goes in front of what Claude sees (not the chat log or the router). */
   private async start(tabId: string, message: string, choice: ModelChoice, effort: EffortLevel, files: Attachment[], note = '') {
+    // A chat that just changed project starts a new session: it gets the conversation so far as context.
+    const carried = this.carry.get(tabId);
+    if (carried) {
+      this.carry.delete(tabId);
+      note = carried + note;
+    }
     let decision: RouteDecision;
     let text: string;
     // "thinking" from routing until the session has the message, so the status pill doesn't blink idle in between.
@@ -485,6 +525,116 @@ export class ChatManager {
     this.publishHistory();
     this.onStatus(this.status);
   }
+
+  // ── Project mode (docs/PLAN.md §6f) ──
+
+  private publishProjects() {
+    this.broadcast({ type: 'projects', projects: this.store.projects() });
+  }
+
+  private dropSession(tabId: string) {
+    this.sessions.get(tabId)?.close();
+    this.sessions.delete(tabId);
+  }
+
+  /** The turn that changed a chat's project has ended: its old session goes. */
+  turnEnded(tabId: string): void {
+    if (this.switchAfterTurn.delete(tabId)) setTimeout(() => this.dropSession(tabId), 0);
+  }
+
+  /**
+   * Binds a chat to a project (or back to a plain assistant chat with null). A Claude
+   * session can't move folders, so the next message starts a new one, with the
+   * conversation so far as context. Returns an error message, if any.
+   */
+  setProject(tabId: string, projectId: string | null): string | undefined {
+    const project = this.store.project(projectId);
+    if (projectId && !project) return 'There is no such project.';
+    this.store.ensureChat(tabId, 'New chat');
+    this.store.setOpen(tabId, true);
+    if ((this.store.projectOf(tabId)?.id ?? null) === (project?.id ?? null)) return undefined;
+    this.store.setProject(tabId, project?.id ?? null);
+    const lines = this.store.snapshot(tabId)?.lines ?? [];
+    if (lines.length) {
+      const what = project ? `moved into the project "${project.name}" (${project.path})` : 'left project mode';
+      const earlier = formatTranscript(lines.slice(-30)).slice(-8000);
+      this.carry.set(
+        tabId,
+        `[This chat just ${what}. The conversation so far, for context:]\n${earlier}\n[End of the earlier conversation.]\n\n`,
+      );
+    }
+    this.store.setSession(tabId, null);
+    if (this.busy(tabId)) this.switchAfterTurn.add(tabId);
+    else this.dropSession(tabId);
+    this.broadcast({ type: 'chat.project', tabId, projectId: project?.id ?? null });
+    this.publishHistory();
+    return undefined;
+  }
+
+  /** Adds an existing folder as a project. */
+  addProject(path: string, name?: string): string | undefined {
+    const folder = win32.normalize(path.trim());
+    if (!win32.isAbsolute(folder) || !existsSync(folder) || !statSync(folder).isDirectory()) return `No folder at ${path}.`;
+    this.store.addProject(name?.trim() || win32.basename(folder), folder);
+    this.publishProjects();
+    return undefined;
+  }
+
+  removeProject(id: string): void {
+    for (const chat of this.store.openChats()) if (chat.projectId === id) this.setProject(chat.id, null);
+    this.store.removeProject(id);
+    this.publishProjects();
+    this.publishHistory();
+  }
+
+  /** Harv's start_project / open_project / list_projects tools. */
+  private projectTools: ProjectTools = {
+    list: () => this.store.projects(),
+    start: async (tabId, rawName, description) => {
+      // Characters Windows doesn't allow in folder names (and control characters) go.
+      const name = [...rawName.trim()]
+        .filter((c) => c.charCodeAt(0) >= 32 && !'<>:"/\\|?*'.includes(c))
+        .join('')
+        .replace(/\s+/g, ' ')
+        .replace(/[. ]+$/, '');
+      if (!name) return 'That name has no usable characters for a folder; pick another.';
+      const path = win32.join(projectsDir(), name);
+      if (existsSync(path)) {
+        return `${path} already exists. Ask the user whether to use it (open_project with that path) or pick another name.`;
+      }
+      mkdirSync(path, { recursive: true });
+      writeFileSync(win32.join(path, 'CLAUDE.md'), starterClaudeMd(name, description));
+      let git = 'a git repository';
+      try {
+        await promisify(execFile)('git', ['init', '-b', 'main'], { cwd: path, windowsHide: true });
+      } catch {
+        git = 'no git repository (git init failed; try it in the project chat)';
+      }
+      const project = this.store.addProject(name, path);
+      this.publishProjects();
+      this.setProject(tabId, project.id);
+      return `Created ${path} with ${git} and a starter CLAUDE.md, and this is now a project chat for "${name}". From the user's next message you work in that folder as Claude Code. Tell the user the folder you made and suggest the first step (the stack and a short plan).`;
+    },
+    open: async (tabId, nameOrPath) => {
+      const wanted = nameOrPath.trim();
+      let project = this.store.projects().find((p) => p.name.toLowerCase() === wanted.toLowerCase());
+      if (!project && win32.isAbsolute(wanted)) {
+        const error = this.addProject(wanted);
+        if (error) return error;
+        project = this.store.projects().find((p) => p.path.toLowerCase() === win32.normalize(wanted).toLowerCase());
+      }
+      if (!project) {
+        const known =
+          this.store
+            .projects()
+            .map((p) => p.name)
+            .join(', ') || 'none yet';
+        return `No project called "${wanted}" (known: ${known}). Ask the user for the folder path to add it.`;
+      }
+      this.setProject(tabId, project.id);
+      return `This is now a project chat for "${project.name}" (${project.path}). From the user's next message you work there as Claude Code, with its CLAUDE.md and memory.`;
+    },
+  };
 
   /** Shuts down the live Claude sessions; chats stay saved and open for next time. */
   closeAll(): void {

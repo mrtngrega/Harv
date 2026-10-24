@@ -326,6 +326,11 @@ export function ChatPanel() {
                     className={`flex min-h-9 cursor-pointer items-center gap-1.5 truncate pr-1 pl-3 text-xs ${on ? 'text-ink' : 'text-muted'}`}
                   >
                     {t.busy && <span aria-hidden="true" className="animate-blink size-1.5 flex-none rounded-full bg-accent" />}
+                    {t.projectId && (
+                      <span aria-hidden="true" title="Project chat" className="flex-none text-accent">
+                        ▣
+                      </span>
+                    )}
                     {views[t.id] && views[t.id] !== 'chat' && (
                       <span aria-hidden="true" className="flex-none text-accent">
                         {TOOL_ICONS[views[t.id]!]}

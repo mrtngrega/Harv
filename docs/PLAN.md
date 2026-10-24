@@ -188,7 +188,7 @@ The user's wish: every tab is its own session, but they all behave as the same H
 - **Safety:** ask before yellow changes too (`confirmYellow`: yellow calls go through the approval card, still backed up). Read-only folders.
 - **Startup:** reopen tabs, start the sensors (LHM; `HARV_START_LHM=0` still overrides).
 
-## 6f. Project mode: Harv as Claude Code (decided 2026-10-24, not built yet)
+## 6f. Project mode: Harv as Claude Code (decided and built 2026-10-24)
 
 The user's wish: Harv is the only AI they use, half of it for dev sessions like the Claude Code ones that build Harv. "We're starting a new project" or "let's work on X" should make Harv behave exactly like Claude Code (and still be Harv), remembering every rule without being told again.
 
@@ -196,7 +196,9 @@ The user's wish: Harv is the only AI they use, half of it for dev sessions like 
 - **Project chats run as Claude Code:** `systemPrompt: { type: 'preset', preset: 'claude_code', append: <persona + Harv memory + dev rules> }`, `cwd` = the project folder, `settingSources: ['project']` (loads its `CLAUDE.md`), the full Claude Code toolset. The preset includes Claude Code's auto-memory, so Harv and Claude Code dev sessions on the same folder share one memory (`~/.claude/projects/<path>/memory`). Normal chats stay the assistant as now.
 - **Dev rules:** the general dev rules now in Claude Code memory (end-of-session routine, testing method, build first, do it yourself, new project folder) move to a public `harv/dev-rules.md` loaded in every project chat.
 - **Safety (the user's choice: "trusted folder"):** inside the project folder, edits and normal dev commands (npm/npx, tests, builds, git add/commit/status/diff/log, node/tsx scripts in the project) run without cards; git is the undo. Still red: git push, deleting or writing outside the project, global/system installs, registry and system settings, killing processes. Blocked stays blocked. The classifier must resolve relative paths against the project folder (the session's real cwd).
-- **Usage:** the Claude Code prompt is large, so project turns cost more; AUTO uses the coding ladder (Sonnet·high normally, Opus for planning/hard work).
+- **Usage:** the Claude Code prompt is large, so project turns cost more; AUTO uses the coding ladder (Sonnet·high normally, Opus for planning/hard work). Measured: one Haiku project turn sends ~71k input tokens (mostly cached after the first).
+- **As built:** `projects` table + `chats.project_id` in `harv.db`; `ChatManager.setProject` (a session can't move folders, so the next message starts a new session with the last ~30 lines as context, `carry`); Harv tools `start_project` (folder in Settings › Projects › "New projects in", default `~/Projects`; `git init -b main`; starter `CLAUDE.md`), `open_project`, `list_projects`; dashboard: a chat's ≡ menu has a Project section, ▣ badge on project tabs and history rows, Settings › Projects (add/forget folders, projects folder); a project chat's terminal and explorer open in the project. Claude Code's agent tools (TodoWrite, Task/Agent, plan mode, BashOutput/KillShell) are green only in project chats. Writing Claude Code memory notes (`~/.claude/projects/*/memory/*.md`) is allowed; the rest of `.claude` stays blocked.
+- **Verified live (Haiku·low, Harv repo):** `npm --version` ran with no card, the project's CLAUDE.md was in context, the auto-memory directory is `~/.claude/projects/C--My-files-Code-Harv/memory` (the same as the Claude Code dev sessions), and it calls itself Harv (the preset says "Claude Code", so the append states Harv's identity first).
 
 ## 7. Risks and open questions
 

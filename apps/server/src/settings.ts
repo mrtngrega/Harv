@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { COMPACT_ROWS, DEFAULT_SETTINGS, type HarvSettings } from '@harv/shared';
 import { HARV_HOME } from './paths.ts';
@@ -22,7 +23,12 @@ export function cleanSettings(raw: Raw, base: HarvSettings = DEFAULT_SETTINGS): 
     ? [...new Set(raw.protectedPaths.filter((p): p is string => typeof p === 'string' && p.trim() !== '').map((p) => p.trim()))]
     : base.protectedPaths;
   const rows = Array.isArray(raw.compactRows) ? COMPACT_ROWS.filter((r) => (raw.compactRows as unknown[]).includes(r)) : base.compactRows;
-  const workDir = typeof raw.workDir === 'string' ? raw.workDir.trim() : base.workDir;
+  const folder = (v: unknown, fallback: string) => {
+    if (typeof v !== 'string') return fallback;
+    const path = v.trim();
+    // Only a full Windows path (or nothing).
+    return path === '' ? '' : win32.isAbsolute(path) ? win32.normalize(path) : fallback;
+  };
   return {
     protectedPaths: paths,
     confirmYellow: bool(raw.confirmYellow, base.confirmYellow),
@@ -44,8 +50,8 @@ export function cleanSettings(raw: Raw, base: HarvSettings = DEFAULT_SETTINGS): 
     metricsMs: oneOf(raw.metricsMs, [1000, 2000, 5000] as const, base.metricsMs),
     warnSession: percents(raw.warnSession, base.warnSession),
     warnWeekly: percents(raw.warnWeekly, base.warnWeekly),
-    // Only a full Windows path (or nothing).
-    workDir: workDir === '' || win32.isAbsolute(workDir) ? win32.normalize(workDir || '.').replace(/^\.$/, '') : base.workDir,
+    workDir: folder(raw.workDir, base.workDir),
+    projectsDir: folder(raw.projectsDir, base.projectsDir),
     startSensors: bool(raw.startSensors, base.startSensors),
     restoreTabs: bool(raw.restoreTabs, base.restoreTabs),
   };
@@ -66,6 +72,11 @@ export function updateSettings(patch: Raw): HarvSettings {
   const next = cleanSettings(patch, loadSettings());
   writeFileSync(settingsPath(), `${JSON.stringify(next, null, 2)}\n`);
   return next;
+}
+
+/** Where new projects get their folder. */
+export function projectsDir(settings = loadSettings()): string {
+  return settings.projectsDir || join(homedir(), 'Projects');
 }
 
 /** The user's default folder, if it's set and still there. */

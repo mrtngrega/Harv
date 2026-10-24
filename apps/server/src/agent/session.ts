@@ -1,9 +1,9 @@
 import { query, type Query, type SDKMessage, type SDKRateLimitInfo, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { ChatServerMessage, EffortLevel } from '@harv/shared';
+import type { ChatServerMessage, EffortLevel, Project } from '@harv/shared';
 import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
 import type { ContentBlockParam } from './attachments.ts';
-import type { Delegate } from './chatTools.ts';
+import type { Delegate, ProjectTools } from './chatTools.ts';
 import { describeTool, MEMORY_TOOLS } from './guard.ts';
 import { memoryChanges, memorySnapshot } from './memory.ts';
 import { buildOptions, SUBSCRIPTION_KEY_SOURCES } from './options.ts';
@@ -60,10 +60,11 @@ export class ChatSession {
     gate: SafetyGate,
     private resume?: string,
     delegate?: Delegate,
+    mode: { project?: Project; projects?: ProjectTools } = {},
   ) {
     this.q = query({
       prompt: this.input,
-      options: buildOptions(model, effort, this.abort, { resume, chat: { store, tabId, gate, delegate } }),
+      options: buildOptions(model, effort, this.abort, { resume, chat: { store, tabId, gate, delegate, ...mode } }),
     });
     void this.consume();
   }

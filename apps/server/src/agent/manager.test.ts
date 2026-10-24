@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SDKRateLimitInfo } from '@anthropic-ai/claude-agent-sdk';
-import type { ChatServerMessage, EffortLevel } from '@harv/shared';
+import type { ChatServerMessage, EffortLevel, Project } from '@harv/shared';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { SessionHooks } from './session.ts';
 
@@ -23,6 +23,11 @@ class FakeSession {
     _effort: EffortLevel,
     private emit: (msg: ChatServerMessage) => void,
     readonly hooks: SessionHooks,
+    _store?: unknown,
+    _gate?: unknown,
+    _resume?: string,
+    _delegate?: unknown,
+    readonly mode: { project?: Project } = {},
   ) {
     FakeSession.all.set(tabId, this);
   }
@@ -70,7 +75,7 @@ function setup() {
     gate,
     new Router(routes, async () => null),
     meter,
-    (m) => sent.push(m),
+    (m) => sent.push(m as ChatServerMessage),
     () => {},
   );
   const notices = (tabId: string) => sent.flatMap((m) => (m.type === 'chat.notice' && m.tabId === tabId ? [m.message] : []));
@@ -169,7 +174,7 @@ describe('chat names', () => {
       gate,
       new Router(routes, classify),
       meter,
-      (m) => sent.push(m),
+      (m) => sent.push(m as ChatServerMessage),
       () => {},
     );
 
@@ -273,5 +278,50 @@ describe('chat names with a one-message override', () => {
     await chats.send('o', '/haiku /low delete the test file', 'auto', 'medium');
     await vi.waitFor(() => expect(store.title('o')).toBe('Test file cleanup'));
     FakeSession.all.get('o')!.finish();
+  });
+});
+
+describe('project mode', () => {
+  it('moves a chat into a project: a new session in the folder, with the conversation so far', async () => {
+    const { chats, store } = setup();
+    await chats.send('p', 'we talked about a todo app', 'sonnet', 'medium');
+    FakeSession.all.get('p')!.reply('Sounds good.');
+    FakeSession.all.get('p')!.finish();
+    const folder = mkdtempSync(join(tmpdir(), 'harv-proj-'));
+    expect(chats.addProject(folder)).toBeUndefined();
+    const project = store.projects()[0]!;
+    expect(chats.setProject('p', project.id)).toBeUndefined();
+    expect(store.projectOf('p')?.path).toBe(project.path);
+
+    await chats.send('p', 'start with the data model', 'sonnet', 'medium');
+    const session = FakeSession.all.get('p')!;
+    expect(session.mode.project?.path).toBe(project.path);
+    const first = String(session.sent[0]!.content);
+    expect(first).toContain(`moved into the project "${project.name}"`);
+    expect(first).toContain('we talked about a todo app');
+    expect(first).toContain('start with the data model');
+    session.finish();
+    rmSync(folder, { recursive: true, force: true });
+  });
+
+  it('starts a new project: folder, git, CLAUDE.md, and the chat moves in', async () => {
+    const projectsRoot = mkdtempSync(join(tmpdir(), 'harv-projects-'));
+    writeFileSync(join(home, 'settings.json'), JSON.stringify({ projectsDir: projectsRoot }));
+    try {
+      const { chats, store } = setup();
+      const tools = (chats as unknown as { projectTools: { start: (t: string, n: string, d: string) => Promise<string> } }).projectTools;
+      const reply = await tools.start('s', 'weather-app', 'A small weather dashboard.');
+      const folder = join(projectsRoot, 'weather-app');
+      expect(reply).toContain(folder);
+      expect(readFileSync(join(folder, 'CLAUDE.md'), 'utf8')).toContain('A small weather dashboard.');
+      expect(existsSync(join(folder, '.git'))).toBe(true);
+      expect(store.projectOf('s')?.name).toBe('weather-app');
+      // A second time, the folder exists: Harv has to ask.
+      expect(await tools.start('t', 'weather-app', 'again')).toContain('already exists');
+      mkdirSync(join(projectsRoot, 'empty'), { recursive: true });
+    } finally {
+      rmSync(join(home, 'settings.json'), { force: true });
+      rmSync(projectsRoot, { recursive: true, force: true });
+    }
   });
 });

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react';
 import type { DriveInfo, FileEntry, FilePlaces, FolderListing } from '@harv/shared';
-import { chat } from '../../../lib/chatStore.ts';
+import { chat, getChatState } from '../../../lib/chatStore.ts';
 import { addAttachment } from '../../../lib/drafts.ts';
 import { dateGroup } from '../../../lib/format.ts';
 import { explorerPaths, saveLayoutSoon } from '../../../lib/layout.ts';
-import { useSettings } from '../../../lib/useHarvSocket.ts';
+import { useProjects, useSettings } from '../../../lib/useHarvSocket.ts';
 import { clipboard, files } from './api.ts';
 import { FileIcon, iconKind, isImage, typeName } from './fileTypes.tsx';
 import { bytes as formatSize, Icon } from './icons.tsx';
@@ -55,8 +55,10 @@ const driveOf = (path: string) => path.slice(0, 2).toLowerCase();
 /** A chat's file explorer (its view menu), laid out and behaving like Windows 11 File Explorer. `id` is the chat's. */
 export function Explorer({ id }: { id: string }) {
   const { workDir } = useSettings();
-  // Opens where it was, else in the user's default folder (Settings), else Home.
-  const [loc, setLoc] = useState(() => explorerPaths.get(id) ?? (workDir || HOME));
+  const { list: projects } = useProjects();
+  const projectPath = projects.find((p) => p.id === getChatState().tabs.find((t) => t.id === id)?.projectId)?.path;
+  // Opens where it was, else in its project, else in the user's default folder (Settings), else Home.
+  const [loc, setLoc] = useState(() => explorerPaths.get(id) ?? (projectPath || workDir || HOME));
   const [back, setBack] = useState<string[]>([]);
   const [fwd, setFwd] = useState<string[]>([]);
   const [listing, setListing] = useState<FolderListing | null>(null);

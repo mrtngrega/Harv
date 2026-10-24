@@ -82,8 +82,8 @@ export class TerminalManager {
   constructor(
     private events: TerminalEvents,
     private dir: string,
-    /** Where a new terminal opens when nothing else says (the user's default folder). */
-    private defaultCwd: () => string | undefined = () => undefined,
+    /** Where a new terminal opens when nothing else says (its chat's project, or the user's default folder). */
+    private defaultCwd: (id: string) => string | undefined = () => undefined,
     private shell = 'powershell.exe',
   ) {
     mkdirSync(dir, { recursive: true });
@@ -135,7 +135,7 @@ export class TerminalManager {
       name: 'xterm-256color',
       cols,
       rows,
-      cwd: start ?? this.defaultCwd() ?? homedir(),
+      cwd: start ?? this.defaultCwd(id) ?? homedir(),
       // Harv's environment already has the API credentials stripped (env.ts).
       env: process.env as Record<string, string>,
     });
