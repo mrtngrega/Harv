@@ -26,7 +26,7 @@ export interface GateHooks {
   allow?: (rules: string[]) => void;
 }
 
-type Decision = { approve: boolean; command?: string; why?: string; always?: boolean };
+type Decision = { approve: boolean; command?: string; why?: string; always?: boolean; all?: boolean };
 
 const MAX_RESULT = 300;
 
@@ -67,6 +67,10 @@ function buildPreview(tool: string, input: Record<string, unknown>, verdict: Ver
   return lines.join('\n');
 }
 
+/** What Harv is told when Stop cancels a waiting approval (it once read these as refusals and gave up). */
+const STOPPED =
+  'The user pressed Stop, which interrupts the whole reply. It is not a refusal of this action: if they then ask you to continue, you may run it again.';
+
 const deny = (reason: string): HookJSONOutput => ({
   hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
 });
@@ -76,6 +80,8 @@ export class SafetyGate {
   /** Red calls the user approved; canUseTool double-checks against this. */
   private approved = new Set<string>();
   private backups = new Map<string, Backup>();
+  /** Tabs where the user chose "Approve all for this reply": their red calls run without a card until the turn ends. */
+  private trustedTurns = new Set<string>();
 
   constructor(
     private actions: ActionStore,
@@ -110,7 +116,7 @@ export class SafetyGate {
     const verdict = classify(tool, input, ctx);
     const at = Date.now();
     // Red always asks; yellow asks too when the user turned on "confirm changes" in Settings.
-    const asks = verdict.tier === 'red' || (verdict.tier === 'yellow' && loadSettings().confirmYellow);
+    const asks = (verdict.tier === 'red' || (verdict.tier === 'yellow' && loadSettings().confirmYellow)) && !this.trustedTurns.has(tabId);
     const status = verdict.tier === 'blocked' ? 'blocked' : asks ? 'pending' : 'running';
     this.actions.add({ id, tabId, at, tool, tier: verdict.tier, summary: verdict.summary, reason: verdict.reason, status, input });
 
@@ -121,6 +127,10 @@ export class SafetyGate {
     if (verdict.tier === 'green') return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } };
 
     if (!asks) {
+      if (verdict.tier === 'red') {
+        this.approved.add(id);
+        this.actions.update(id, { result: 'Approved with the rest of this reply.' });
+      }
       this.backup(id, verdict.targets);
       this.publish(id);
       return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } };
@@ -150,7 +160,10 @@ export class SafetyGate {
     const decision = await this.ask(approval, signal);
 
     if (!decision.approve) {
-      this.actions.update(id, { status: 'denied', result: decision.why ?? 'Denied by the user.' });
+      this.actions.update(id, {
+        status: 'denied',
+        result: decision.why === STOPPED ? 'Stopped by the user.' : (decision.why ?? 'Denied by the user.'),
+      });
       this.publish(id);
       return deny(decision.why ?? 'The user denied this action. Ask what they would like instead; don’t retry it unchanged.');
     }
@@ -192,7 +205,7 @@ export class SafetyGate {
         this.hooks.onChange();
         resolve(d);
       };
-      const onAbort = () => finish({ approve: false, why: 'Stopped by the user.' });
+      const onAbort = () => finish({ approve: false, why: STOPPED });
       this.pending.set(approval.id, { approval, resolve: finish });
       signal.addEventListener('abort', onAbort, { once: true });
       this.hooks.broadcast({ type: 'approval.request', approval });
@@ -201,16 +214,27 @@ export class SafetyGate {
   }
 
   /** The user's answer from the approval card. */
-  answer(id: string, approve: boolean, command?: string, always = false): void {
-    this.pending
-      .get(id)
-      ?.resolve({ approve, ...(approve && command !== undefined ? { command } : {}), ...(approve && always ? { always } : {}) });
+  answer(id: string, approve: boolean, command?: string, always = false, all = false): void {
+    const pending = this.pending.get(id);
+    if (!pending) return;
+    pending.resolve({ approve, ...(approve && command !== undefined ? { command } : {}), ...(approve && always ? { always } : {}) });
+    if (!approve || !all) return;
+    // "Approve all for this reply": this card, the others waiting in the tab, and whatever else this turn asks.
+    const { tabId } = pending.approval;
+    this.trustedTurns.add(tabId);
+    for (const p of [...this.pending.values()]) if (p.approval.tabId === tabId) p.resolve({ approve: true });
+  }
+
+  /** The turn ended (or was stopped): "Approve all for this reply" is over. */
+  turnEnded(tabId: string): void {
+    this.trustedTurns.delete(tabId);
   }
 
   /** Stop: every approval waiting in this tab is denied. */
   cancel(tabId: string): void {
+    this.trustedTurns.delete(tabId);
     for (const p of [...this.pending.values()]) {
-      if (p.approval.tabId === tabId) p.resolve({ approve: false, why: 'Stopped by the user.' });
+      if (p.approval.tabId === tabId) p.resolve({ approve: false, why: STOPPED });
     }
   }
 

@@ -118,6 +118,36 @@ describe('SafetyGate', () => {
     gate.cancel('tab');
     expect(decision(await stopped)?.permissionDecision).toBe('deny');
     expect(store.get('t7')?.result).toBe('Stopped by the user.');
+    // Harv is told it was an interruption, not a refusal (it once gave up on scans after Stop + "continue").
+    const reason = ((await stopped) as { hookSpecificOutput?: { permissionDecisionReason?: string } }).hookSpecificOutput
+      ?.permissionDecisionReason;
+    expect(reason).toMatch(/not a refusal/);
+  });
+
+  it('"Approve all for this reply" lets the rest of the turn through, until it ends', async () => {
+    const { gate, store } = setup();
+    const first = gate.preToolUse('tab', 'Bash', { command: 'rm -rf ~/tmp/a' }, 'a1', signal());
+    const second = gate.preToolUse('tab', 'Bash', { command: 'rm -rf ~/tmp/b' }, 'a2', signal());
+    await Promise.resolve();
+    expect(gate.waiting).toBe(2);
+    gate.answer('a1', true, undefined, false, true);
+    expect(decision(await first)?.permissionDecision).toBe('allow');
+    expect(decision(await second)?.permissionDecision).toBe('allow');
+    // Later calls in the same reply run without a card; other tabs still ask; blocked stays blocked.
+    expect(decision(await gate.preToolUse('tab', 'Bash', { command: 'rm -rf ~/tmp/c' }, 'a3', signal()))?.permissionDecision).toBe('allow');
+    expect(store.get('a3')?.status).toBe('running');
+    expect(await gate.canUseTool('Bash', { command: 'rm -rf ~/tmp/c' }, 'a3', 'tab')).toMatchObject({ behavior: 'allow' });
+    expect(decision(await gate.preToolUse('tab', 'Bash', { command: 'format D:' }, 'a4', signal()))?.permissionDecision).toBe('deny');
+    void gate.preToolUse('other', 'Bash', { command: 'rm -rf ~/tmp/d' }, 'a5', signal());
+    await Promise.resolve();
+    expect(gate.waiting).toBe(1);
+    gate.cancel('other');
+    // The next reply asks again.
+    gate.turnEnded('tab');
+    void gate.preToolUse('tab', 'Bash', { command: 'rm -rf ~/tmp/e' }, 'a6', signal());
+    await Promise.resolve();
+    expect(gate.waiting).toBe(1);
+    gate.cancel('tab');
   });
 
   it('asks before yellow edits too when "confirm changes" is on', async () => {

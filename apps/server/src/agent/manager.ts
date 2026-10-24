@@ -221,6 +221,7 @@ export class ChatManager {
         this.replies.get(msg.tabId)?.push(`(error: ${msg.message})`);
         break;
       case 'chat.done':
+        this.gate.turnEnded(msg.tabId);
         this.router.finished(msg.tabId, msg.ok, msg.stopped, msg.usage);
         if (msg.usage?.inputTokens) this.store.setContext(msg.tabId, msg.usage.inputTokens);
         this.meter.turnFinished();

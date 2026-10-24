@@ -385,7 +385,7 @@ app.get('/ws', { websocket: true }, (socket) => {
         chats.rename(msg.tabId, msg.title);
         break;
       case 'approval.answer':
-        gate.answer(msg.id, msg.approve, msg.command, msg.always === true);
+        gate.answer(msg.id, msg.approve, msg.command, msg.always === true, msg.all === true);
         break;
       case 'action.undo':
         gate.undo(msg.id);

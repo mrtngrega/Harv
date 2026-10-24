@@ -473,6 +473,14 @@ export function ChatPanel() {
 
       {/* Everything under the tab bar, so a chat's start question covers only this part. */}
       <div className="relative flex min-h-0 flex-1 flex-col">
+        {/* A chat showing its files or terminal still shows what it waits for (hidden, the turn just hung). */}
+        {!inSettings && view !== 'chat' && waiting.length > 0 && (
+          <div className="flex max-h-[60%] flex-none flex-col gap-2 overflow-y-auto border-b border-line p-3">
+            {waiting.map((a) => (
+              <ApprovalCard key={a.id} approval={a} />
+            ))}
+          </div>
+        )}
         {inSettings ? (
           <div className="flex flex-1 flex-col overflow-y-auto px-5 py-4">
             <SettingsView />

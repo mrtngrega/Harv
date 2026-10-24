@@ -30,8 +30,16 @@ onServerMessage((msg) => {
 });
 
 export const safety = {
-  answer(id: string, approve: boolean, command?: string, always = false) {
-    sendMessage({ type: 'approval.answer', id, approve, ...(command !== undefined ? { command } : {}), ...(always ? { always } : {}) });
+  /** `always`: don't ask again for this kind of command; `all`: approve the rest of this reply too. */
+  answer(id: string, approve: boolean, command?: string, { always = false, all = false } = {}) {
+    sendMessage({
+      type: 'approval.answer',
+      id,
+      approve,
+      ...(command !== undefined ? { command } : {}),
+      ...(always ? { always } : {}),
+      ...(all ? { all } : {}),
+    });
   },
   undo(id: string) {
     sendMessage({ type: 'action.undo', id });
