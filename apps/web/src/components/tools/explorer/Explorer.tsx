@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import type { DriveInfo, FileEntry, FilePlaces, FolderListing } from '@harv/shared';
 import { chat } from '../../../lib/chatStore.ts';
 import { addAttachment } from '../../../lib/drafts.ts';
+import { dateGroup } from '../../../lib/format.ts';
 import { clipboard, files } from './api.ts';
 import { FileIcon, iconKind, isImage, typeName } from './fileTypes.tsx';
 import { bytes as formatSize, Icon } from './icons.tsx';
@@ -22,6 +23,11 @@ import {
 type View = 'details' | 'icons' | 'list';
 type SortKey = 'name' | 'mtime' | 'type' | 'size';
 const DRAG_TYPE = 'application/x-harv-paths';
+type Sort = { key: SortKey; desc: boolean };
+/** Newest first, folders and files together, like Windows shows Downloads. */
+const DEFAULT_SORT: Sort = { key: 'mtime', desc: true };
+/** Date and size start with the biggest/newest on top, like Explorer's column headers. */
+const startsDesc = (key: SortKey) => key === 'mtime' || key === 'size';
 
 /** Where each explorer tab was, so switching tabs and back keeps the folder. */
 export const explorerPaths = new Map<string, string>();
@@ -61,7 +67,8 @@ export function Explorer({ id }: { id: string }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
   const [view, setView] = useState<View>(() => load('harv.explorer.view', 'details'));
-  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>(() => load('harv.explorer.sort', { key: 'name', desc: false }));
+  // Like Windows, each folder remembers its own sort order.
+  const [sorts, setSorts] = useState<Record<string, Sort>>(() => load('harv.explorer.sorts', {}));
   const [showHidden, setShowHidden] = useState<boolean>(() => load('harv.explorer.hidden', false));
   const [showPane, setShowPane] = useState<boolean>(() => load('harv.explorer.pane', true));
   const [search, setSearch] = useState<{ query: string; results: FileEntry[]; complete: boolean; loading: boolean } | null>(null);
@@ -75,6 +82,12 @@ export function Explorer({ id }: { id: string }) {
   const root = useRef<HTMLDivElement>(null);
   const searchBox = useRef<HTMLInputElement>(null);
   const isFolder = loc !== HOME && loc !== THIS_PC;
+  const sort = sorts[loc.toLowerCase()] ?? DEFAULT_SORT;
+  const setSort = (next: Sort) => {
+    const all = { ...sorts, [loc.toLowerCase()]: next };
+    setSorts(all);
+    save('harv.explorer.sorts', all);
+  };
 
   const say = useCallback((message: string) => {
     setToast(message);
@@ -179,9 +192,15 @@ export function Explorer({ id }: { id: string }) {
           return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }) * dir;
       }
     };
-    // Folders stay on top, like Explorer.
+    // By date, folders and files mix (newest first); otherwise folders stay on top, like Explorer.
+    if (sort.key === 'mtime') return [...list].sort(cmp);
     return [...list].sort((a, b) => Number(b.dir) - Number(a.dir) || cmp(a, b));
   }, [listing, search, showHidden, sort]);
+
+  // Sorted by date, the details view gets Windows' groups: Today, Yesterday, Earlier this week...
+  const groups = sort.key === 'mtime' && !search ? entries.map((e) => dateGroup(e.mtime)) : null;
+  const groupSizes = new Map<string, number>();
+  for (const g of groups ?? []) groupSizes.set(g, (groupSizes.get(g) ?? 0) + 1);
 
   const selectedEntries = entries.filter((e) => selected.has(e.path));
   const cutPaths = new Set(clip?.mode === 'cut' ? clip.paths : []);
@@ -408,9 +427,7 @@ export function Explorer({ id }: { id: string }) {
       label,
       checked: sort.key === key,
       run: () => {
-        const next = { key, desc: sort.key === key ? sort.desc : key === 'mtime' || key === 'size' };
-        setSort(next);
-        save('harv.explorer.sort', next);
+        setSort({ key, desc: sort.key === key ? sort.desc : startsDesc(key) });
       },
     });
     const order = (desc: boolean, label: string): MenuItem => ({
@@ -418,7 +435,6 @@ export function Explorer({ id }: { id: string }) {
       checked: sort.desc === desc,
       run: () => {
         setSort({ ...sort, desc });
-        save('harv.explorer.sort', { ...sort, desc });
       },
     });
     return [
@@ -564,9 +580,7 @@ export function Explorer({ id }: { id: string }) {
     <button
       type="button"
       onClick={() => {
-        const next = { key, desc: sort.key === key ? !sort.desc : false };
-        setSort(next);
-        save('harv.explorer.sort', next);
+        setSort({ key, desc: sort.key === key ? !sort.desc : startsDesc(key) });
       }}
       className={`flex cursor-pointer items-center gap-1 px-2 py-1.5 text-left hover:bg-white/5 ${className}`}
     >
@@ -880,24 +894,33 @@ export function Explorer({ id }: { id: string }) {
                 {header('type', 'Type', 'w-32')}
                 {header('size', 'Size', 'w-20 justify-end')}
               </div>
-              {entries.map((entry) => (
-                <div key={entry.path} {...rowProps(entry)} className={`flex items-center ${rowClass(entry)}`}>
-                  <span className="flex min-w-[160px] flex-1 items-center gap-2 px-2 py-1">
-                    <FileIcon kind={iconKind(entry)} size={16} />
-                    {nameCell(entry)}
-                  </span>
-                  {search && (
-                    <span className="w-56 truncate px-2 text-faint" title={dirOf(entry.path)}>
-                      {dirOf(entry.path)}
-                    </span>
+              {entries.map((entry, i) => (
+                <div key={entry.path} role="presentation" className="contents">
+                  {groups && groups[i] !== groups[i - 1] && (
+                    <div role="presentation" className="flex items-center gap-2 px-2 pt-3 pb-1 text-[11px] text-accent">
+                      <span>{groups[i]}</span>
+                      <span className="text-faint">({groupSizes.get(groups[i]!)})</span>
+                      <span className="h-px flex-1 bg-line" />
+                    </div>
                   )}
-                  <span className="w-36 truncate px-2 text-[11px] text-faint">{when(entry.mtime)}</span>
-                  <span className="w-32 truncate px-2 text-faint" title={typeName(entry)}>
-                    {typeName(entry)}
-                  </span>
-                  <span className="w-20 px-2 text-right text-faint tabular-nums">
-                    {entry.size !== undefined ? formatSize(entry.size) : ''}
-                  </span>
+                  <div {...rowProps(entry)} className={`flex items-center ${rowClass(entry)}`}>
+                    <span className="flex min-w-[160px] flex-1 items-center gap-2 px-2 py-1">
+                      <FileIcon kind={iconKind(entry)} size={16} />
+                      {nameCell(entry)}
+                    </span>
+                    {search && (
+                      <span className="w-56 truncate px-2 text-faint" title={dirOf(entry.path)}>
+                        {dirOf(entry.path)}
+                      </span>
+                    )}
+                    <span className="w-36 truncate px-2 text-[11px] text-faint">{when(entry.mtime)}</span>
+                    <span className="w-32 truncate px-2 text-faint" title={typeName(entry)}>
+                      {typeName(entry)}
+                    </span>
+                    <span className="w-20 px-2 text-right text-faint tabular-nums">
+                      {entry.size !== undefined ? formatSize(entry.size) : ''}
+                    </span>
+                  </div>
                 </div>
               ))}
               {isFolder && !search && listing && entries.length === 0 && (

@@ -10,13 +10,15 @@ interface CompactItem {
   label: string;
   value: string;
   load: number | undefined;
+  /** °C, shown next to the load (CPU and GPU, when the sensors report it). */
+  temp?: number;
 }
 
 function compactItems(m: MetricsSnapshot | null): CompactItem[] {
   const system = m ? (m.volumes.find((v) => v.mount.toUpperCase().startsWith('C')) ?? m.volumes[0]) : undefined;
   return [
-    { label: 'CPU', value: pct(m?.cpu.load), load: m?.cpu.load },
-    { label: 'GPU', value: pct(m?.gpu?.load), load: m?.gpu?.load },
+    { label: 'CPU', value: pct(m?.cpu.load), load: m?.cpu.load, temp: m?.cpu.tempC },
+    { label: 'GPU', value: pct(m?.gpu?.load), load: m?.gpu?.load, temp: m?.gpu?.tempC },
     { label: 'RAM', value: pct(m?.memory.load), load: m?.memory.load },
     { label: system ? `DISK ${system.mount}` : 'DISK', value: pct(system?.load), load: system?.load },
     { label: 'NET', value: m?.network ? rate(m.network.downBps) : '—', load: m?.network?.utilization },
@@ -38,8 +40,13 @@ function CompactRow({ item }: { item: CompactItem }) {
     <div className="flex flex-col gap-1.5 px-2">
       <div className="flex justify-between gap-1 text-[11px]">
         <span className="truncate text-muted">{item.label}</span>
-        <span className="tabular-nums" style={{ color: item.load === undefined ? 'var(--color-faint)' : barColor(item.load) }}>
-          {item.value}
+        <span className="flex gap-1.5 tabular-nums">
+          <span style={{ color: item.load === undefined ? 'var(--color-faint)' : barColor(item.load) }}>{item.value}</span>
+          {item.temp !== undefined && (
+            <span title="Temperature" style={{ color: barColor(item.temp) }}>
+              {Math.round(item.temp)}°
+            </span>
+          )}
         </span>
       </div>
       <Bar value={item.load} />

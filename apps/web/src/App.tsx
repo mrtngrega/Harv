@@ -17,7 +17,7 @@ export function App() {
       {/* Blurred personal background from ~/.harv, falling back to the ground color. */}
       <div
         aria-hidden="true"
-        className="absolute -inset-12 scale-105 bg-cover bg-center blur-[18px] saturate-[1.1]"
+        className="absolute -inset-12 scale-105 bg-cover bg-center blur-[9px] saturate-[1.1]"
         style={{ backgroundImage: photo }}
       />
       <div aria-hidden="true" className="absolute inset-0 bg-[rgb(10_16_24/0.55)]" />

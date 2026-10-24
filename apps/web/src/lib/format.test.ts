@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countDuplicates, duration, lineTime, pace, rate, resetTime, sizePair, tokens, until } from './format.ts';
+import { countDuplicates, dateGroup, duration, lineTime, pace, rate, resetTime, sizePair, tokens, until } from './format.ts';
 
 describe('format', () => {
   it('formats throughput', () => {
@@ -56,5 +56,22 @@ describe('plan meter details', () => {
     expect(lineTime(new Date(2026, 9, 23, 9, 5).getTime(), now)).toBe('09:05');
     expect(lineTime(new Date(2026, 9, 20, 9, 5).getTime(), now)).toBe('Tue');
     expect(lineTime(new Date(2026, 8, 1, 9, 5).getTime(), now)).toBe('1 Sept');
+  });
+
+  it('groups dates like Windows Explorer', () => {
+    // Friday 24 Oct 2026, 15:00 local time.
+    const now = new Date(2026, 9, 24, 15).getTime();
+    const at = (m: number, d: number, h = 12) => new Date(2026, m, d, h).getTime();
+    expect(dateGroup(at(9, 24, 1), now)).toBe('Today');
+    expect(dateGroup(at(9, 23), now)).toBe('Yesterday');
+    expect(dateGroup(at(9, 20), now)).toBe('Earlier this week');
+    expect(dateGroup(at(9, 19, 0), now)).toBe('Earlier this week');
+    expect(dateGroup(at(9, 18), now)).toBe('Last week');
+    expect(dateGroup(at(9, 12), now)).toBe('Last week');
+    expect(dateGroup(at(9, 3), now)).toBe('Earlier this month');
+    expect(dateGroup(at(8, 2), now)).toBe('Last month');
+    expect(dateGroup(at(1, 2), now)).toBe('Earlier this year');
+    expect(dateGroup(new Date(2025, 11, 31).getTime(), now)).toBe('A long time ago');
+    expect(dateGroup(undefined, now)).toBe('A long time ago');
   });
 });

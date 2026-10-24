@@ -93,3 +93,20 @@ export function pace(m: Pick<PlanMeter, 'kind' | 'percent' | 'resetsAt'>, now = 
   if (m.percent >= 100) return 'limit reached';
   return m.percent <= elapsed + 5 ? 'on track' : 'running hot';
 }
+
+/** Windows Explorer's date groups for a file's modified time, newest first. Weeks start on Monday. */
+export function dateGroup(at: number | undefined, now = Date.now()): string {
+  if (at === undefined) return 'A long time ago';
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const daysBack = (n: number) => new Date(today.getFullYear(), today.getMonth(), today.getDate() - n).getTime();
+  const weekStart = daysBack((today.getDay() + 6) % 7);
+  if (at >= today.getTime()) return 'Today';
+  if (at >= daysBack(1)) return 'Yesterday';
+  if (at >= weekStart) return 'Earlier this week';
+  if (at >= weekStart - 7 * 24 * 60 * 60 * 1000) return 'Last week';
+  if (at >= new Date(today.getFullYear(), today.getMonth(), 1).getTime()) return 'Earlier this month';
+  if (at >= new Date(today.getFullYear(), today.getMonth() - 1, 1).getTime()) return 'Last month';
+  if (at >= new Date(today.getFullYear(), 0, 1).getTime()) return 'Earlier this year';
+  return 'A long time ago';
+}
