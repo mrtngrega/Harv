@@ -239,3 +239,9 @@ The user found AUTO "a bit inaccurate". The route log showed why: a chat opened 
 - **Context for the classifier.** It gets the chat's last four lines (cut to 220 characters each, `ChatManager.recentForRouter`) instead of a one-line label.
 - **Project chats run at least sonnet·high** (`PROJECT_FLOOR`), small talk excepted.
 - **Learning from "Try harder".** Follow-ups now log the task's category and difficulty. When the user asked to try harder on at least 2 tasks of the same category and difficulty in 30 days, and on at least a quarter of them, that kind starts one ladder step higher (`RouteStore.harderStats`), and the reason says so.
+
+## 6i. The user's Claude Code setup in project chats (2026-10-24 evening)
+
+The user asked for Claude Code's tools (artifacts, Claude Design, plugins) in Harv. Artifacts and Claude Design are claude.ai features that don't come through the subscription login. What does come through: project chats now load the user's own Claude Code settings (`settingSources` gains `'user'`, `strictMcpConfig: false`). That brings the skills synced from claude.ai (docx, pdf, pptx, xlsx, deep-research, skill-creator, morning…), plugins, and claude.ai connectors (right now Claude Docs), all on the subscription. They show up in the `/` menu too. Checked without a prompt: 66 commands instead of 53, plus the Claude Docs connector.
+
+Safety: `Skill`, `SlashCommand`, `ToolSearch` and the MCP resource tools are green in project chats (they load instructions; what follows is checked tool by tool). Connector tools (`classifyMcp`) are green when they only read (get/list/search/…), green for writes to the user's private Claude Docs (delete asks), and red for any other write (a future Gmail connector sending mail, a project's own MCP server). Assistant chats still block them all. A user setting that would switch to API billing can't slip through: the session refuses to run unless it logs in with the subscription.

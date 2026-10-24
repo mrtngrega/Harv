@@ -28,7 +28,22 @@ export const READ_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'NotebookRead', 'WebSea
  * tool calls pass the gate themselves), plan mode, watching or stopping a shell Harv
  * started in the background.
  */
-export const AGENT_TOOLS = ['TodoWrite', 'Task', 'Agent', 'ExitPlanMode', 'EnterPlanMode', 'BashOutput', 'KillShell', 'KillBash'];
+export const AGENT_TOOLS = [
+  'TodoWrite',
+  'Task',
+  'Agent',
+  'ExitPlanMode',
+  'EnterPlanMode',
+  'BashOutput',
+  'KillShell',
+  'KillBash',
+  // Skills and slash commands only load instructions; what they then do is checked tool by tool.
+  'Skill',
+  'SlashCommand',
+  'ToolSearch',
+  'ListMcpResourcesTool',
+  'ReadMcpResourceTool',
+];
 // hand_off only starts a turn in another chat; everything that chat does passes the gate itself.
 export const HARV_TOOLS = [
   'mcp__harv__remember',
@@ -120,7 +135,29 @@ export function classify(tool: string, input: Record<string, unknown>, ctx: Clas
     return classifyCommand(command, str(input, 'description'), { ...ctx, project: inProject });
   }
 
+  if (tool.startsWith('mcp__') && ctx.project) return classifyMcp(tool);
+
   return verdict('blocked', `${tool} isn't one of Harv's tools.`, tool);
+}
+
+/** Connector tools that only look things up. */
+const MCP_READ = /^(get|list|read|search|query|fetch|find|guide|describe|view|lookup|export|status)([_-]|$)/i;
+/** The user's own private Claude Docs on claude.ai: writing there touches nothing outside their account. */
+const PRIVATE_MCP = /^claude_ai_Claude_Docs$/i;
+
+/**
+ * A tool from an MCP server a project chat loads (the user's claude.ai connectors, a project's
+ * .mcp.json). Reading is free; changing things elsewhere asks first, except the user's private docs.
+ */
+function classifyMcp(tool: string): Verdict {
+  const [, server = '', ...rest] = tool.split('__');
+  const name = rest.join('__');
+  const summary = `${server.replace(/^claude_ai_/, '').replace(/_/g, ' ')}: ${name}`;
+  if (MCP_READ.test(name)) return verdict('green', 'Only reads through a connected service.', summary);
+  if (PRIVATE_MCP.test(server) && !/delete|remove/i.test(name)) {
+    return verdict('green', 'Changes a private doc in your own claude.ai account.', summary);
+  }
+  return verdict('red', `Changes something through an outside service (${server.replace(/^claude_ai_/, '')}).`, summary);
 }
 
 function classifyFileWrite(tool: string, rawPath: string, ctx: ClassifyContext = {}): Verdict {

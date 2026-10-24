@@ -319,3 +319,26 @@ describe('read-only command chains', () => {
     expect(cmd('echo x > ~/.harv/settings.json')).toBe('blocked');
   });
 });
+
+describe("connectors and skills in project chats (the user's Claude Code setup)", () => {
+  const ctx = { project: join(userDir, 'proj') };
+
+  it('lets skills load, and reads through any connector', () => {
+    expect(classify('Skill', { skill: 'docx' }, ctx).tier).toBe('green');
+    expect(classify('mcp__claude_ai_Gmail__search_threads', {}, ctx).tier).toBe('green');
+    expect(classify('mcp__claude_ai_Claude_Docs__guide', {}, ctx).tier).toBe('green');
+  });
+
+  it("writes the user's private Claude Docs freely, asks before changing anything elsewhere", () => {
+    expect(classify('mcp__claude_ai_Claude_Docs__batch', {}, ctx).tier).toBe('green');
+    expect(classify('mcp__claude_ai_Claude_Docs__update', {}, ctx).tier).toBe('green');
+    expect(classify('mcp__claude_ai_Claude_Docs__delete', {}, ctx).tier).toBe('red');
+    expect(classify('mcp__claude_ai_Gmail__send_message', {}, ctx).tier).toBe('red');
+    expect(classify('mcp__some_server__run', {}, ctx).tier).toBe('red');
+  });
+
+  it('keeps assistant chats on Harv’s own tools', () => {
+    expect(classify('mcp__claude_ai_Claude_Docs__batch', {}).tier).toBe('blocked');
+    expect(classify('Skill', { skill: 'docx' }).tier).toBe('blocked');
+  });
+});

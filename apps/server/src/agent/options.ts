@@ -73,7 +73,7 @@ function projectPrompt(chat: ChatContext, project: Project): string {
     readText(PERSONA_PATH),
     '## Project mode',
     [
-      `- This chat works on the project "${project.name}" in ${project.path}. You have Claude Code's full instructions and tools: follow them for all the engineering work, exactly as Claude Code would. You're still Harv (the persona above), running in Harv's dashboard on the user's Windows PC, and replies render as Markdown.`,
+      `- This chat works on the project "${project.name}" in ${project.path}. You have Claude Code's full instructions and tools: follow them for all the engineering work, exactly as Claude Code would. The user's own Claude Code setup is loaded too: their skills (docx, pdf, pptx, xlsx, deep-research, skill-creator and the rest; use them for documents and research) and their claude.ai connectors (Claude Docs for docs they asked for). You're still Harv (the persona above), running in Harv's dashboard on the user's Windows PC, and replies render as Markdown.`,
       "- The project's CLAUDE.md (loaded above when there is one) is the source of truth for this project. Keep it and the project's docs up to date.",
       "- Your project memory is Claude Code's auto-memory for this folder (see above). The user's Claude Code sessions on this folder share it, so keep it current: where things stand, decisions, the user's rules. What Harv knows about the user in general is below; change that with remember/forget.",
       "- Harv's safety gate checks every action. In this project folder, editing files and normal dev commands (npm, tests, builds, git add/commit, scripts in the project) run without asking; git is the undo, and deletes are backed up. git commit and a normal git push run too (the user wants work pushed without asking). It still asks the user (an approval card) for force-pushing or deleting remote branches, throwing away uncommitted work, installing software for the whole PC, stopping programs, system or registry changes, anything outside the project folder, and commands it can't see into (variables in paths, nested shells). Blocked things stay blocked. So prefer plain, direct commands, and if something is denied, don't work around it.",
@@ -176,9 +176,13 @@ export function buildOptions(
     ...(project
       ? {
           // Project mode: Claude Code itself, in the project folder, with the project's CLAUDE.md and settings,
-          // Claude Code's prompt (including its auto-memory) and tools, and Harv on top.
+          // Claude Code's prompt (including its auto-memory) and tools, and Harv on top. The user's own
+          // Claude Code setup too: their skills (synced from claude.ai: docx, pdf, xlsx…), plugins and
+          // claude.ai connectors, which run on the subscription. A billing setting there can't slip
+          // through: a session that doesn't log in with the subscription refuses to run (session.ts).
           cwd: project.path,
-          settingSources: ['project', 'local'],
+          settingSources: ['user', 'project', 'local'],
+          strictMcpConfig: false,
           systemPrompt: { type: 'preset', preset: 'claude_code', append: projectPrompt(chat!, project) },
           tools: { type: 'preset', preset: 'claude_code' },
         }
@@ -188,8 +192,8 @@ export function buildOptions(
           settingSources: [],
           systemPrompt: systemPrompt(chat),
           tools: ENABLED_TOOLS,
+          strictMcpConfig: true,
         }),
-    strictMcpConfig: true,
     mcpServers: chat ? { harv: harvServer(chat.store, chat.tabId, chat.delegate, chat.projects) } : {},
     permissionMode: 'default',
     canUseTool: async (name, input, { toolUseID }) =>
