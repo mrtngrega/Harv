@@ -85,21 +85,17 @@ export function HistorySidebar() {
 
   if (!open) {
     return (
-      <nav
-        aria-label="Chat history (collapsed)"
-        className="glass flex w-full flex-none flex-row items-center gap-3 rounded-2xl px-2 py-2 lg:w-12 lg:flex-col lg:px-0"
-      >
+      <nav aria-label="Chat history (collapsed)" className="glass flex w-full flex-none rounded-2xl px-2 py-2.5 lg:w-12 lg:px-1.5">
+        {/* One button with the word in it, like the stats panel's LIVE button (the user's wish). */}
         <button
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Expand history"
-          className="size-8 cursor-pointer rounded-lg text-[15px] text-ink hover:bg-white/5"
+          className="flex min-h-8 w-full cursor-pointer items-center justify-between gap-3 rounded-lg px-2 text-[11px] tracking-[2px] text-muted hover:bg-white/5 lg:flex-col lg:justify-start lg:px-0 lg:py-2"
         >
-          ›
+          <span className="lg:order-2 lg:[writing-mode:vertical-rl]">HISTORY</span>
+          <span className="text-[15px] tracking-normal text-ink lg:order-1">›</span>
         </button>
-        <span aria-hidden="true" className="text-[11px] tracking-[3px] text-muted [writing-mode:vertical-rl]">
-          HISTORY
-        </span>
       </nav>
     );
   }
@@ -111,17 +107,15 @@ export function HistorySidebar() {
       aria-label="Chat history"
       className="glass flex max-h-64 w-full flex-col gap-2.5 rounded-2xl p-3 lg:max-h-[calc(var(--app-h)-110px)] lg:w-[230px] lg:flex-none"
     >
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] tracking-[2px] text-muted">HISTORY</span>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          aria-label="Collapse history"
-          className="size-8 cursor-pointer rounded-lg text-[15px] hover:bg-white/5"
-        >
-          ‹
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={() => setOpen(false)}
+        aria-label="Collapse history"
+        className="flex min-h-8 w-full cursor-pointer items-center justify-between rounded-lg px-2 text-[11px] tracking-[2px] text-muted hover:bg-white/5"
+      >
+        <span>HISTORY</span>
+        <span className="text-[15px] tracking-normal text-ink">‹</span>
+      </button>
       <label htmlFor="history-search" className="sr-only">
         Search chats
       </label>
