@@ -32,6 +32,9 @@ export function cleanSettings(raw: Raw, base: HarvSettings = DEFAULT_SETTINGS): 
   return {
     protectedPaths: paths,
     confirmYellow: bool(raw.confirmYellow, base.confirmYellow),
+    allowRules: Array.isArray(raw.allowRules)
+      ? [...new Set(raw.allowRules.filter((r): r is string => typeof r === 'string' && r.trim() !== '').map((r) => r.trim().toLowerCase()))]
+      : base.allowRules,
     motion: bool(raw.motion, base.motion),
     accent: typeof raw.accent === 'string' && /^#[0-9a-f]{6}$/i.test(raw.accent) ? raw.accent.toUpperCase() : base.accent,
     backgroundBlur: num(raw.backgroundBlur, 0, 30, base.backgroundBlur),

@@ -57,14 +57,37 @@ export const HARV_TOOLS = [
 ];
 export const ENABLED_TOOLS = [...READ_TOOLS, ...FILE_WRITE_TOOLS, ...SHELL_TOOLS];
 
+/** Where a file name ends inside a command line too (a quote, a space, a separator), not only at the end. */
+const END = String.raw`(?=$|[\s"'\\/;|),])`;
+const START = String.raw`(^|[\\/\s"'])`;
+const sensitive = (body: string) => new RegExp(body.replace(/\^START/g, START).replace(/END$/, END), 'i');
+
+/** Files and folders that hold passwords, keys, tokens or login sessions: never read or changed. */
 const SENSITIVE_PATHS: RegExp[] = [
   /(^|[\\/])\.claude([\\/]|$)/i, // Claude Code login and settings
-  /(^|[\\/])\.ssh([\\/]|$)/i,
-  /(^|[\\/])\.aws([\\/]|$)/i,
-  /(^|[\\/])\.env(\.[\w.-]+)?$/i,
-  /credential/i,
-  /(^|[\\/])(id_rsa|id_ed25519)/i,
-  /\.(pem|key|pfx|p12|kdbx)$/i,
+  /credential/i, // Windows Credentials, .git-credentials, …credentials.json
+  sensitive(String.raw`^START\.(ssh|aws|azure|kube|gnupg|gcloud)([\\/]|END)`),
+  sensitive(String.raw`^START\.env(?!\.(example|sample|template)\b)(\.[\w.-]+)?END`),
+  sensitive(String.raw`^START(id_rsa|id_ed25519|id_ecdsa|id_dsa)`),
+  sensitive(String.raw`\.(pem|key|pfx|p12|kdbx|ppk|ovpn|jks|keystore)END`),
+  sensitive(String.raw`^START(\.npmrc|\.netrc|_netrc|\.pypirc)END`),
+  sensitive(String.raw`[\\/]\.docker[\\/]config\.json`),
+  sensitive(String.raw`[\\/]gh[\\/]hosts\.yml`),
+  // Browsers (Chrome, Edge, Brave, Opera…): saved passwords, cookies, autofill, and the key that decrypts them.
+  sensitive(String.raw`[\\/](login data|cookies|web data|local state)(-journal)?END`),
+  // Firefox
+  sensitive(String.raw`[\\/](logins\.json|key[34]\.db|cookies\.sqlite|signons\.sqlite)END`),
+  // Windows: saved credentials, the vault, DPAPI master keys, the password hives, Wi-Fi keys.
+  sensitive(String.raw`[\\/]microsoft[\\/](credentials|vault|protect)([\\/]|END)`),
+  sensitive(String.raw`[\\/]system32[\\/]config[\\/](regback[\\/])?(sam|security|system)END`),
+  /[\\/]wlansvc[\\/]profiles/i,
+  // App logins: Discord / Telegram sessions, Steam, password managers, VPN state, Harv's own browser.
+  /[\\/]discord\w*[\\/]local storage/i,
+  /[\\/]telegram desktop[\\/]tdata/i,
+  /[\\/]steam[\\/](ssfn|config[\\/](loginusers|config)\.vdf)/i,
+  sensitive(String.raw`[\\/](bitwarden|1password|keepassxc|logmein hamachi)([\\/]|END)`),
+  /[\\/]tailscale[\\/][^\\/]*state/i,
+  /[\\/]\.harv[\\/]browser-profile/i,
 ];
 
 const verdict = (tier: Tier, reason: string, summary: string, targets: string[] = []): Verdict => ({ tier, reason, summary, targets });
@@ -72,7 +95,7 @@ const verdict = (tier: Tier, reason: string, summary: string, targets: string[] 
 const str = (input: Record<string, unknown>, key: string) => (typeof input[key] === 'string' ? (input[key] as string) : '');
 
 export function isSensitivePath(p: string): boolean {
-  return SENSITIVE_PATHS.some((re) => re.test(p)) && !isClaudeMemory(p);
+  return SENSITIVE_PATHS.some((re) => re.test(p)) && !isClaudeMemory(p) && !isClaudeToolResult(p);
 }
 
 /**
@@ -84,6 +107,16 @@ export function isClaudeMemory(p: string): boolean {
   return isInside(path, join(homedir(), '.claude', 'projects')) && /[\\/]memory[\\/][^\\/]+\.md$|[\\/]memory[\\/]?$/i.test(path);
 }
 
+/**
+ * Where the SDK saves a tool's output that was too big for the chat
+ * (~/.claude/projects/<folder>/<session>/tool-results/…). Harv is told to read it there,
+ * so blocking it left Harv stuck.
+ */
+export function isClaudeToolResult(p: string): boolean {
+  const path = toWindowsPath(p);
+  return isInside(path, join(homedir(), '.claude', 'projects')) && /[\\/][0-9a-f-]{36}[\\/]tool-results([\\/][^\\/]+)?[\\/]?$/i.test(path);
+}
+
 /** Where a call runs: in a project chat, the project folder (trusted, and the base for relative paths). */
 export interface ClassifyContext {
   project?: string;
@@ -92,10 +125,14 @@ export interface ClassifyContext {
    * trust (a command that starts with `cd <project>`, or a file in it).
    */
   projects?: string[];
+  /** Which shell runs a command: PowerShell commands get the read-only analysis below. */
+  shell?: 'powershell' | 'bash';
 }
 
-/** Claude Code's project memory folders named in a command (allowed, although they're under .claude). */
-const CLAUDE_MEMORY_IN_COMMAND = /\S*\.claude[\\/]projects[\\/][^\s"'\\/]+[\\/]memory\b[^\s"']*/gi;
+/** Claude Code's project memory folders and saved tool outputs named in a command (allowed, although they're under .claude). */
+const CLAUDE_ALLOWED_IN_COMMAND = /\S*\.claude[\\/]projects[\\/][^\s"'\\/]+[\\/](memory\b|[0-9a-f-]{36}[\\/]tool-results\b)[^\s"']*/gi;
+/** The command with those allowed .claude paths taken out (unless they climb out with `..`). */
+const withoutAllowedClaude = (command: string) => command.replace(CLAUDE_ALLOWED_IN_COMMAND, (m) => (m.includes('..') ? m : ' '));
 
 /** The registered project a command works in: it starts with `cd`/`Set-Location`/`pushd` (or `git -C`) into one. */
 export function projectOfCommand(command: string, projects: string[]): string | undefined {
@@ -132,7 +169,11 @@ export function classify(tool: string, input: Record<string, unknown>, ctx: Clas
   if (SHELL_TOOLS.includes(tool)) {
     const command = str(input, 'command');
     const inProject = ctx.project ?? projectOfCommand(command, ctx.projects ?? []);
-    return classifyCommand(command, str(input, 'description'), { ...ctx, project: inProject });
+    return classifyCommand(command, str(input, 'description'), {
+      ...ctx,
+      project: inProject,
+      shell: tool === 'PowerShell' ? 'powershell' : 'bash',
+    });
   }
 
   if (tool.startsWith('mcp__') && ctx.project) return classifyMcp(tool);
@@ -193,7 +234,7 @@ const BLOCKED_COMMANDS: [RegExp, string][] = [
     'turns off or removes firewall protection',
   ],
   [
-    /\bcmdkey\b|\bvaultcmd\b|get-storedcredential|\bmimikatz\b|\blsass\b|reg(\.exe)?\s+save\s+hklm\\(sam|security|system)|\.credentials\.json/i,
+    /\bcmdkey\b|\bvaultcmd\b|get-storedcredential|\bmimikatz\b|\blsass\b|reg(\.exe)?\s+save\s+hklm\\(sam|security|system)|\.credentials\.json|\bwlan\s+show\s+prof\w*\b.*\bkey\s*=\s*clear|protecteddata|\bunprotect\(|hklm[\\:]+(sam|security)\b/i,
     'reads stored credentials',
   ],
 ];
@@ -242,12 +283,170 @@ const RED_REASONS: [RegExp, string][] = [
 
 const EXECUTABLE = /\.(exe|bat|cmd|ps1|vbs|js|jse|wsf|msi|scr|com|lnk|reg|py|sh)$/i;
 
-/** The parts of a command chain: `a && b; c | d` → [a, b, c, d]. Quotes aren't parsed, which only errs towards red. */
+/** The parts of a command chain: `a && b; c | d` → [a, b, c, d]. Separators inside quotes (`-match 'a|b'`) don't split. */
 export function splitCommand(command: string): string[] {
-  return command
-    .split(/&&|\|\||[;|\n\r]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const out: string[] = [];
+  let current = '';
+  let quote = '';
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]!;
+    if (quote) {
+      if (ch === quote) quote = '';
+      current += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+    } else if (/[;|\n\r]/.test(ch) || (ch === '&' && command[i + 1] === '&')) {
+      if (command[i + 1] === ch) i++;
+      out.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  out.push(current);
+  return out.map((s) => s.trim()).filter(Boolean);
+}
+
+// ── Read-only programs and PowerShell pipelines ────────────────────────────
+
+/** Programs that only show information when their first argument is one of these. */
+const READ_ONLY_PROGRAMS: Record<string, RegExp> = {
+  ollama: /^(list|ls|ps|show|--version|-v)$/i,
+  winget: /^(list|search|show|--version|-v)$/i,
+  npm: /^(ls|list|ll|view|info|outdated|root|prefix|--version|-v)$/i,
+  pnpm: /^(ls|list|outdated|--version|-v)$/i,
+  yarn: /^(list|info|--version|-v)$/i,
+  pip: /^(list|show|freeze|--version|-V)$/,
+  pip3: /^(list|show|freeze|--version|-V)$/,
+  node: /^(--version|-v)$/i,
+  python: /^(--version|-V)$/,
+  python3: /^(--version|-V)$/,
+  py: /^(--version|-V|--list|-0)$/,
+  dotnet: /^(--version|--info|--list-sdks|--list-runtimes)$/i,
+  docker: /^(ps|images|version|info)$/i,
+  wsl: /^(-l|--list|--status|--version)$/i,
+  choco: /^(list|search|info|--version)$/i,
+  scoop: /^(list|search|info|status)$/i,
+  code: /^(--version|--list-extensions)$/i,
+  tailscale: /^(status|ip|version)$/i,
+  powercfg: /^[/-](l|list|q|query|a|availablesleepstates|getactivescheme|requests)$/i,
+};
+
+/** `ollama list`, `npm --version`: a program from the list above, asked only to show something. */
+export function isReadOnlyProgram(name: string, args: string[]): boolean {
+  const program = name.toLowerCase().replace(/\.exe$/, '');
+  const first = args.find((a) => a.length > 0);
+  return Object.hasOwn(READ_ONLY_PROGRAMS, program) && first !== undefined && READ_ONLY_PROGRAMS[program]!.test(first);
+}
+
+const PS_KEYWORDS = new Set(
+  'if else elseif foreach for while do until switch return break continue try catch finally in default begin process end'.split(' '),
+);
+/** PowerShell commands that only read: Get-*, Test-*, filters, formatting. */
+const PS_READ_CMDLET =
+  /^(get|test|resolve|measure|select|sort|group|where|foreach|compare|convertto|convertfrom|split|join)-[a-z]+$|^(format-(table|list|wide|custom|hex)|out-(string|null|host|default)|write-(output|host)|start-sleep)$/;
+const PS_READ_ALIASES = new Set('% ? foreach where sort select measure group gp gpv gm gcm gal'.split(' '));
+/** .NET methods that only compute or read; any other method call (`.Delete()`, `.Kill()`, `::Start(`) isn't read-only. */
+const SAFE_METHODS = new Set(
+  (
+    'tostring substring trim trimend trimstart tolower toupper tolowerinvariant toupperinvariant replace split join contains startswith endswith ' +
+    'indexof lastindexof padleft padright insert normalize equals compareto gettype gethashcode format concat isnullorempty isnullorwhitespace ' +
+    'round floor ceiling truncate max min abs pow sqrt log log10 sign parse tryparse toint32 toint64 todouble todecimal toboolean tochararray ' +
+    'tobase64string frombase64string adddays addhours addminutes addseconds addmilliseconds addmonths addyears subtract toshortdatestring ' +
+    'tolongdatestring toshorttimestring touniversaltime tolocaltime fromfiletime now today match matches ismatch escape unescape toarray ' +
+    'getfolderpath getenvironmentvariable getenvironmentvariables getlogicaldrives getfilename getextension getdirectoryname ' +
+    'getfilenamewithoutextension combine getfullpath getpathroot gettemppath exists getfiles getdirectories getfilesystementries ' +
+    'enumeratefiles enumeratedirectories getlastwritetime getcreationtime getattributes readalltext readalllines getvalue getvaluenames ' +
+    'getsubkeynames getbytes getstring openread add'
+  ).split(' '),
+);
+
+/**
+ * A PowerShell command that only reads, however it's put together: pipelines, script blocks
+ * (`ForEach-Object { … }`, `@{n=…;e={…}}`), variables, `[math]::Round(…)`. Every command
+ * that runs, wherever it sits, must be a read-only one, and every .NET call a harmless one.
+ */
+export function isReadOnlyPowerShell(command: string): boolean {
+  // Here-strings are hard to read safely.
+  if (/@["']/.test(command)) return false;
+  // Strings are data, but "…$(…)…" runs code inside a string.
+  let code = command.replace(/'[^']*'/g, "''");
+  if (/"[^"]*\$\(/.test(code)) return false;
+  code = code.replace(/"[^"]*"/g, '""');
+  // An unclosed quote, a backtick (escapes, line continuations) or a comment.
+  if (/['"`#]/.test(code.replace(/''|""/g, ''))) return false;
+
+  for (const m of code.matchAll(/(?:\.|::)\s*([A-Za-z_]\w*)\s*\(/g)) {
+    if (!SAFE_METHODS.has(m[1]!.toLowerCase())) return false;
+  }
+  // A method named by a string or a variable: `$x.'Delete'()`, `$x.$name()`.
+  if (/(\.|::)\s*(''|""|\$\w*)\s*\(/.test(code)) return false;
+
+  const tokens = code.match(/\$\(|@\(|@\{|&&|\|\||\[[^\]]*\]|[|;{}()=,\n\r]|[^\s|;{}()=,]+/g) ?? [];
+  // What each open bracket is: a hashtable (keys come before `=`), or a block/pipeline.
+  const stack: ('hash' | 'block')[] = [];
+  let expectCommand = true;
+  let hashKey = false;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]!;
+    const lower = t.toLowerCase();
+    if (t === '@{') {
+      stack.push('hash');
+      hashKey = true;
+      expectCommand = false;
+      continue;
+    }
+    if (t === '{' || t === '(' || t === '$(' || t === '@(') {
+      stack.push('block');
+      expectCommand = true;
+      continue;
+    }
+    if (t === '}' || t === ')') {
+      stack.pop();
+      expectCommand = false;
+      continue;
+    }
+    const inHash = stack.at(-1) === 'hash';
+    if (t === ';' || t === '\n' || t === '\r') {
+      if (inHash) hashKey = true;
+      else expectCommand = true;
+      continue;
+    }
+    if (t === '|' || t === '&&' || t === '||' || t === '=' || t === ',') {
+      // `a = b` and `x, (Get-Date)`: what follows may be a command.
+      if (inHash && t === '=') hashKey = false;
+      expectCommand = t !== ',';
+      continue;
+    }
+    if (inHash && hashKey) continue; // a hashtable key
+    if (!expectCommand) continue; // an argument or operator
+    expectCommand = false;
+    // Values, not commands: variables, types/casts, numbers, strings, operators like -not.
+    if (/^[$[\d'"@!-]/.test(t)) {
+      // `[math]::Round(...)` and `$x.Method()` were checked above; `$x = ...` continues as an assignment.
+      continue;
+    }
+    if (t === '&' || t === '.' || t.startsWith('.') || /[\\/]/.test(t)) return false; // call operator, dot-sourcing, a script by path
+    const next = (tokens[i + 1] ?? '').toLowerCase();
+    if (lower === 'foreach-object' || lower === '%' || (lower === 'foreach' && next !== '(')) {
+      // `% Delete` calls a method on every item; only a script block is read here.
+      if (next !== '{' && next !== '-process') return false;
+      continue;
+    }
+    if (PS_KEYWORDS.has(lower)) {
+      expectCommand = lower !== 'in';
+      continue;
+    }
+    if (PS_READ_CMDLET.test(lower) && !/^get-(credential|storedcredential)$/.test(lower)) continue;
+    if (PS_READ_ALIASES.has(lower) || (GREEN_COMMANDS.has(lower) && !CHANGING_WORDS.has(lower))) continue;
+    // An outside program: read-only only when it's asked to show something.
+    const args: string[] = [];
+    for (let j = i + 1; j < tokens.length && !/^([|;})\n\r]|&&|\|\|)$/.test(tokens[j]!); j++) args.push(unquote(tokens[j]!));
+    if (isReadOnlyProgram(lower, args)) continue;
+    return false;
+  }
+  return true;
 }
 
 const words = (segment: string) => segment.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
@@ -352,12 +551,67 @@ function isGreenSegment(segment: string): boolean {
 const writesFile = (command: string) => />/.test(command.replace(/\d?>\s*(&\d|\$null|\/dev\/null|nul\b)/gi, ''));
 
 export function classifyCommand(command: string, description = '', ctx: ClassifyContext = {}): Verdict {
+  const v = classifyCommandAsIs(command, description, ctx);
+  if (v.tier !== 'red') return v;
+  const rules = loadSettings().allowRules;
+  if (rules.length === 0) return v;
+  const needed = rulesFor(command, ctx);
+  if (!needed || needed.length === 0 || !needed.every((r) => rules.includes(r))) return v;
+  return { ...v, tier: 'yellow', reason: `You said not to ask again for ${needed.map((r) => `"${r}"`).join(' and ')}.` };
+}
+
+// ── "Don't ask again" rules (Settings › Safety; the user's wish 2026-10-24) ──
+
+/** Commands no rule may cover: they run other code, so "this kind of command" means nothing. */
+const NO_RULE = new Set(
+  (
+    'powershell pwsh cmd bash sh node python python3 py deno bun iex invoke-expression invoke-command start start-process saps & . ' +
+    'foreach-object % foreach where-object ? sudo runas wsl npx call'
+  ).split(' '),
+);
+
+/**
+ * The rule a single command would be covered by: the program plus its subcommand
+ * (`npm install`, `git push`, `reg export`), or the PowerShell cmdlet (`remove-item`).
+ * Null when it's not a plain command (script blocks, substitutions, redirection).
+ */
+export function ruleOf(segment: string): string | null {
+  if (/[{}()`<>]/.test(segment) || /\$\(|\biex\b/i.test(segment)) return null;
+  const ws = words(segment).map(unquote);
+  const program = (ws[0] ?? '').toLowerCase().replace(/\.exe$/, '');
+  if (!/^[a-z][\w.-]*$/.test(program) || NO_RULE.has(program) || EXECUTABLE.test(program)) return null;
+  const sub = ws[1] ?? '';
+  // The destructive kinds of git get their own rule, so allowing `git push` doesn't allow a force push.
+  if (program === 'git' && sub === 'push' && /\s(-f|-d|--force\S*|--delete|--mirror)\b|\s\+\S|\s:\S/.test(segment))
+    return 'git push --force';
+  if (program === 'git' && sub === 'reset' && /\s--hard\b/.test(segment)) return 'git reset --hard';
+  // Cmdlets (Verb-Noun) have no subcommands; for programs the second word is one when it's a plain word.
+  if (!program.includes('-') && /^[a-z][a-z-]*$/i.test(sub)) return `${program} ${sub.toLowerCase()}`;
+  return program;
+}
+
+/**
+ * The rules a command needs to run without asking: one per part that isn't read-only.
+ * Null when some part can't be covered by a rule (it always asks).
+ */
+export function rulesFor(command: string, ctx: ClassifyContext = {}): string[] | null {
+  const needed = new Set<string>();
+  for (const segment of splitCommand(command)) {
+    if (classifyCommandAsIs(segment, '', ctx).tier === 'green') continue;
+    const rule = ruleOf(segment);
+    if (!rule) return null;
+    needed.add(rule);
+  }
+  return [...needed];
+}
+
+function classifyCommandAsIs(command: string, description: string, ctx: ClassifyContext): Verdict {
   const cwd = ctx.project ?? WORKSPACE;
   const summary = description || command.split(/\r?\n/)[0]!.slice(0, 120);
   for (const [re, what] of BLOCKED_COMMANDS) {
     if (re.test(command)) return verdict('blocked', `Blocked: this ${what}. Only you can unblock that, in Harv's settings.`, summary);
   }
-  if (SENSITIVE_PATHS.some((re) => re.test(command.replace(CLAUDE_MEMORY_IN_COMMAND, ' ').replace(/["']/g, ' ')))) {
+  if (SENSITIVE_PATHS.some((re) => re.test(withoutAllowedClaude(command).replace(/["']/g, ' ')))) {
     return verdict('blocked', 'Blocked: it touches files that may hold credentials or secrets.', summary);
   }
 
@@ -368,14 +622,18 @@ export function classifyCommand(command: string, description = '', ctx: Classify
 
   // git's read-only subcommands and `sed -n` are fine although "git" and "sed" are on the changing list.
   const readOnly = (segment: string) => {
-    if (!isGreenSegment(segment)) return false;
     const ws = words(segment).map((w) => unquote(w).toLowerCase());
+    if (isReadOnlyProgram(ws[0] ?? '', ws.slice(1))) return true;
+    if (!isGreenSegment(segment)) return false;
     return ['git', 'sed'].includes(ws[0] ?? '') || !ws.some((t) => CHANGING_WORDS.has(t));
   };
 
   if (!substitutes && !writesFile(command) && segments.length > 0) {
     if (segments.length === 1 && isOpenApp(segments[0]!)) return verdict('green', 'Opens an app, page or document.', summary);
     if (segments.every(readOnly) && !CHANGING_CMDLET.test(command)) return verdict('green', 'Only reads information.', summary);
+  }
+  if (ctx.shell === 'powershell' && !writesFile(command) && isReadOnlyPowerShell(command)) {
+    return verdict('green', 'Only reads information.', summary);
   }
 
   const folders = newFolders(command, cwd);

@@ -14,6 +14,8 @@ export interface HarvSettings {
   protectedPaths: string[];
   /** Ask before yellow actions too (editing, moving or creating the user's files), not only red ones. */
   confirmYellow: boolean;
+  /** "Don't ask again" rules from approval cards: commands like "npm install" or "remove-item" that run without a card (backed up, with Undo). */
+  allowRules: string[];
 
   // Look
   /** Subtle animations on (off = everything still). */
@@ -77,6 +79,7 @@ export interface HarvSettings {
 export const DEFAULT_SETTINGS: HarvSettings = {
   protectedPaths: [],
   confirmYellow: false,
+  allowRules: [],
   motion: true,
   accent: ACCENTS[0],
   backgroundBlur: 9,

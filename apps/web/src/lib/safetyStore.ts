@@ -30,8 +30,8 @@ onServerMessage((msg) => {
 });
 
 export const safety = {
-  answer(id: string, approve: boolean, command?: string) {
-    sendMessage({ type: 'approval.answer', id, approve, ...(command !== undefined ? { command } : {}) });
+  answer(id: string, approve: boolean, command?: string, always = false) {
+    sendMessage({ type: 'approval.answer', id, approve, ...(command !== undefined ? { command } : {}), ...(always ? { always } : {}) });
   },
   undo(id: string) {
     sendMessage({ type: 'action.undo', id });

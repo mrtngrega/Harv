@@ -88,6 +88,7 @@ const gate = new SafetyGate(actions, {
   // Project chats: the project folder is trusted (docs/PLAN.md §6f).
   projectOf: (tabId) => store.projectOf(tabId)?.path,
   projects: () => store.projects().map((p) => p.path),
+  allow: (rules) => broadcast({ type: 'settings', settings: updateSettings({ allowRules: [...loadSettings().allowRules, ...rules] }) }),
 });
 const routes = new RouteStore(join(HARV_HOME, 'harv.db'));
 const meter = new UsageMeter(
@@ -382,7 +383,7 @@ app.get('/ws', { websocket: true }, (socket) => {
         chats.rename(msg.tabId, msg.title);
         break;
       case 'approval.answer':
-        gate.answer(msg.id, msg.approve, msg.command);
+        gate.answer(msg.id, msg.approve, msg.command, msg.always === true);
         break;
       case 'action.undo':
         gate.undo(msg.id);

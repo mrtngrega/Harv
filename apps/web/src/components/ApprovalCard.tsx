@@ -65,6 +65,16 @@ export function ApprovalCard({ approval }: { approval: ApprovalRequest }) {
         >
           {edited ? 'APPROVE EDITED' : 'APPROVE'}
         </button>
+        {approval.rules && !edited && (
+          <button
+            type="button"
+            onClick={() => safety.answer(approval.id, true, approval.command, true)}
+            title={`Approve, and from now on run ${approval.rules.map((r) => `"${r}"`).join(' and ')} commands without asking (backed up first, with Undo). Settings › Safety lists these rules.`}
+            className="min-h-10 cursor-pointer rounded-[10px] border border-warn/60 bg-warn/10 px-4 text-xs text-warn hover:bg-warn/20"
+          >
+            APPROVE · DON’T ASK AGAIN FOR {approval.rules.map((r) => r.toUpperCase()).join(' + ')}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => safety.answer(approval.id, false)}

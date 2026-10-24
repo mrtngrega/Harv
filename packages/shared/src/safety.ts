@@ -38,10 +38,14 @@ export interface ApprovalRequest {
   backups: string[];
   /** Set when no automatic backup was possible. */
   backupNote?: string;
+  /** What "Don't ask again" would allow (e.g. ["npm install"]); missing when it can't be offered. */
+  rules?: string[];
 }
 
 export type SafetyClientMessage =
-  { type: 'approval.answer'; id: string; approve: boolean; command?: string } | { type: 'action.undo'; id: string };
+  /** `always`: approve, and don't ask again for this kind of command (Settings › Safety lists the rules). */
+  | { type: 'approval.answer'; id: string; approve: boolean; command?: string; always?: boolean }
+  | { type: 'action.undo'; id: string };
 
 export type SafetyServerMessage =
   | { type: 'approval.request'; approval: ApprovalRequest }

@@ -3,7 +3,7 @@ import type { HookJSONOutput, PermissionResult } from '@anthropic-ai/claude-agen
 import type { ApprovalRequest, SafetyServerMessage } from '@harv/shared';
 import type { ActionStore } from '../store/actions.ts';
 import { createBackup, readBackup, restoreBackup, type Backup } from './backup.ts';
-import { classify, FILE_WRITE_TOOLS, SHELL_TOOLS, type Verdict } from './classify.ts';
+import { classify, FILE_WRITE_TOOLS, rulesFor, SHELL_TOOLS, type Verdict } from './classify.ts';
 import { loadSettings } from './paths.ts';
 
 // Every tool call passes through here (Agent SDK hooks, so it can't be skipped):
@@ -22,9 +22,11 @@ export interface GateHooks {
   projectOf?: (tabId: string) => string | undefined;
   /** Every registered project folder: trusted from any chat, not only project chats. */
   projects?: () => string[];
+  /** "Don't ask again": save these rules (Settings › Safety). */
+  allow?: (rules: string[]) => void;
 }
 
-type Decision = { approve: boolean; command?: string; why?: string };
+type Decision = { approve: boolean; command?: string; why?: string; always?: boolean };
 
 const MAX_RESULT = 300;
 
@@ -127,6 +129,7 @@ export class SafetyGate {
     // Red (or yellow with confirm on): safety check and preview, backup, then the user decides.
     const backup = this.backup(id, verdict.targets);
     const backedUp = backup?.entries.filter((e) => e.copy).map((e) => e.original) ?? [];
+    const rules = SHELL_TOOLS.includes(tool) ? rulesFor(String(input.command ?? ''), ctx) : null;
     const notes: string[] = [];
     if (backup?.skipped.length) notes.push(`Too big to back up: ${backup.skipped.join(', ')}.`);
     if (backedUp.length === 0) notes.push('Nothing to back up was found, so Undo won’t be available for this one.');
@@ -141,6 +144,7 @@ export class SafetyGate {
       preview: buildPreview(tool, input, verdict),
       backups: backedUp,
       ...(notes.length ? { backupNote: notes.join(' ') } : {}),
+      ...(rules?.length ? { rules } : {}),
     };
     this.publish(id);
     const decision = await this.ask(approval, signal);
@@ -162,6 +166,10 @@ export class SafetyGate {
       }
       runInput = { ...input, command: decision.command };
       this.actions.update(id, { input: runInput });
+    }
+    if (decision.always) {
+      const allow = SHELL_TOOLS.includes(tool) ? rulesFor(String(runInput.command ?? ''), ctx) : null;
+      if (allow?.length) this.hooks.allow?.(allow);
     }
     this.approved.add(id);
     this.actions.update(id, { status: 'running' });
@@ -193,8 +201,10 @@ export class SafetyGate {
   }
 
   /** The user's answer from the approval card. */
-  answer(id: string, approve: boolean, command?: string): void {
-    this.pending.get(id)?.resolve({ approve, ...(approve && command !== undefined ? { command } : {}) });
+  answer(id: string, approve: boolean, command?: string, always = false): void {
+    this.pending
+      .get(id)
+      ?.resolve({ approve, ...(approve && command !== undefined ? { command } : {}), ...(approve && always ? { always } : {}) });
   }
 
   /** Stop: every approval waiting in this tab is denied. */

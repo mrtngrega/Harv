@@ -686,6 +686,32 @@ export function SettingsView() {
           hint="Normally Harv backs up and changes your files right away (you can Undo). On, it shows an approval card first, like for deleting."
           onChange={(confirmYellow) => updateSettings({ confirmYellow })}
         />
+        <div className="flex flex-col gap-1">
+          <span className="text-xs">Don’t ask again for</span>
+          {settings.allowRules.length === 0 ? (
+            <p className="m-0 text-[11px] text-faint">
+              Nothing yet. “Don’t ask again” on an approval card adds the kind of command here (it then runs without a card, backed up
+              first, with Undo). Blocked things always stay blocked.
+            </p>
+          ) : (
+            <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs">
+              {settings.allowRules.map((rule) => (
+                <li key={rule} className="flex items-center gap-2">
+                  <code className="min-w-0 flex-1 truncate">{rule} …</code>
+                  <button
+                    type="button"
+                    aria-label={`Ask again for ${rule}`}
+                    title="Ask again for these"
+                    onClick={() => updateSettings({ allowRules: settings.allowRules.filter((x) => x !== rule) })}
+                    className="size-7 flex-none cursor-pointer rounded text-muted hover:bg-white/10"
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </Section>
 
       <Watchdog />

@@ -138,4 +138,39 @@ describe('SafetyGate', () => {
       rmSync(join(home, 'settings.json'), { force: true });
     }
   });
+
+  it('Don’t ask again saves the rule, and the next such command runs without a card', async () => {
+    const store = new ActionStore(':memory:');
+    const sent: SafetyServerMessage[] = [];
+    const saved: string[][] = [];
+    const gate = new SafetyGate(store, {
+      broadcast: (m) => sent.push(m),
+      notice: () => {},
+      onChange: () => {},
+      allow: (rules) => {
+        saved.push(rules);
+        writeFileSync(join(home, 'settings.json'), JSON.stringify({ allowRules: rules }));
+      },
+    });
+    try {
+      const pending = gate.preToolUse('tab', 'PowerShell', { command: 'ollama rm qwen3:8b' }, 'r1', signal());
+      await Promise.resolve();
+      const request = sent.find((m) => m.type === 'approval.request');
+      expect(request).toMatchObject({ approval: { rules: ['ollama rm'] } });
+      gate.answer('r1', true, 'ollama rm qwen3:8b', true);
+      expect(decision(await pending)?.permissionDecision).toBe('allow');
+      expect(saved).toEqual([['ollama rm']]);
+
+      const next = await gate.preToolUse('tab', 'PowerShell', { command: 'ollama rm llama3:8b' }, 'r2', signal());
+      expect(decision(next)?.permissionDecision).toBe('allow');
+      expect(store.get('r2')?.tier).toBe('yellow');
+      // Another kind of command still asks.
+      void gate.preToolUse('tab', 'PowerShell', { command: 'ollama pull llama3' }, 'r3', signal());
+      await Promise.resolve();
+      expect(gate.waiting).toBe(1);
+      gate.cancel('tab');
+    } finally {
+      rmSync(join(home, 'settings.json'), { force: true });
+    }
+  });
 });

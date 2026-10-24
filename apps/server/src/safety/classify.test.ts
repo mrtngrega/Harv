@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 
 const home = mkdtempSync(join(tmpdir(), 'harv-safety-'));
 vi.stubEnv('HARV_HOME', home);
-const { classify, classifyCommand, newFolders, pathsInCommand, splitCommand } = await import('./classify.ts');
+const { classify, classifyCommand, newFolders, pathsInCommand, ruleOf, rulesFor, splitCommand } = await import('./classify.ts');
 const { isInside, toWindowsPath } = await import('./paths.ts');
 
 const userDir = mkdtempSync(join(tmpdir(), 'harv-user-'));
@@ -169,6 +169,115 @@ describe('shell commands', () => {
 
   it('splits command chains', () => {
     expect(splitCommand('a && b; c | d\ne')).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(splitCommand(`grep -n "a\\|b" x.ts | head`)).toEqual([`grep -n "a\\|b" x.ts`, 'head']);
+    expect(splitCommand(`Where-Object { $_.Name -match 'iso|zip' }; ls`)).toEqual([`Where-Object { $_.Name -match 'iso|zip' }`, 'ls']);
+  });
+});
+
+describe('read-only PowerShell (no cards for looking around, the user’s wish 2026-10-24)', () => {
+  const ps = (command: string) => classify('PowerShell', { command }).tier;
+
+  // Real commands that asked for approval before, from the action log.
+  it.each([
+    "Get-ChildItem 'C:\\Users\\me\\Downloads' -Force | Where-Object { $_.Name -match '\\.iso$|DaVinci_Resolve_21' } | Select-Object Name",
+    "Get-ChildItem 'C:\\Users\\me\\Downloads' -Force | Sort-Object LastWriteTime | Select-Object -Property @{n='Name';e={$_.Name.Substring(0,[Math]::Min(55,$_.Name.Length))}}",
+    "(Get-ChildItem 'C:\\Users\\me\\AppData\\Local\\Temp' -Force -Directory | Where-Object { $_.Name -match '^[a-z0-9]{8}$' }).Count",
+    "Get-ChildItem 'C:\\Users\\me\\AppData\\Local\\Temp' -Force -Directory -ErrorAction SilentlyContinue | ForEach-Object { [pscustomobject]@{Name=$_.Name; MB=[int]((Get-ChildItem $_.FullName -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum/1MB)} }",
+    "(Get-ChildItem 'C:\\Users\\me\\.ollama' -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB",
+    "Get-Package -ProviderName Programs -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'Autodesk|DaVinci|Ollama' } | Select-Object Name, Version",
+    "$old=(Get-Date).AddDays(-3); Get-ChildItem 'C:\\Temp' -Recurse -File | Where-Object { $_.LastWriteTime -lt $old } | Measure-Object Length -Sum",
+    'Get-ChildItem C:\\ -Force -Directory | ForEach-Object { $s = (Get-ChildItem $_.FullName -Recurse -File | Measure-Object Length -Sum).Sum; [pscustomobject]@{Name=$_.Name; GB=[math]::Round($s/1GB,1)} } | Sort-Object GB -Descending',
+    'ollama list',
+    'npm --version',
+    'winget list --name Steam',
+    'foreach ($d in Get-PSDrive -PSProvider FileSystem) { $d.Name }',
+    "if (Test-Path 'C:\\x') { 'yes' } else { 'no' }",
+    "Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'",
+  ])('green: %s', (command) => {
+    expect(ps(command)).toBe('green');
+  });
+
+  it.each([
+    'Get-ChildItem C:\\x | Remove-Item',
+    'Get-ChildItem C:\\x | ForEach-Object { Remove-Item $_.FullName }',
+    'Get-ChildItem C:\\x | ForEach-Object { $_.Delete() }',
+    'Get-ChildItem C:\\x | % Delete',
+    'Get-ChildItem C:\\x | foreach Delete',
+    'Get-Process notepad | ForEach-Object { $_.Kill() }',
+    "[System.Diagnostics.Process]::Start('calc')",
+    "Get-ChildItem | Select-Object @{n='x';e={Stop-Process -Id 1}}",
+    "$m = 'Delete'; (Get-Item x).$m()",
+    "(Get-Item x).'Delete'()",
+    '& $script',
+    '. .\\setup.ps1',
+    '.\\run.ps1',
+    'Get-Content a.txt | Out-File b.txt',
+    'Get-Date > out.txt',
+    'Get-ChildItem | Export-Csv files.csv',
+    'Write-Output "$(Remove-Item x)"',
+    'Get-Date `\n; Remove-Item x',
+    'Get-Process | Stop-Process',
+    "Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::ExtractToDirectory('a.zip','b')",
+    'npm install left-pad',
+    'ollama rm qwen3:8b',
+    'Get-Credential',
+    'Invoke-Expression (Get-Content x.ps1)',
+  ])('not green: %s', (command) => {
+    expect(ps(command)).not.toBe('green');
+  });
+
+  it('still blocks credentials when only reading', () => {
+    expect(ps("Get-Content 'C:\\Users\\me\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Login Data'")).toBe('blocked');
+    expect(ps('Get-ChildItem $env:APPDATA\\Microsoft\\Credentials')).toBe('blocked');
+    expect(ps('netsh wlan show profile name=Home key=clear')).toBe('blocked');
+  });
+});
+
+describe('credentials stay blocked (the user’s wish)', () => {
+  it.each([
+    'C:\\Users\\me\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Login Data',
+    'C:\\Users\\me\\AppData\\Local\\Microsoft\\Edge\\User Data\\Default\\Network\\Cookies',
+    'C:\\Users\\me\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data\\Local State',
+    'C:\\Users\\me\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\abc.default\\logins.json',
+    'C:\\Users\\me\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\abc.default\\key4.db',
+    'C:\\Users\\me\\AppData\\Roaming\\Microsoft\\Protect\\S-1-5-21\\abc',
+    'C:\\Users\\me\\AppData\\Local\\Microsoft\\Vault\\x',
+    'C:\\Windows\\System32\\config\\SAM',
+    'C:\\ProgramData\\Microsoft\\Wlansvc\\Profiles\\Interfaces\\x.xml',
+    'C:\\Users\\me\\.git-credentials',
+    'C:\\Users\\me\\.npmrc',
+    'C:\\Users\\me\\.docker\\config.json',
+    'C:\\Users\\me\\.kube\\config',
+    'C:\\Users\\me\\AppData\\Roaming\\GitHub CLI\\gh\\hosts.yml',
+    'C:\\Users\\me\\AppData\\Roaming\\discord\\Local Storage\\leveldb\\000.ldb',
+    'C:\\Users\\me\\AppData\\Roaming\\Telegram Desktop\\tdata\\key_datas',
+    'C:\\Program Files (x86)\\Steam\\config\\loginusers.vdf',
+    'C:\\Users\\me\\AppData\\Roaming\\Bitwarden\\data.json',
+    'C:\\ProgramData\\Tailscale\\server-state.conf',
+    'C:\\Users\\me\\.harv\\browser-profile\\Default\\History',
+    'C:\\keys\\server.ppk',
+  ])('never reads %s', (path) => {
+    expect(tier('Read', { file_path: path })).toBe('blocked');
+  });
+
+  it('leaves ordinary files with similar names alone', () => {
+    for (const path of [
+      'C:\\project\\src\\cookies.ts',
+      'C:\\project\\.env.example',
+      'C:\\project\\src\\config\\system.ts',
+      'C:\\project\\docs\\key-ideas.md',
+      'C:\\Program Files\\Tailscale\\tailscale.exe',
+    ]) {
+      expect(tier('Read', { file_path: path }), path).toBe('green');
+    }
+  });
+
+  it("reads the SDK's saved tool outputs (blocking them left Harv stuck), nothing else under .claude", () => {
+    const saved = '~/.claude/projects/C--Users-me--harv-workspace/d26d5901-3c3e-44c7-a457-fb119ec3e2a0/tool-results/bndf9f21s.txt';
+    expect(tier('Read', { file_path: saved })).toBe('green');
+    expect(cmd(`sed 's/ */ /g' "${saved}" | grep -v x`)).not.toBe('blocked');
+    expect(cmd(`cat ${saved}/../../../../.credentials.json`)).toBe('blocked');
+    expect(tier('Read', { file_path: '~/.claude/projects/C--x/d26d5901-3c3e-44c7-a457-fb119ec3e2a0.jsonl' })).toBe('blocked');
   });
 });
 
@@ -340,5 +449,48 @@ describe("connectors and skills in project chats (the user's Claude Code setup)"
   it('keeps assistant chats on Harv’s own tools', () => {
     expect(classify('mcp__claude_ai_Claude_Docs__batch', {}).tier).toBe('blocked');
     expect(classify('Skill', { skill: 'docx' }).tier).toBe('blocked');
+  });
+});
+
+describe('Don’t ask again rules', () => {
+  it('names the kind of command a card would allow', () => {
+    expect(ruleOf('npm install left-pad')).toBe('npm install');
+    expect(ruleOf('git push origin main')).toBe('git push');
+    expect(ruleOf('git push --force origin main')).toBe('git push --force');
+    expect(ruleOf('git reset --hard HEAD~1')).toBe('git reset --hard');
+    expect(ruleOf("Remove-Item -LiteralPath 'C:\\x' -Recurse")).toBe('remove-item');
+    expect(ruleOf('taskkill /IM chrome.exe /F')).toBe('taskkill');
+    expect(ruleOf('ollama rm qwen3:8b')).toBe('ollama rm');
+    // Things that run other code can't get a rule.
+    for (const c of [
+      'python script.py',
+      'Invoke-Expression x',
+      'Get-ChildItem | ForEach-Object { Remove-Item $_ }',
+      '.\\run.ps1',
+      'powershell -c x',
+      'echo $(rm x)',
+    ]) {
+      expect(ruleOf(c), c).toBeNull();
+    }
+    expect(rulesFor('cd C:\\x && npm install && ollama rm a')).toEqual(['npm install', 'ollama rm']);
+    expect(rulesFor('Get-ChildItem | ForEach-Object { Remove-Item $_ }')).toBeNull();
+  });
+
+  it('runs covered commands without a card (yellow: backed up, Undo), nothing else', () => {
+    writeFileSync(
+      join(home, 'settings.json'),
+      JSON.stringify({ protectedPaths: [protectedDir], allowRules: ['npm install', 'remove-item'] }),
+    );
+    try {
+      expect(classifyCommand('npm install left-pad')).toMatchObject({ tier: 'yellow', reason: expect.stringMatching(/npm install/) });
+      expect(cmd(`Remove-Item "${userFile}"`)).toBe('yellow');
+      expect(cmd('npm install x && npm publish')).toBe('red');
+      expect(cmd('npm uninstall x')).toBe('red');
+      // Blocked and protected things stay blocked.
+      expect(cmd(`Remove-Item "${protectedDir}" -Recurse`)).toBe('blocked');
+      expect(cmd('Remove-Item C:\\Windows\\Temp\\x.log')).toBe('blocked');
+    } finally {
+      writeFileSync(join(home, 'settings.json'), JSON.stringify({ protectedPaths: [protectedDir] }));
+    }
   });
 });
