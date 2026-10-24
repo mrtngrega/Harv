@@ -6,6 +6,7 @@ import { HARV_VERSION, type EffortLevel } from '@harv/shared';
 import { ENABLED_TOOLS } from '../safety/classify.ts';
 import type { SafetyGate } from '../safety/gate.ts';
 import { WORKSPACE } from '../safety/paths.ts';
+import { workDir } from '../settings.ts';
 import type { ChatStore } from '../store/chats.ts';
 import { harvServer, recentChatsContext, type Delegate } from './chatTools.ts';
 import { memoryContext } from './memory.ts';
@@ -52,6 +53,11 @@ function systemPrompt(chat?: ChatContext): string {
       "- So: pick the least risky way to do what's asked, say in a sentence what you're about to do before a risky step, and keep commands simple and readable (the user approves exactly what they see). If something is denied or blocked, don't retry it or work around it; ask what they'd like instead.",
       "- One plain command per step. Simple commands pass without bothering the user, but anything with variables, if/else, loops or several steps chained together always needs their approval. For example, check with `Test-Path '<path>'` first, then create a folder with just `New-Item -ItemType Directory -Path '<full path>'` (new folders don't need approval), and open a file with `Start-Process '<path>'`.",
       `- The user's home folder is ${homedir()} (Downloads, Documents and Desktop are usually inside it; check if a path isn't there). You can read and open files anywhere on the PC.`,
+      ...(workDir()
+        ? [
+            `- The user's default folder is ${workDir()}. When they ask you to make or change files without saying where, work there (with full paths). Your own scratch files still go in your workspace.`,
+          ]
+        : []),
       `- Today is ${today}.`,
     ].join('\n'),
     '## Your memory',

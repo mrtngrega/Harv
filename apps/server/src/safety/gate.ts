@@ -102,7 +102,9 @@ export class SafetyGate {
   async preToolUse(tabId: string, tool: string, input: Record<string, unknown>, id: string, signal: AbortSignal): Promise<HookJSONOutput> {
     const verdict = classify(tool, input);
     const at = Date.now();
-    const status = verdict.tier === 'blocked' ? 'blocked' : verdict.tier === 'red' ? 'pending' : 'running';
+    // Red always asks; yellow asks too when the user turned on "confirm changes" in Settings.
+    const asks = verdict.tier === 'red' || (verdict.tier === 'yellow' && loadSettings().confirmYellow);
+    const status = verdict.tier === 'blocked' ? 'blocked' : asks ? 'pending' : 'running';
     this.actions.add({ id, tabId, at, tool, tier: verdict.tier, summary: verdict.summary, reason: verdict.reason, status, input });
 
     if (verdict.tier === 'blocked') {
@@ -111,13 +113,13 @@ export class SafetyGate {
     }
     if (verdict.tier === 'green') return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } };
 
-    if (verdict.tier === 'yellow') {
+    if (!asks) {
       this.backup(id, verdict.targets);
       this.publish(id);
       return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } };
     }
 
-    // Red: safety check and preview, backup, then the user decides.
+    // Red (or yellow with confirm on): safety check and preview, backup, then the user decides.
     const backup = this.backup(id, verdict.targets);
     const backedUp = backup?.entries.filter((e) => e.copy).map((e) => e.original) ?? [];
     const notes: string[] = [];

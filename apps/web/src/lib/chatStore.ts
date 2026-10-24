@@ -46,6 +46,8 @@ export interface Tab {
   reason?: string;
   /** Tokens the last turn sent: the conversation's context size. */
   context?: number;
+  /** The server has this chat (it came from there, or a message was sent): otherwise it's a blank tab only the dashboard knows. */
+  stored?: boolean;
 }
 
 /** The Settings tab's id in `activeId`; it sits in the tab bar after the chats. */
@@ -115,6 +117,7 @@ export const useHistory = history.use;
 
 const fromSnapshot = (chat: ChatSnapshot): Tab => ({
   id: chat.id,
+  stored: true,
   title: chat.title,
   busy: false,
   currentId: null,
@@ -145,7 +148,7 @@ function hydrate(chats: ChatSnapshot[], ui?: UiState) {
   store.set((s) => {
     const saved = chats.map(fromSnapshot);
     // The untouched starter tab gives way to saved chats; blank tabs the user opened stay.
-    const blanks = s.tabs.filter((t) => t.lines.length === 0 && t.id !== first.id && !saved.some((c) => c.id === t.id));
+    const blanks = s.tabs.filter((t) => !t.stored && t.id !== first.id && !saved.some((c) => c.id === t.id));
     for (const id of ui?.blanks ?? []) {
       if (!saved.some((c) => c.id === id) && !blanks.some((t) => t.id === id)) blanks.push({ ...blankTab(), id });
     }
@@ -290,6 +293,8 @@ onServerMessage((msg) => {
     hydrate(msg.chats, restored ? undefined : msg.ui);
     if (!restored) {
       restored = true;
+      // Settings › AUTO: start on AUTO instead of the last model picked.
+      if (msg.settings.startModel === 'auto') store.set((s) => ({ ...s, model: 'auto' }));
       restoreListeners.forEach((fn) => fn(msg.ui));
     }
     history.set({ items: msg.history, query: '' });
@@ -393,6 +398,7 @@ export const chat = {
     updateTab(tabId, (t) => ({
       ...t,
       title: t.title === 'New chat' ? (text.replace(OVERRIDE_WORDS, '') || text || files[0] || 'Attachment').slice(0, 24) : t.title,
+      stored: true,
       lines: [...t.lines, line('you', text, files.length ? { files } : {})],
     }));
     chat.dispatch(tabId, { type: 'chat.send', tabId, text, model, effort, ...(attachments.length ? { attachments } : {}) });

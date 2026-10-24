@@ -12,11 +12,41 @@ const { findBackground, imageType, removeBackground, saveBackground } = await im
 
 describe('settings', () => {
   it('drops invalid values and keeps the rest', () => {
-    expect(cleanSettings({ motion: 'yes', accent: '#123456', allowFable: true, protectedPaths: ['C:\\A', ' C:\\A ', 3, ''] })).toEqual({
+    expect(cleanSettings({ motion: 'yes', accent: 'red', allowFable: true, protectedPaths: ['C:\\A', ' C:\\A ', 3, ''] })).toEqual({
       ...DEFAULT_SETTINGS,
       allowFable: true,
       protectedPaths: ['C:\\A'],
     });
+  });
+
+  it('clamps numbers, checks choices and keeps lists tidy', () => {
+    const s = cleanSettings({
+      accent: '#12ab9f',
+      backgroundBlur: 99,
+      scrim: -5,
+      uiScale: 112.4,
+      density: 'tiny',
+      metricsMs: 3000,
+      tempUnit: 'F',
+      compactRows: ['net', 'cpu', 'bogus'],
+      warnSession: [95, 75, 75, 150, 'x'],
+      warnWeekly: [],
+      workDir: 'relative\\path',
+    });
+    expect(s).toMatchObject({
+      accent: '#12AB9F',
+      backgroundBlur: 30,
+      scrim: 0,
+      uiScale: 112,
+      density: DEFAULT_SETTINGS.density,
+      metricsMs: DEFAULT_SETTINGS.metricsMs,
+      tempUnit: 'F',
+      compactRows: ['cpu', 'net'],
+      warnSession: [75, 95],
+      warnWeekly: [],
+      workDir: '',
+    });
+    expect(cleanSettings({ workDir: ' D:\\Projects ' }).workDir).toBe('D:\\Projects');
   });
 
   it('saves a change on top of what is stored', () => {

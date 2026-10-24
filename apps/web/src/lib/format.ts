@@ -6,6 +6,10 @@ export const pct = (n: number | undefined) => (n === undefined ? '—' : `${Math
 
 export const celsius = (n: number | undefined) => (n === undefined ? '—' : `${Math.round(n)}°C`);
 
+/** A temperature in the user's unit (Settings › Stats panel). */
+export const temperature = (n: number | undefined, unit: 'C' | 'F' = 'C') =>
+  n === undefined ? '—' : unit === 'F' ? `${Math.round((n * 9) / 5 + 32)}°F` : `${Math.round(n)}°C`;
+
 export const watts = (n: number | undefined) => (n === undefined ? '—' : `${Math.round(n)} W`);
 
 export const ghz = (mhz: number | undefined) => (mhz === undefined ? '—' : `${(mhz / 1000).toFixed(2)} GHz`);

@@ -34,11 +34,14 @@ export class MetricsCollector {
     return () => this.listeners.delete(listener);
   }
 
+  /** `tickMs`: how often a snapshot is pushed (the user's "stats update" setting); read before every tick. */
+  constructor(private tickMs: () => number = () => TICK_MS) {}
+
   async start(): Promise<void> {
     this.staticInfo = await readStaticInfo();
     this.loop(() => this.refreshProcesses(), PROCESSES_MS);
     this.loop(() => this.refreshVolumes(), VOLUMES_MS);
-    this.loop(() => this.tick(), TICK_MS);
+    this.loop(() => this.tick(), this.tickMs);
   }
 
   stop(): void {
@@ -47,14 +50,14 @@ export class MetricsCollector {
   }
 
   /** Runs `fn` now and then every `ms` after it finishes, so slow calls never pile up. */
-  private loop(fn: () => Promise<void>, ms: number): void {
+  private loop(fn: () => Promise<void>, ms: number | (() => number)): void {
     const run = async () => {
       try {
         await fn();
       } catch {
         // A failed read just skips this round; the next one retries.
       }
-      if (!this.stopped) this.timers.push(setTimeout(run, ms));
+      if (!this.stopped) this.timers.push(setTimeout(run, typeof ms === 'number' ? ms : ms()));
     };
     void run();
   }

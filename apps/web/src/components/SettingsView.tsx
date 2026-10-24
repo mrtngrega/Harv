@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { ACCENTS } from '@harv/shared';
+import { ACCENTS, COMPACT_ROWS, DEFAULT_SETTINGS, WARN_CHOICES, type CompactRow, type HarvSettings } from '@harv/shared';
 import { updateSettings, useBackground, useSettings } from '../lib/useHarvSocket.ts';
 
 const ACCENT_NAMES: Record<string, string> = {
@@ -35,6 +35,169 @@ function Toggle({ on, label, hint, onChange }: { on: boolean; label: string; hin
         {hint && <span className="text-faint">{hint}</span>}
       </span>
     </label>
+  );
+}
+
+function Slider({
+  label,
+  value,
+  min,
+  max,
+  step = 1,
+  unit,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  unit: string;
+  onChange: (v: number) => void;
+}) {
+  // Moves freely while dragging; saved when let go, so the settings file isn't written 60 times a second.
+  const [live, setLive] = useState<number | null>(null);
+  const shown = live ?? value;
+  const save = () => {
+    if (live !== null && live !== value) onChange(live);
+    setLive(null);
+  };
+  return (
+    <label className="flex items-center gap-3 text-xs">
+      <span className="w-24 flex-none text-muted">{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={shown}
+        onChange={(e) => setLive(Number(e.target.value))}
+        onPointerUp={save}
+        onKeyUp={save}
+        onBlur={save}
+        className="min-w-0 flex-1 accent-[var(--color-accent)]"
+      />
+      <span className="w-12 flex-none text-right tabular-nums">
+        {shown}
+        {unit}
+      </span>
+    </label>
+  );
+}
+
+/** A small row of choices (one picked). */
+function Choice<T extends string | number>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex flex-wrap items-center gap-1.5 text-xs">
+      <span className="w-24 flex-none text-muted">{label}</span>
+      {options.map((o) => (
+        <button
+          key={String(o.value)}
+          type="button"
+          role="radio"
+          aria-checked={value === o.value}
+          onClick={() => onChange(o.value)}
+          className={`min-h-8 cursor-pointer rounded-lg border px-2.5 ${
+            value === o.value ? 'border-accent/60 bg-accent/15 text-ink' : 'border-line text-muted hover:bg-white/5'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Several choices that can each be on or off. */
+function Chips<T extends string | number>({
+  label,
+  values,
+  options,
+  onChange,
+}: {
+  label: string;
+  values: T[];
+  options: { value: T; label: string }[];
+  onChange: (v: T[]) => void;
+}) {
+  return (
+    <div role="group" aria-label={label} className="flex flex-wrap items-center gap-1.5 text-xs">
+      <span className="w-24 flex-none text-muted">{label}</span>
+      {options.map((o) => {
+        const on = values.includes(o.value);
+        return (
+          <button
+            key={String(o.value)}
+            type="button"
+            aria-pressed={on}
+            onClick={() =>
+              onChange(
+                on ? values.filter((v) => v !== o.value) : options.map((x) => x.value).filter((v) => v === o.value || values.includes(v)),
+              )
+            }
+            className={`min-h-8 cursor-pointer rounded-lg border px-2.5 ${on ? 'border-accent/60 bg-accent/15 text-ink' : 'border-line text-faint hover:bg-white/5'}`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const LOOK_KEYS = ['motion', 'accent', 'backgroundBlur', 'scrim', 'glass', 'uiScale', 'density'] as const satisfies (keyof HarvSettings)[];
+const ROW_NAMES: Record<CompactRow, string> = {
+  cpu: 'CPU',
+  gpu: 'GPU',
+  ram: 'RAM',
+  disk: 'Disk',
+  net: 'Net',
+  session: 'Session',
+  weekly: 'Weekly',
+};
+
+function WorkFolder() {
+  const { workDir } = useSettings();
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? workDir;
+  const save = (e: FormEvent) => {
+    e.preventDefault();
+    updateSettings({ workDir: value.trim() });
+    setDraft(null);
+  };
+  return (
+    <Section title="Default folder">
+      <p className="m-0 text-[11px] text-faint">
+        Where new terminals and the file explorer open, and where Harv works on files when you don't say where. Harv's own scratch files
+        stay in ~/.harv/workspace. Empty = your home folder.
+      </p>
+      <form onSubmit={save} className="flex gap-2">
+        <label htmlFor="harv-workdir" className="sr-only">
+          Default folder
+        </label>
+        <input
+          id="harv-workdir"
+          value={value}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="C:\Users\you\Projects"
+          className="min-h-9 min-w-0 flex-1 rounded-lg border border-line bg-black/20 px-2.5 text-xs text-ink outline-none placeholder:text-faint focus:border-accent/60"
+        />
+        <button type="submit" className="min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 text-xs hover:bg-white/10">
+          Save
+        </button>
+      </form>
+      {draft !== null && draft.trim() !== workDir && <p className="m-0 text-[11px] text-faint">Not saved yet: press Save.</p>}
+    </Section>
   );
 }
 
@@ -152,25 +315,21 @@ function ProtectedFolders() {
   );
 }
 
-/** Harv's settings, shown as a tab in the chat bar: look and feel, the background photo, AUTO, and read-only folders. Saved in ~/.harv/settings.json. */
+/** Harv's settings, shown as a tab in the chat bar. Saved in ~/.harv/settings.json and applied at once in every window. */
 export function SettingsView() {
   const settings = useSettings();
+  const lookChanged = LOOK_KEYS.some((k) => settings[k] !== DEFAULT_SETTINGS[k]);
+  const resetLook = () => updateSettings(Object.fromEntries(LOOK_KEYS.map((k) => [k, DEFAULT_SETTINGS[k]])) as Partial<HarvSettings>);
 
   return (
-    <div className="animate-fade-in mx-auto grid w-full max-w-[860px] grid-cols-1 content-start gap-2.5 md:grid-cols-2">
+    <div className="animate-fade-in mx-auto grid w-full max-w-[920px] grid-cols-1 content-start gap-2.5 md:grid-cols-2">
       <p className="m-0 px-1 text-xs text-muted md:col-span-2">
         Saved on this PC in ~/.harv/settings.json. Changes apply at once in every Harv window.
       </p>
 
       <Section title="Look">
-        <Toggle
-          on={settings.motion}
-          label="Animations"
-          hint="Subtle fades, pulses and bars. Off keeps everything still."
-          onChange={(motion) => updateSettings({ motion })}
-        />
-        <div role="radiogroup" aria-label="Accent colour" className="flex items-center gap-2 pt-1 text-xs">
-          <span className="mr-1 text-muted">Accent</span>
+        <div role="radiogroup" aria-label="Accent colour" className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="w-24 flex-none text-muted">Accent</span>
           {ACCENTS.map((c) => (
             <button
               key={c}
@@ -184,17 +343,196 @@ export function SettingsView() {
               style={{ background: c }}
             />
           ))}
+          <label
+            title="Any colour"
+            className={`relative size-7 cursor-pointer overflow-hidden rounded-full border-2 ${
+              (ACCENTS as readonly string[]).includes(settings.accent) ? 'border-dashed border-line' : 'border-ink'
+            }`}
+            style={{ background: (ACCENTS as readonly string[]).includes(settings.accent) ? undefined : settings.accent }}
+          >
+            <span className="sr-only">Custom accent colour</span>
+            {(ACCENTS as readonly string[]).includes(settings.accent) && (
+              <span aria-hidden="true" className="absolute inset-0 flex items-center justify-center text-muted">
+                +
+              </span>
+            )}
+            <input
+              type="color"
+              value={settings.accent.toLowerCase()}
+              onChange={(e) => updateSettings({ accent: e.target.value.toUpperCase() })}
+              className="absolute inset-0 cursor-pointer opacity-0"
+            />
+          </label>
         </div>
+        <Slider
+          label="Size"
+          value={settings.uiScale}
+          min={80}
+          max={130}
+          step={5}
+          unit="%"
+          onChange={(uiScale) => updateSettings({ uiScale })}
+        />
+        <Slider label="Glass" value={settings.glass} min={20} max={95} step={5} unit="%" onChange={(glass) => updateSettings({ glass })} />
+        <Choice
+          label="Chat spacing"
+          value={settings.density}
+          options={[
+            { value: 'comfy', label: 'Comfy' },
+            { value: 'compact', label: 'Compact' },
+          ]}
+          onChange={(density) => updateSettings({ density })}
+        />
+        <Toggle
+          on={settings.motion}
+          label="Animations"
+          hint="Subtle fades, pulses and bars. Off keeps everything still."
+          onChange={(motion) => updateSettings({ motion })}
+        />
+        {lookChanged && (
+          <button
+            type="button"
+            onClick={resetLook}
+            className="cursor-pointer self-start rounded px-1 text-[11px] text-muted hover:text-accent"
+          >
+            Reset the look to default
+          </button>
+        )}
       </Section>
 
-      <BackgroundPicker />
+      <div className="flex flex-col gap-2.5">
+        <BackgroundPicker />
+        <Section title="Background effect">
+          <Slider
+            label="Blur"
+            value={settings.backgroundBlur}
+            min={0}
+            max={30}
+            unit="px"
+            onChange={(backgroundBlur) => updateSettings({ backgroundBlur })}
+          />
+          <Slider
+            label="Darkness"
+            value={settings.scrim}
+            min={0}
+            max={90}
+            step={5}
+            unit="%"
+            onChange={(scrim) => updateSettings({ scrim })}
+          />
+        </Section>
+      </div>
+
+      <Section title="Chat">
+        <Toggle on={settings.showTimes} label="Times on chat lines" onChange={(showTimes) => updateSettings({ showTimes })} />
+        <Toggle
+          on={settings.showTags}
+          label="Model tag on replies"
+          hint="The [sonnet·medium] after harv ›. Hover it to see why AUTO picked it."
+          onChange={(showTags) => updateSettings({ showTags })}
+        />
+        <Choice
+          label="Send with"
+          value={settings.sendKey}
+          options={[
+            { value: 'enter', label: 'Enter' },
+            { value: 'ctrlEnter', label: 'Ctrl+Enter' },
+          ]}
+          onChange={(sendKey) => updateSettings({ sendKey })}
+        />
+        <p className="m-0 text-[11px] text-faint">
+          {settings.sendKey === 'enter' ? 'Shift+Enter makes a new line.' : 'Enter makes a new line, so long messages are easier to write.'}
+        </p>
+      </Section>
 
       <Section title="AUTO">
+        <Choice
+          label="Start on"
+          value={settings.startModel}
+          options={[
+            { value: 'auto', label: 'AUTO' },
+            { value: 'last', label: 'Last model picked' },
+          ]}
+          onChange={(startModel) => updateSettings({ startModel })}
+        />
         <Toggle
           on={settings.allowFable}
           label="Allow Fable 5.1"
           hint="Lets AUTO use Fable for the hardest tasks and as the top of Try harder. It's always available as a manual pick."
           onChange={(allowFable) => updateSettings({ allowFable })}
+        />
+      </Section>
+
+      <Section title="Stats panel">
+        <Toggle on={settings.statsExpanded} label="Start expanded" onChange={(statsExpanded) => updateSettings({ statsExpanded })} />
+        <Chips
+          label="Narrow view"
+          values={settings.compactRows}
+          options={COMPACT_ROWS.map((r) => ({ value: r, label: ROW_NAMES[r] }))}
+          onChange={(compactRows) => updateSettings({ compactRows })}
+        />
+        <Choice
+          label="Temperature"
+          value={settings.tempUnit}
+          options={[
+            { value: 'C', label: '°C' },
+            { value: 'F', label: '°F' },
+          ]}
+          onChange={(tempUnit) => updateSettings({ tempUnit })}
+        />
+        <Choice
+          label="Update every"
+          value={settings.metricsMs}
+          options={[
+            { value: 1000, label: '1 s' },
+            { value: 2000, label: '2 s' },
+            { value: 5000, label: '5 s' },
+          ]}
+          onChange={(metricsMs) => updateSettings({ metricsMs })}
+        />
+      </Section>
+
+      <Section title="Usage warnings">
+        <p className="m-0 text-[11px] text-faint">
+          A note pops up when your Claude plan use crosses these marks, once per window. Turn them all off for no warnings.
+        </p>
+        <Chips
+          label="Session"
+          values={settings.warnSession}
+          options={WARN_CHOICES.session.map((v) => ({ value: v as number, label: `${v}%` }))}
+          onChange={(warnSession) => updateSettings({ warnSession })}
+        />
+        <Chips
+          label="Weekly"
+          values={settings.warnWeekly}
+          options={WARN_CHOICES.weekly.map((v) => ({ value: v as number, label: `${v}%` }))}
+          onChange={(warnWeekly) => updateSettings({ warnWeekly })}
+        />
+      </Section>
+
+      <WorkFolder />
+
+      <Section title="Safety">
+        <Toggle
+          on={settings.confirmYellow}
+          label="Ask before changing my files too"
+          hint="Normally Harv backs up and changes your files right away (you can Undo). On, it shows an approval card first, like for deleting."
+          onChange={(confirmYellow) => updateSettings({ confirmYellow })}
+        />
+      </Section>
+
+      <Section title="Startup">
+        <Toggle
+          on={settings.restoreTabs}
+          label="Reopen tabs"
+          hint="After a restart, bring back the tabs, their files and terminals, and unsent messages, like Chrome."
+          onChange={(restoreTabs) => updateSettings({ restoreTabs })}
+        />
+        <Toggle
+          on={settings.startSensors}
+          label="Start the hardware sensors"
+          hint="Starts LibreHardwareMonitor with Harv (Windows asks for permission). Off, temperatures and fans stay hidden until you press Start sensors."
+          onChange={(startSensors) => updateSettings({ startSensors })}
         />
       </Section>
 

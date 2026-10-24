@@ -101,7 +101,7 @@ export function HistorySidebar() {
   return (
     <nav
       aria-label="Chat history"
-      className="glass flex max-h-[calc(100vh-110px)] w-full flex-col gap-2.5 rounded-2xl p-3 sm:w-[230px] sm:flex-none"
+      className="glass flex max-h-[calc(var(--app-h)-110px)] w-full flex-col gap-2.5 rounded-2xl p-3 sm:w-[230px] sm:flex-none"
     >
       <div className="flex items-center justify-between">
         <span className="text-[11px] tracking-[2px] text-muted">HISTORY</span>

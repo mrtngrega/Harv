@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { LhmLaunchResult, MetricsSnapshot } from '@harv/shared';
-import { celsius, countDuplicates, duration, gb, ghz, pct, rate, sizePair, watts } from '../../lib/format.ts';
+import { countDuplicates, duration, temperature, gb, ghz, pct, rate, sizePair, watts } from '../../lib/format.ts';
+import { useSettings } from '../../lib/useHarvSocket.ts';
 import { ActionLog } from './ActionLog.tsx';
 import { BarList, Card, Rows, ThreadBars } from './parts.tsx';
 
@@ -55,6 +56,8 @@ function SensorsOffline() {
 }
 
 export function StatsDetails({ m }: { m: MetricsSnapshot }) {
+  const { tempUnit } = useSettings();
+  const deg = (n: number | undefined) => temperature(n, tempUnit);
   const { cpu, gpu, memory, network, cooling } = m;
 
   return (
@@ -66,9 +69,9 @@ export function StatsDetails({ m }: { m: MetricsSnapshot }) {
         <Rows
           rows={[
             ['Clock', ghz(cpu.clockMhz)],
-            ['Temp', celsius(cpu.tempC)],
+            ['Temp', deg(cpu.tempC)],
             ['Power', watts(cpu.powerW)],
-            ['Peak temp', celsius(cpu.peakTempC)],
+            ['Peak temp', deg(cpu.peakTempC)],
           ]}
         />
         <BarList title="Top processes" items={cpu.topByCpu.map((p) => ({ name: p.name, value: `${p.cpu.toFixed(1)}%`, share: p.cpu }))} />
@@ -78,8 +81,8 @@ export function StatsDetails({ m }: { m: MetricsSnapshot }) {
         <Card title="GPU" sub={shortGpu(gpu.name)} value={pct(gpu.load)} load={gpu.load}>
           <Rows
             rows={[
-              ['Temp', celsius(gpu.tempC)],
-              ['Hotspot', celsius(gpu.hotspotC)],
+              ['Temp', deg(gpu.tempC)],
+              ['Hotspot', deg(gpu.hotspotC)],
               [
                 'VRAM',
                 gpu.vramUsedMb !== undefined && gpu.vramTotalMb !== undefined
@@ -123,7 +126,7 @@ export function StatsDetails({ m }: { m: MetricsSnapshot }) {
               <div className="truncate text-[11px] text-muted">{d.name}</div>
               <Rows
                 rows={[
-                  ['Temp', celsius(d.tempC)],
+                  ['Temp', deg(d.tempC)],
                   ['Life', pct(d.lifePct)],
                   ['Read', d.readBps !== undefined ? rate(d.readBps) : undefined],
                   ['Write', d.writeBps !== undefined ? rate(d.writeBps) : undefined],
@@ -155,7 +158,7 @@ export function StatsDetails({ m }: { m: MetricsSnapshot }) {
           <Rows
             rows={[
               ...cooling.fans.map((f): [string, string] => [f.name, `${Math.round(f.value)} rpm`]),
-              ...cooling.boardTempsC.map((t): [string, string] => [t.name.replace('Temperature', 'Board'), celsius(t.value)]),
+              ...cooling.boardTempsC.map((t): [string, string] => [t.name.replace('Temperature', 'Board'), deg(t.value)]),
               ['Uptime', duration(m.uptimeSec)],
             ]}
           />

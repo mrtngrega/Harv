@@ -119,4 +119,23 @@ describe('SafetyGate', () => {
     expect(decision(await stopped)?.permissionDecision).toBe('deny');
     expect(store.get('t7')?.result).toBe('Stopped by the user.');
   });
+
+  it('asks before yellow edits too when "confirm changes" is on', async () => {
+    writeFileSync(join(home, 'settings.json'), JSON.stringify({ confirmYellow: true }));
+    try {
+      const { gate, store, sent } = setup();
+      const file = join(userDir, 'confirm.txt');
+      writeFileSync(file, 'v1');
+      const pending = gate.preToolUse('tab', 'Edit', { file_path: file, old_string: 'v1', new_string: 'v2' }, 't8', signal());
+      await Promise.resolve();
+      expect(gate.waiting).toBe(1);
+      expect(store.get('t8')).toMatchObject({ tier: 'yellow', status: 'pending' });
+      expect(sent.find((m) => m.type === 'approval.request')).toMatchObject({ approval: { id: 't8' } });
+      gate.answer('t8', true);
+      expect(decision(await pending)?.permissionDecision).toBe('allow');
+      expect(store.get('t8')?.backups).toEqual([file]);
+    } finally {
+      rmSync(join(home, 'settings.json'), { force: true });
+    }
+  });
 });

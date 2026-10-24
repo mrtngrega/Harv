@@ -103,3 +103,14 @@ describe('chat views (files and terminal inside a chat)', () => {
     expect(getChatState()).toMatchObject({ activeId: tabId, views: { [tabId]: 'files' }, tools: { [tabId]: ['files'] } });
   });
 });
+
+describe('blank tabs', () => {
+  it('stay blank (only the dashboard knows them) until a message is sent, even with notes in them', () => {
+    const tabId = openTab();
+    chat.noticeInActive('Heads up: 90% of your Claude session limit is used.');
+    expect(tab(tabId).lines).toHaveLength(1);
+    expect(tab(tabId).stored).toBeFalsy();
+    chat.send('hello');
+    expect(tab(tabId).stored).toBe(true);
+  });
+});

@@ -24,7 +24,7 @@ function snapshot(): UiState {
     settingsOpen: s.settingsOpen,
     order: s.tabs.map((t) => t.id),
     // Chats with no messages exist only here until the first send.
-    blanks: s.tabs.filter((t) => t.lines.length === 0).map((t) => t.id),
+    blanks: s.tabs.filter((t) => !t.stored).map((t) => t.id),
     tools: keep(s.tools),
     views: keep(s.views),
     explorer: keep(Object.fromEntries(explorerPaths)),

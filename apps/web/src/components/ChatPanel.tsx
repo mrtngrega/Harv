@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { formatSize, uploadAttachment } from '../lib/attachments.ts';
 import { lineTime, resetTime, tokens } from '../lib/format.ts';
 import { HELP, parseCommand } from '../lib/commands.ts';
-import { useUsage } from '../lib/useHarvSocket.ts';
+import { useSettings, useUsage } from '../lib/useHarvSocket.ts';
 import { chat, getChatState, SETTINGS_TAB, useChat, type Line } from '../lib/chatStore.ts';
 import { useSafety } from '../lib/safetyStore.ts';
 import { ActionBadge, ApprovalCard } from './ApprovalCard.tsx';
@@ -47,6 +47,7 @@ function Thinking() {
 }
 
 function Time({ at }: { at: number }) {
+  if (!useSettings().showTimes) return null;
   return (
     <time dateTime={new Date(at).toISOString()} className="mr-2 text-faint tabular-nums">
       {lineTime(at)}
@@ -55,6 +56,7 @@ function Time({ at }: { at: number }) {
 }
 
 function ChatLine({ line, onHarder }: { line: Line; onHarder?: () => void }) {
+  const { showTimes, showTags } = useSettings();
   switch (line.kind) {
     case 'you':
       return (
@@ -75,8 +77,8 @@ function ChatLine({ line, onHarder }: { line: Line; onHarder?: () => void }) {
         <div className="animate-fade-in">
           <div className="flex items-baseline gap-2">
             <Time at={line.at} />
-            <span className="-ml-2 text-ok">harv ›</span>
-            {line.tag && (
+            <span className={`text-ok ${showTimes ? '-ml-2' : ''}`}>harv ›</span>
+            {line.tag && showTags && (
               <span title={line.reason} className="cursor-help text-[11px] text-faint">
                 [{line.tag}]
               </span>
@@ -137,6 +139,8 @@ export function ChatPanel() {
   const inSettings = activeId === SETTINGS_TAB;
   const { approvals } = useSafety();
   const usage = useUsage();
+  const { density, sendKey } = useSettings();
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const pendingByTab = useDrafts();
   const draftTexts = useDraftTexts();
   const [dragging, setDragging] = useState(false);
@@ -195,6 +199,14 @@ export function ChatPanel() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [active?.lines.length, lastText, activeId, waiting.length]);
 
+  // The message box grows with what's typed (up to its max height).
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [draft, nonChat]);
+
   const send = (e: FormEvent) => {
     e.preventDefault();
     const text = draft.trim();
@@ -233,7 +245,7 @@ export function ChatPanel() {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
       }}
       onDrop={(e) => !nonChat && onDrop(e)}
-      className="glass relative flex max-h-[calc(100vh-110px)] min-w-0 flex-[999_1_520px] flex-col overflow-hidden rounded-2xl"
+      className="glass relative flex max-h-[calc(var(--app-h)-110px)] min-w-0 flex-[999_1_520px] flex-col overflow-hidden rounded-2xl"
     >
       <div role="tablist" aria-label="Open chats" className="flex items-end gap-1 overflow-x-auto border-b border-line px-2 pt-2">
         {tabs.map((t) => {
@@ -342,7 +354,10 @@ export function ChatPanel() {
       ) : active && view === 'files' ? (
         <Explorer key={active.id} id={active.id} />
       ) : (
-        <div ref={logRef} className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-4 leading-relaxed">
+        <div
+          ref={logRef}
+          className={`flex flex-1 flex-col overflow-y-auto px-5 ${density === 'compact' ? 'gap-1.5 py-3 leading-normal' : 'gap-3.5 py-4 leading-relaxed'}`}
+        >
           {!active || active.lines.length === 0 ? (
             <p className="m-auto text-center text-muted">
               {active ? 'New chat. Ask Harv anything.' : 'No chat open. Press + to start one.'}
@@ -396,24 +411,33 @@ export function ChatPanel() {
       )}
 
       {!nonChat && (
-        <form onSubmit={send} className="flex items-center gap-2.5 border-t border-line py-2.5 pr-3 pl-5">
-          <label htmlFor="harv-cmd" className="font-semibold text-accent">
+        <form onSubmit={send} className="flex items-end gap-2.5 border-t border-line py-2.5 pr-3 pl-5">
+          <label htmlFor="harv-cmd" className="pb-3 leading-5 font-semibold text-accent">
             harv&gt;
           </label>
-          <input
+          <textarea
+            ref={inputRef}
             id="harv-cmd"
-            type="text"
+            rows={1}
             autoComplete="off"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+              // Settings › Chat: Enter sends (Shift+Enter = new line), or Ctrl+Enter sends (Enter = new line).
+              const sends = sendKey === 'enter' ? !e.shiftKey : e.ctrlKey;
+              if (!sends) return;
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
+            }}
             onPaste={(e) => {
               // Pasted screenshots arrive as files.
               if (e.clipboardData.files.length === 0) return;
               e.preventDefault();
               attach(e.clipboardData.files);
             }}
-            placeholder="type a command or ask anything · /model · /attach"
-            className="min-h-11 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
+            placeholder={`type a command or ask anything · /model · /attach · ${sendKey === 'enter' ? 'Shift+Enter' : 'Enter'} for a new line`}
+            className="max-h-40 min-h-11 min-w-0 flex-1 resize-none bg-transparent py-3 text-sm leading-5 outline-none placeholder:text-faint"
           />
           <input
             ref={fileInputRef}

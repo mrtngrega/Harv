@@ -17,8 +17,8 @@ import { ActionStore } from './store/actions.ts';
 import { ChatStore } from './store/chats.ts';
 import { RouteStore } from './store/routes.ts';
 import { UsageMeter } from './usage/meter.ts';
-import { loadSettings, updateSettings } from './settings.ts';
-import { loadUi, saveUi } from './ui.ts';
+import { loadSettings, updateSettings, workDir } from './settings.ts';
+import { loadUi, resetUi, saveUi } from './ui.ts';
 import { cleanPath, listFolder, openWithDefault, places, previewType } from './tools/files.ts';
 import {
   copyItems,
@@ -67,7 +67,7 @@ app.addHook('onRequest', async (req, reply) => {
 const clients = new Set<(msg: ServerMessage) => void>();
 const broadcast = (msg: ServerMessage) => clients.forEach((send) => send(msg));
 
-const metrics = new MetricsCollector();
+const metrics = new MetricsCollector(() => loadSettings().metricsMs);
 const store = new ChatStore(join(HARV_HOME, 'harv.db'));
 const actions = new ActionStore(join(HARV_HOME, 'harv.db'));
 actions.markInterrupted();
@@ -87,6 +87,11 @@ const meter = new UsageMeter(
     onWarning: (warning) => broadcast({ type: 'usage.warning', warning }),
   },
   () => routes.summary(),
+  undefined,
+  () => {
+    const s = loadSettings();
+    return { session: s.warnSession, weekly: s.warnWeekly };
+  },
 );
 // Each chat's terminal (its view menu); saved in ~/.harv/terminals across restarts.
 const terminals = new TerminalManager(
@@ -95,6 +100,7 @@ const terminals = new TerminalManager(
     exit: (id, code) => broadcast({ type: 'term.exit', id, code }),
   },
   join(HARV_HOME, 'terminals'),
+  () => workDir(),
 );
 
 const router = new Router(
@@ -106,6 +112,11 @@ const router = new Router(
 const chats = new ChatManager(store, gate, router, meter, broadcast, (status) =>
   broadcast({ type: 'harv.status', status, detail: chats.statusDetail }),
 );
+// "Reopen tabs" off: Harv starts with no tabs (the chats stay in history).
+if (!loadSettings().restoreTabs) {
+  for (const c of store.openChats()) store.setOpen(c.id, false);
+  resetUi();
+}
 // Terminals of chats closed while Harv was off aren't coming back.
 {
   const live = new Set([...store.openChats().map((c) => c.id), ...loadUi().blanks].map(terminalId));
@@ -379,8 +390,8 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK'] as const) {
 await app.listen({ host: '127.0.0.1', port: SERVER_PORT });
 await metrics.start();
 
-// LibreHardwareMonitor starts with Harv (set HARV_START_LHM=0 to skip).
-if (process.env.HARV_START_LHM !== '0') {
+// LibreHardwareMonitor starts with Harv (Settings › Startup, or HARV_START_LHM=0, turns that off).
+if (process.env.HARV_START_LHM !== '0' && loadSettings().startSensors) {
   void ensureLhmRunning().then((result) => app.log.info({ result }, 'LibreHardwareMonitor'));
 }
 
