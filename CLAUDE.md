@@ -75,7 +75,7 @@ Since 2026-10-24 (evening) the user develops Harv in **Claude Code** again ("it 
 
 ## Commands
 
-- `npm run harv`: how Harv normally runs (server without auto-restart, plus the dashboard). Started, stopped and restarted by `scripts/harv.ps1 start|stop|restart` (desktop shortcuts "Harv", "Stop Harv", "Restart Harv", made by `scripts/install-shortcuts.ps1`; logs in `~/.harv/logs`). Stop asks the server to shut down cleanly (`POST /api/shutdown`) before cleaning up its ports; Settings' Restart button calls `POST /api/restart`, which runs the script detached.
+- `npm run harv`: how Harv normally runs (server without auto-restart, plus the dashboard). Started, stopped and restarted by `scripts/harv.ps1 start|stop|restart` (on Linux `scripts/harv.sh`, menu entry from `scripts/install-shortcuts.sh`) (desktop shortcuts "Harv", "Stop Harv", "Restart Harv", made by `scripts/install-shortcuts.ps1`; logs in `~/.harv/logs`). Stop asks the server to shut down cleanly (`POST /api/shutdown`) before cleaning up its ports; Settings' Restart button calls `POST /api/restart`, which runs the script detached.
 - `npm run dev`: server (tsx watch, http://127.0.0.1:4317) and web (Vite, http://127.0.0.1:5173). Vite proxies `/api` and `/ws` to the server.
 - `npm test`: Vitest across workspaces. Run one test file with `npx vitest run apps/server/src/env.test.ts`, or one test by name with `npx vitest run -t "removes API credentials"`.
 - `npm run typecheck` (`tsc --noEmit` in each workspace), `npm run lint` (ESLint flat config), `npm run format` (Prettier).
@@ -87,7 +87,7 @@ Since 2026-10-24 (evening) the user develops Harv in **Claude Code** again ("it 
 ## Code layout
 
 - `packages/shared`: the WebSocket protocol (`ServerMessage` / `ClientMessage`) and constants. It's consumed as TS source (`exports: ./src/index.ts`).
-- `apps/server/src`: `index.ts` (Fastify routes and `/ws`), `env.ts` (strips billed credentials at startup; keep this first), `paths.ts` (`~/.harv`, override with `HARV_HOME`), `background.ts`.
+- `apps/server/src`: `index.ts` (Fastify routes and `/ws`), `env.ts` (strips billed credentials at startup; keep this first), `paths.ts` (`~/.harv`, override with `HARV_HOME`), `background.ts`, `platform.ts` (Windows vs Linux: `IS_WINDOWS`, `osPath`, `pathKey`, `OS_NAME`; anything OS-specific asks here, and OS-specific tests use `it.runIf`; run the suite on both, see `docs/PLAN.md` §6m).
 - `apps/server/src/metrics`: `collector.ts` merges the sources into one `MetricsSnapshot` (type in `packages/shared/src/metrics.ts`) and pushes `metrics.tick` every ~1 s.
   - LibreHardwareMonitor (`lhm.ts` parses, `fromLhm.ts` maps) is the fast main source, about 40 ms per read. Its values are locale-formatted (`"38,5 °C"`), so always go through `parseLhmValue`.
   - systeminformation (`system.ts`) is slow on Windows (0.5–5 s per call, since it shells out to PowerShell), so it only covers processes (5 s), volumes (30 s), static CPU info, and a CPU/RAM fallback.

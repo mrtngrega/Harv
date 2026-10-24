@@ -1,8 +1,12 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { spawn, type IPty } from '@lydell/node-pty';
 import xtermHeadless from '@xterm/headless';
+import { IS_WINDOWS } from '../platform.ts';
+
+/** PowerShell on Windows; the user's own shell (bash on Fedora) elsewhere. */
+const DEFAULT_SHELL = IS_WINDOWS ? 'powershell.exe' : process.env.SHELL || '/bin/bash';
 
 // A CommonJS package: its Terminal comes off the default export.
 const { Terminal: Screen } = xtermHeadless;
@@ -57,14 +61,22 @@ export function promptFolder(lines: string[]): string | undefined {
 }
 
 /** The old lines plus a divider saying when they're from: what a restored terminal shows above the new shell. */
-export function restoredLines(lines: string[], at: number): string[] {
+export function restoredLines(lines: string[], at: number, shell = DEFAULT_SHELL): string[] {
   const when = new Date(at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  return [...lines, `── restored from ${when} · new PowerShell below ──`].slice(-SAVED_LINES);
+  const name = /powershell|pwsh/i.test(shell) ? 'PowerShell' : basename(shell);
+  return [...lines, `── restored from ${when} · new ${name} below ──`].slice(-SAVED_LINES);
 }
 
 /** True when the shell printed nothing but prompts (nothing was typed), so there's nothing new to keep. */
 export function onlyPrompts(lines: string[]): boolean {
-  return lines.every((l) => !l.trim() || /^PS [A-Za-z]:\\[^>]*>\s*$/.test(l));
+  // PowerShell's "PS C:\…> ", or a bash/zsh prompt ending in $, # or % ("[me@host ~]$ ").
+  return lines.every((l) => !l.trim() || /^PS [A-Za-z]:\\[^>]*>\s*$/.test(l) || (!IS_WINDOWS && /^\S.*[$#%]\s*$/.test(l)));
+}
+
+/** A shell command that moves to `folder`, in the shell's own syntax. */
+export function cdCommand(shell: string, folder: string): string {
+  if (/powershell|pwsh/i.test(shell)) return `Set-Location -LiteralPath '${folder.replace(/'/g, "''")}'`;
+  return `cd -- '${folder.replace(/'/g, `'\\''`)}'`;
 }
 
 /**
@@ -84,7 +96,7 @@ export class TerminalManager {
     private dir: string,
     /** Where a new terminal opens when nothing else says (its chat's project, or the user's default folder). */
     private defaultCwd: (id: string) => string | undefined = () => undefined,
-    private shell = 'powershell.exe',
+    private shell = DEFAULT_SHELL,
   ) {
     mkdirSync(dir, { recursive: true });
     this.timer = setInterval(() => this.saveAll(), SAVE_EVERY_MS);
@@ -109,7 +121,7 @@ export class TerminalManager {
       this.kill(running);
     } else if (running) {
       // "Open in Terminal" on a running shell: move it to that folder.
-      if (cwd && existsSync(cwd)) running.pty.write(`Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}'\r`);
+      if (cwd && existsSync(cwd)) running.pty.write(`${cdCommand(this.shell, cwd)}\r`);
       return { restored: running.restored, data: running.buffer };
     }
 
@@ -122,7 +134,7 @@ export class TerminalManager {
         const saved = JSON.parse(readFileSync(meta, 'utf8')) as Saved;
         const lines = readFileSync(log, 'utf8').split('\n');
         if (lines.some((l) => l.trim())) {
-          restored = restoredLines(lines, saved.at);
+          restored = restoredLines(lines, saved.at, this.shell);
           restoredAt = saved.at;
         }
         if (!start && saved.cwd && existsSync(saved.cwd)) start = saved.cwd;
@@ -131,7 +143,7 @@ export class TerminalManager {
       // A damaged save just means a fresh terminal.
     }
 
-    const pty = spawn(this.shell, ['-NoLogo'], {
+    const pty = spawn(this.shell, /powershell|pwsh/i.test(this.shell) ? ['-NoLogo'] : [], {
       name: 'xterm-256color',
       cols,
       rows,
@@ -190,9 +202,20 @@ export class TerminalManager {
     const { log, meta } = this.files(id);
     try {
       writeFileSync(log, text.join('\n'));
-      writeFileSync(meta, JSON.stringify({ cwd: promptFolder(lines), at: unused ? term.restoredAt : Date.now() } satisfies Saved));
+      writeFileSync(meta, JSON.stringify({ cwd: this.folder(term, lines), at: unused ? term.restoredAt : Date.now() } satisfies Saved));
     } catch {
       // Try again next round.
+    }
+  }
+
+  /** The shell's folder: from its last prompt on Windows, from /proc on Linux (exact, whatever the prompt looks like). */
+  private folder(term: Terminal, lines: string[]): string | undefined {
+    if (IS_WINDOWS) return promptFolder(lines);
+    if (term.exited) return undefined;
+    try {
+      return readlinkSync(`/proc/${term.pty.pid}/cwd`);
+    } catch {
+      return undefined;
     }
   }
 

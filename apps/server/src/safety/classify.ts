@@ -2,7 +2,11 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Tier } from '@harv/shared';
-import { isHarvData, isInside, isProgramDir, isWindowsDir, loadSettings, toWindowsPath, WORKSPACE } from './paths.ts';
+import { IS_WINDOWS } from '../platform.ts';
+import { fullPath, isHarvData, isInside, isProgramDir, isSystemDir, loadSettings, WORKSPACE } from './paths.ts';
+
+/** How the OS folders are named in reasons. */
+const SYSTEM_FOLDER = IS_WINDOWS ? 'the Windows folder' : "the system's own folders";
 
 // Sorts every tool call into green / yellow / red / blocked (CLAUDE.md "Harv's
 // safety model"). It is deliberately conservative: a shell command is green only
@@ -88,6 +92,11 @@ const SENSITIVE_PATHS: RegExp[] = [
   sensitive(String.raw`[\\/](bitwarden|1password|keepassxc|logmein hamachi)([\\/]|END)`),
   /[\\/]tailscale[\\/][^\\/]*state/i,
   /[\\/]\.harv[\\/]browser-profile/i,
+  // Linux: the password hashes, sudo rules, the desktop keyrings (GNOME Keyring, KDE Wallet), pass.
+  sensitive(String.raw`[\\/]etc[\\/](g?shadow-?|sudoers(\.d)?)END`),
+  /[\\/]keyrings([\\/]|$)/i,
+  /[\\/]kwalletd?([\\/]|$)/i,
+  /[\\/]\.password-store([\\/]|$)/i,
 ];
 
 const verdict = (tier: Tier, reason: string, summary: string, targets: string[] = []): Verdict => ({ tier, reason, summary, targets });
@@ -103,7 +112,7 @@ export function isSensitivePath(p: string): boolean {
  * chats share them with Claude Code, so they're allowed although they're under .claude.
  */
 export function isClaudeMemory(p: string): boolean {
-  const path = toWindowsPath(p);
+  const path = fullPath(p);
   return isInside(path, join(homedir(), '.claude', 'projects')) && /[\\/]memory[\\/][^\\/]+\.md$|[\\/]memory[\\/]?$/i.test(path);
 }
 
@@ -113,7 +122,7 @@ export function isClaudeMemory(p: string): boolean {
  * so blocking it left Harv stuck.
  */
 export function isClaudeToolResult(p: string): boolean {
-  const path = toWindowsPath(p);
+  const path = fullPath(p);
   return isInside(path, join(homedir(), '.claude', 'projects')) && /[\\/][0-9a-f-]{36}[\\/]tool-results([\\/][^\\/]+)?[\\/]?$/i.test(path);
 }
 
@@ -143,7 +152,7 @@ export function projectOfCommand(command: string, projects: string[]): string | 
   if (['cd', 'chdir', 'set-location', 'sl', 'pushd'].includes(cmd)) target = ws.slice(1).find((w) => !w.startsWith('-'));
   else if (cmd === 'git' && ws[1] === '-C') target = ws[2];
   if (!target || /[$`%*?]/.test(target)) return undefined;
-  const path = toWindowsPath(target);
+  const path = fullPath(target);
   return projects.find((p) => isInside(path, p));
 }
 
@@ -162,7 +171,7 @@ export function classify(tool: string, input: Record<string, unknown>, ctx: Clas
 
   if (FILE_WRITE_TOOLS.includes(tool)) {
     const file = str(input, 'file_path') || str(input, 'notebook_path');
-    const inProject = ctx.project ?? (file ? ctx.projects?.find((p) => isInside(toWindowsPath(file), p)) : undefined);
+    const inProject = ctx.project ?? (file ? ctx.projects?.find((p) => isInside(fullPath(file), p)) : undefined);
     return classifyFileWrite(tool, file, { ...ctx, project: inProject });
   }
 
@@ -202,13 +211,13 @@ function classifyMcp(tool: string): Verdict {
 }
 
 function classifyFileWrite(tool: string, rawPath: string, ctx: ClassifyContext = {}): Verdict {
-  const path = toWindowsPath(rawPath, ctx.project);
+  const path = fullPath(rawPath, ctx.project);
   const verb = tool === 'Write' ? (existsSync(path) ? 'overwrite' : 'create') : 'edit';
   const summary = `${verb} ${path}`;
   const protectedDir = loadSettings().protectedPaths.find((p) => isInside(path, p));
   if (protectedDir) return verdict('blocked', `${protectedDir} is on your read-only list.`, summary);
   if (isSensitivePath(path)) return verdict('blocked', 'That file may hold credentials or secrets.', summary);
-  if (isWindowsDir(path)) return verdict('blocked', 'Harv never writes inside the Windows folder.', summary);
+  if (isSystemDir(path)) return verdict('blocked', `Harv never writes inside ${SYSTEM_FOLDER}.`, summary);
   if (isHarvData(path)) return verdict('blocked', "Harv's database, backups and memory are only changed by Harv itself.", summary);
   if (isInside(path, WORKSPACE)) return verdict('green', "Inside Harv's own workspace.", summary);
   if (isClaudeMemory(path)) return verdict('green', 'Harv’s notes about the project (shared with Claude Code).', summary);
@@ -222,19 +231,20 @@ function classifyFileWrite(tool: string, rawPath: string, ctx: ClassifyContext =
 /** Never allowed, whatever the user approves (only the user can lift these, in settings). */
 const BLOCKED_COMMANDS: [RegExp, string][] = [
   [
-    /\bformat(\.com)?\s+[a-z]:|\b(format-volume|clear-disk|initialize-disk|remove-partition)\b|\bdiskpart\b|\bmkfs\b/i,
+    /\bformat(\.com)?\s+[a-z]:|\b(format-volume|clear-disk|initialize-disk|remove-partition)\b|\bdiskpart\b|\bmkfs\b|\b(wipefs|sfdisk|sgdisk|gdisk|parted|blkdiscard)\b|\bfdisk\s+(?!-l\b)|\bdd\b[^|;&\n]*\bof=\/dev\//i,
     'formats or wipes a drive',
   ],
+  [/\brm\s+(-\S+\s+)*(\/|\/\*|--no-preserve-root)(\s|$)/, 'deletes the whole system'],
   [
-    /set-mppreference\b.*-disable|add-mppreference\b.*exclusion|\b(sc(\.exe)?|stop-service|set-service)\b.*\b(windefend|mpssvc|wscsvc|sense)\b/i,
+    /set-mppreference\b.*-disable|add-mppreference\b.*exclusion|\b(sc(\.exe)?|stop-service|set-service)\b.*\b(windefend|mpssvc|wscsvc|sense)\b|\bsetenforce\s+(0|permissive)\b/i,
     'turns off antivirus protection',
   ],
   [
-    /set-netfirewallprofile\b.*-enabled\s+\$?(false|0)|netsh\s+(advfirewall\s+set\b.*\bstate\s+off|firewall\s+set\s+opmode\s+disable)|\b(remove|disable)-netfirewallrule\b|netsh\s+advfirewall\s+firewall\s+delete/i,
+    /set-netfirewallprofile\b.*-enabled\s+\$?(false|0)|netsh\s+(advfirewall\s+set\b.*\bstate\s+off|firewall\s+set\s+opmode\s+disable)|\b(remove|disable)-netfirewallrule\b|netsh\s+advfirewall\s+firewall\s+delete|\bsystemctl\s+(stop|disable|mask|kill)\b.*\b(firewalld|ufw|nftables|iptables)\b|\bufw\s+disable\b|\bip6?tables\s+(-F|--flush)\b|\bnft\s+flush\s+ruleset\b/i,
     'turns off or removes firewall protection',
   ],
   [
-    /\bcmdkey\b|\bvaultcmd\b|get-storedcredential|\bmimikatz\b|\blsass\b|reg(\.exe)?\s+save\s+hklm\\(sam|security|system)|\.credentials\.json|\bwlan\s+show\s+prof\w*\b.*\bkey\s*=\s*clear|protecteddata|\bunprotect\(|hklm[\\:]+(sam|security)\b/i,
+    /\bcmdkey\b|\bvaultcmd\b|get-storedcredential|\bmimikatz\b|\blsass\b|reg(\.exe)?\s+save\s+hklm\\(sam|security|system)|\.credentials\.json|\bwlan\s+show\s+prof\w*\b.*\bkey\s*=\s*clear|protecteddata|\bunprotect\(|hklm[\\:]+(sam|security)\b|\bsecret-tool\s+lookup\b|\bkwallet-query\b/i,
     'reads stored credentials',
   ],
 ];
@@ -245,7 +255,8 @@ const GREEN_COMMANDS = new Set(
     'ls dir pwd cd echo cat type head tail wc grep rg findstr which where where.exe whoami hostname date uname df du file stat tree sort uniq cut ' +
     'tasklist systeminfo ipconfig ping nslookup tracert netstat nvidia-smi ver get-date ' +
     'select-object select where-object ? sort-object format-table ft format-list fl measure-object measure select-string sls test-path resolve-path ' +
-    'split-path join-path out-string out-host write-output write-host convertto-json convertfrom-json compare-object group-object gci gc gps gsv gl gi'
+    'split-path join-path out-string out-host write-output write-host convertto-json convertfrom-json compare-object group-object gci gc gps gsv gl gi ' +
+    'free uptime ps lsblk lscpu lspci lsusb sensors id ss nproc realpath basename dirname lsof'
   ).split(' '),
 );
 const GREEN_GIT = new Set(['status', 'log', 'diff', 'show', 'ls-files', 'rev-parse', 'blame', 'remote', 'branch', 'tag', 'describe']);
@@ -255,11 +266,19 @@ const CHANGING_WORDS = new Set(
   (
     'rm rmdir rd del erase mv move cp copy xcopy robocopy ren rename mkdir md touch chmod chown ln kill taskkill pkill shutdown reg regedit sc net netsh ' +
     'schtasks wmic msiexec winget choco scoop npm npx pnpm yarn pip pip3 curl wget powershell pwsh cmd bash sh python python3 py node deno bun start ' +
-    'sudo runas iex icacls takeown attrib cipher bcdedit powercfg setx tee dd sed awk perl ruby git -exec -delete -ok'
+    'sudo runas iex icacls takeown attrib cipher bcdedit powercfg setx tee dd sed awk perl ruby git -exec -delete -ok ' +
+    'dnf yum rpm apt apt-get snap flatpak systemctl pkexec crontab mount umount useradd userdel usermod passwd shred truncate killall'
   ).split(' '),
 );
 const CHANGING_CMDLET =
   /\b(remove|set|new|add|clear|stop|start|restart|install|uninstall|move|rename|copy|invoke|enable|disable|register|unregister|update|export|import|reset|suspend|resume|mount|dismount|initialize|expand|compress|send|publish|grant|revoke|block|unblock|lock|unlock|protect|unprotect|restore|backup|save|submit|edit|merge|push|pop|out-file)-[a-z]+\b|\b(write|format)-(?!output\b|host\b|table\b|list\b|wide\b|custom\b)[a-z]+\b/i;
+
+/** Linux package managers installing, removing or upgrading software. */
+const LINUX_INSTALL =
+  /\b(dnf|yum|apt|apt-get|snap|flatpak)\s+(\S+\s+)*?(install|remove|erase|uninstall|reinstall|upgrade|autoremove)\b|\brpm\s+-[a-z]*[iue]/i;
+/** Linux system changes: services, scheduled jobs, mounts, users, kernel and network settings. */
+const LINUX_SYSTEM =
+  /\b(systemctl\s+(?!(status|list-\S+|is-\S+|show|cat)\b)\S+|crontab|mount|umount|useradd|userdel|usermod|passwd|hostnamectl\s+set-\S+|timedatectl\s+set-\S+|nmcli\s+(con|connection|dev|device|radio|networking)\s+(?!(show|status)\b)\S+|sysctl\s+-w|grubby|modprobe|rmmod)\b/i;
 
 /** Red-action categories, for a clear reason on the approval card. */
 const RED_REASONS: [RegExp, string][] = [
@@ -268,9 +287,12 @@ const RED_REASONS: [RegExp, string][] = [
     /\b(winget|choco|scoop|msiexec)\b|\b(npm|pnpm|yarn|pip3?)\s+(i|install|add|uninstall|remove)\b|\b(install|uninstall)-\w+/i,
     'Installs or uninstalls software.',
   ],
-  [/\b(taskkill|kill|pkill|stop-process|spps)\b/i, 'Stops running programs.'],
+  [LINUX_INSTALL, 'Installs or uninstalls software.'],
+  [/\b(taskkill|kill|pkill|killall|stop-process|spps)\b/i, 'Stops running programs.'],
   [/\b(reg|regedit)\b|-itemproperty\b|\bhk(lm|cu|cr|u|cc):?\\/i, 'Changes the Windows registry.'],
   [/\b(netsh|sc|bcdedit|powercfg|schtasks|setx|set-service|set-netadapter|set-executionpolicy)\b/i, 'Changes system settings.'],
+  [LINUX_SYSTEM, 'Changes system settings.'],
+  [/\b(sudo|pkexec)\b/i, 'Runs as administrator.'],
   [/\bgit\s+push\b/i, 'Pushes to a git remote.'],
   [
     /send-mailmessage|\bcurl\b.*\s-(d|f|x\s*post|-data)|invoke-(webrequest|restmethod)\b.*-method\s+(post|put|delete)/i,
@@ -330,6 +352,12 @@ const READ_ONLY_PROGRAMS: Record<string, RegExp> = {
   scoop: /^(list|search|info|status)$/i,
   code: /^(--version|--list-extensions)$/i,
   tailscale: /^(status|ip|version)$/i,
+  dnf: /^(list|info|search|repolist|repoquery|history|check-update|--version)$/i,
+  rpm: /^(-q[a-z]*|--query|--version)$/,
+  flatpak: /^(list|info|search|remotes|history|--version)$/i,
+  systemctl: /^(status|list-units|list-unit-files|list-timers|is-active|is-enabled|is-failed|show|cat|--failed|--version)$/i,
+  hostnamectl: /^status$/i,
+  timedatectl: /^status$/i,
   powercfg: /^[/-](l|list|q|query|a|availablesleepstates|getactivescheme|requests)$/i,
 };
 
@@ -458,8 +486,8 @@ export function pathsInCommand(command: string, cwd = WORKSPACE): string[] {
   for (const segment of splitCommand(command)) {
     for (const word of words(segment).slice(1).map(unquote)) {
       if (!word || word.startsWith('-') || /^\/[a-z?]$/i.test(word) || /[*?$`]/.test(word) || /^https?:/i.test(word)) continue;
-      if (!/[\\/.]/.test(word) && !existsSync(toWindowsPath(word, cwd))) continue;
-      const path = toWindowsPath(word, cwd);
+      if (!/[\\/.]/.test(word) && !existsSync(fullPath(word, cwd))) continue;
+      const path = fullPath(word, cwd);
       if (existsSync(path)) out.add(path);
     }
   }
@@ -470,8 +498,8 @@ export function pathsInCommand(command: string, cwd = WORKSPACE): string[] {
 function isOpenApp(segment: string): boolean {
   const [first = '', ...rest] = words(segment).map(unquote);
   const cmd = first.toLowerCase();
-  if (!['start', 'start-process', 'saps', 'invoke-item', 'ii', 'explorer', 'explorer.exe', 'notepad', 'calc', 'code'].includes(cmd))
-    return false;
+  const windows = ['start', 'start-process', 'saps', 'invoke-item', 'ii', 'explorer', 'explorer.exe', 'notepad', 'calc', 'code'];
+  if (![...windows, 'xdg-open', 'kde-open', 'kde-open5', 'dolphin', 'kate'].includes(cmd)) return false;
   if (/-verb\s+runas|-credential|-argumentlist/i.test(segment)) return false;
   const target = rest.filter((w) => !w.startsWith('-') && w !== '""')[0] ?? '';
   if (/^https?:\/\//i.test(target)) return true;
@@ -511,7 +539,7 @@ export function newFolders(command: string, cwd = WORKSPACE): string[] | null {
     }
     if (targets.length === 0) return null;
     for (const target of targets) {
-      const path = toWindowsPath(target, cwd);
+      const path = fullPath(target, cwd);
       if (/[*?$]/.test(target) || existsSync(path)) return null;
       out.push(path);
     }
@@ -523,7 +551,7 @@ export function newFolders(command: string, cwd = WORKSPACE): string[] | null {
 function classifyNewFolders(folders: string[], summary: string, project?: string): Verdict {
   const protectedDir = loadSettings().protectedPaths.find((dir) => folders.some((f) => isInside(f, dir)));
   if (protectedDir) return verdict('blocked', `Blocked: ${protectedDir} is on your read-only list.`, summary);
-  if (folders.some(isWindowsDir)) return verdict('blocked', 'Blocked: Harv never changes the Windows folder.', summary);
+  if (folders.some(isSystemDir)) return verdict('blocked', `Blocked: Harv never changes ${SYSTEM_FOLDER}.`, summary);
   if (folders.some(isHarvData))
     return verdict('blocked', "Blocked: Harv's database, backups and memory are only changed by Harv itself.", summary);
   if (folders.every((f) => isInside(f, WORKSPACE))) return verdict('green', "Inside Harv's own workspace.", summary);
@@ -541,11 +569,22 @@ function isGreenSegment(segment: string): boolean {
     return !/\s-(pl|r|ac|lgc|pm|rac)\b|--(power-limit|gpu-reset|applications-clocks|lock-gpu-clocks)/i.test(segment);
   if (first === 'ipconfig') return !/\/(release|renew)/i.test(segment);
   if (first === 'find') return !/-(delete|exec|execdir|ok|fprint)/.test(segment);
+  // Logs: reading only (`--vacuum-*`, `--rotate`, `--flush` delete or move them).
+  if (first === 'journalctl') return !/--(vacuum|rotate|flush|relinquish|sync|setup-keys|update-catalog)/.test(segment);
+  // `ip addr`, `ip route`: showing only, never `add`/`del`/`set`/`flush`.
+  if (first === 'ip')
+    return (
+      /^(-\S+\s+)*(a|addr|address|r|route|l|link|n|neigh)\b/.test(ws.slice(1).join(' ')) &&
+      !/\b(add|del|delete|set|flush|change|replace|append)\b/.test(segment)
+    );
   // Printing lines (`sed -n '5,20p' file`); anything else sed can do may write.
   if (first === 'sed') return /^sed\s+-n\s+(["']?)[\d,$;p]+\1(\s|$)/.test(segment) && !/\s(-i|--in-place)/.test(segment);
   if (/^get-[a-z]+$/.test(first)) return !/get-(credential|storedcredential)/.test(first);
   return GREEN_COMMANDS.has(first);
 }
+
+/** A system folder named in a Linux command (/etc, /usr…). */
+const LINUX_SYSTEM_PATH = /(^|[\s"'=>])\/(boot|usr|etc|bin|sbin|lib|lib64|proc|sys|dev|root)(\/|\s|$)/;
 
 /** Redirection into a file (`> out.txt`), ignoring harmless `2>&1` and `> $null`. */
 const writesFile = (command: string) => />/.test(command.replace(/\d?>\s*(&\d|\$null|\/dev\/null|nul\b)/gi, ''));
@@ -625,7 +664,7 @@ function classifyCommandAsIs(command: string, description: string, ctx: Classify
     const ws = words(segment).map((w) => unquote(w).toLowerCase());
     if (isReadOnlyProgram(ws[0] ?? '', ws.slice(1))) return true;
     if (!isGreenSegment(segment)) return false;
-    return ['git', 'sed'].includes(ws[0] ?? '') || !ws.some((t) => CHANGING_WORDS.has(t));
+    return ['git', 'sed', 'journalctl', 'ip'].includes(ws[0] ?? '') || !ws.some((t) => CHANGING_WORDS.has(t));
   };
 
   if (!substitutes && !writesFile(command) && segments.length > 0) {
@@ -644,8 +683,13 @@ function classifyCommandAsIs(command: string, description: string, ctx: Classify
   const mentions = (test: (p: string) => boolean, pattern: RegExp) => paths.some(test) || pattern.test(command);
   const protectedDir = settings.protectedPaths.find((dir) => mentions((p) => isInside(p, dir), new RegExp(escapeRegExp(dir), 'i')));
   if (protectedDir) return verdict('blocked', `Blocked: it would change ${protectedDir}, which is on your read-only list.`, summary);
-  if (mentions(isWindowsDir, /\b[a-z]:[\\/]windows\b|\/c\/windows\b|%windir%|%systemroot%|\$env:(windir|systemroot)/i)) {
+  if (IS_WINDOWS && mentions(isSystemDir, /\b[a-z]:[\\/]windows\b|\/c\/windows\b|%windir%|%systemroot%|\$env:(windir|systemroot)/i)) {
     return verdict('blocked', 'Blocked: Harv never changes the Windows folder.', summary);
+  }
+  // Linux guards its own folders (they belong to root), so only sudo could change them.
+  const changesAsRoot = tokens.some((t) => CHANGING_WORDS.has(t) && t !== 'sudo' && t !== 'pkexec') || writesFile(command);
+  if (!IS_WINDOWS && /\b(sudo|pkexec)\b/.test(command) && changesAsRoot && mentions(isSystemDir, LINUX_SYSTEM_PATH)) {
+    return verdict('blocked', `Blocked: Harv never changes ${SYSTEM_FOLDER}.`, summary);
   }
   // Reading Harv's logs or settings is fine; anything that could change them is blocked.
   if ((changing || writesFile(command)) && mentions(isHarvData, /\.harv[\\/](?!workspace)/i)) {
@@ -661,7 +705,7 @@ function classifyCommandAsIs(command: string, description: string, ctx: Classify
     'red',
     reason,
     summary,
-    paths.filter((p) => !isWindowsDir(p) && !isProgramDir(p)),
+    paths.filter((p) => !isSystemDir(p) && !isProgramDir(p)),
   );
 }
 
@@ -680,10 +724,12 @@ const PROJECT_RED: [RegExp, string][] = [
     /\b(winget|choco|scoop|msiexec)\b|\bpip3?\s+(install|uninstall)\b|\b(install|uninstall)-(module|package|script)\b/i,
     'Installs or removes software for the whole PC.',
   ],
-  [/\b(taskkill|kill|pkill|stop-process|spps)\b/i, 'Stops running programs.'],
+  [LINUX_INSTALL, 'Installs or removes software for the whole PC.'],
+  [/\b(taskkill|kill|pkill|killall|stop-process|spps)\b/i, 'Stops running programs.'],
   [/\b(reg|regedit)\b|-itemproperty\b|\bhk(lm|cu|cr|u|cc):?\\/i, 'Changes the Windows registry.'],
-  [/\b(netsh|sc|bcdedit|powercfg|schtasks|setx|set-service|set-executionpolicy|shutdown)\b/i, 'Changes system settings.'],
-  [/\b(runas|sudo)\b|-verb\s+runas/i, 'Runs as administrator.'],
+  [/\b(netsh|sc|bcdedit|powercfg|schtasks|setx|set-service|set-executionpolicy|shutdown|reboot|poweroff)\b/i, 'Changes system settings.'],
+  [LINUX_SYSTEM, 'Changes system settings.'],
+  [/\b(runas|sudo|pkexec)\b|-verb\s+runas/i, 'Runs as administrator.'],
   [
     /send-mailmessage|\bcurl\b.*\s-(d|f|x\s*post|-data)|invoke-(webrequest|restmethod)\b.*-method\s+(post|put|delete)/i,
     'Sends data over the network.',
@@ -702,7 +748,7 @@ function pathLikeWords(command: string, cwd: string): string[] {
       const word = unquote(raw).replace(/^-{1,2}[\w-]+[=:]/, '');
       if (!word || /:\/\//.test(word) || /\s/.test(word) || word.startsWith('-')) continue;
       if (!/[\\/]/.test(word) && !word.startsWith('..') && !/^[a-z]:/i.test(word)) continue;
-      out.push(toWindowsPath(word.replace(/^>+/, ''), cwd));
+      out.push(fullPath(word.replace(/^>+/, ''), cwd));
     }
   }
   return out;

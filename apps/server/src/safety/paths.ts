@@ -1,37 +1,45 @@
 import { homedir } from 'node:os';
-import { isAbsolute, join, resolve, win32 } from 'node:path';
+import { join, resolve, win32 } from 'node:path';
 import { HARV_HOME } from '../paths.ts';
+import { IS_WINDOWS, osPath, pathKey } from '../platform.ts';
 
 /** Harv's own working folder, the only place it may create and change files freely. */
 export const WORKSPACE = join(HARV_HOME, 'workspace');
 export const BACKUPS_DIR = join(HARV_HOME, 'backups');
 
 /**
- * An absolute Windows path for comparisons. Accepts Git Bash paths (/c/Users),
- * forward slashes, `~` and paths relative to `cwd`.
+ * An absolute path of this OS, for comparisons. Accepts `~` and paths relative to
+ * `cwd`; on Windows also Git Bash paths (/c/Users) and forward slashes.
  */
-export function toWindowsPath(p: string, cwd = WORKSPACE): string {
+export function fullPath(p: string, cwd = WORKSPACE): string {
   let path = p.trim().replace(/^["']|["']$/g, '');
+  if (path === '~' || path.startsWith('~/') || path.startsWith('~\\')) path = join(homedir(), path.slice(1));
+  if (!IS_WINDOWS) return osPath.normalize(resolve(cwd, path));
   const bash = /^\/([a-zA-Z])(\/|$)(.*)$/.exec(path);
   if (bash) path = `${bash[1]!.toUpperCase()}:\\${bash[3] ?? ''}`;
-  if (path === '~' || path.startsWith('~/') || path.startsWith('~\\')) path = join(homedir(), path.slice(1));
   path = path.replace(/\//g, '\\');
-  return win32.normalize(isAbsolute(path) || win32.isAbsolute(path) ? path : resolve(cwd, path));
+  return win32.normalize(win32.isAbsolute(path) ? path : resolve(cwd, path));
 }
 
-/** Whether `child` is `parent` or inside it (case-insensitive, like Windows). */
+/** Whether `child` is `parent` or inside it (without case on Windows). */
 export function isInside(child: string, parent: string): boolean {
-  const c = toWindowsPath(child).toLowerCase().replace(/\\+$/, '');
-  const p = toWindowsPath(parent).toLowerCase().replace(/\\+$/, '');
-  return c === p || c.startsWith(`${p}\\`);
+  const sep = osPath.sep;
+  const trim = (p: string) => (p.length > 1 ? p.replace(/[\\/]+$/, '') : p);
+  const c = trim(pathKey(fullPath(child)));
+  const p = trim(pathKey(fullPath(parent)));
+  return c === p || c.startsWith(p.endsWith(sep) ? p : `${p}${sep}`);
 }
 
-const SYSTEM_ROOT = process.env.SystemRoot ?? 'C:\\Windows';
-const PROGRAM_DIRS = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.ProgramData].filter((d): d is string =>
-  Boolean(d),
-);
+/** Where the OS lives: never written (C:\Windows; /usr, /etc and the other system folders on Linux). */
+const SYSTEM_DIRS = IS_WINDOWS
+  ? [process.env.SystemRoot ?? 'C:\\Windows']
+  : ['/boot', '/usr', '/etc', '/bin', '/sbin', '/lib', '/lib64', '/proc', '/sys', '/dev', '/root'];
+/** Installed programs and their data: changing them asks first. */
+const PROGRAM_DIRS = (
+  IS_WINDOWS ? [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.ProgramData] : ['/opt', '/var', '/srv', '/snap']
+).filter((d): d is string => Boolean(d));
 
-export const isWindowsDir = (p: string) => isInside(p, SYSTEM_ROOT);
+export const isSystemDir = (p: string) => SYSTEM_DIRS.some((d) => isInside(p, d));
 export const isProgramDir = (p: string) => PROGRAM_DIRS.some((d) => isInside(p, d));
 /** Harv's database, backups and memory: only Harv's own code changes them, never a tool call. */
 export const isHarvData = (p: string) => isInside(p, HARV_HOME) && !isInside(p, WORKSPACE);

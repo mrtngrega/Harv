@@ -1,12 +1,20 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
+
+// Harv runs on Windows and Linux (docs/PLAN.md §6m): OS-specific cases run on their own OS.
+const onWindows = process.platform === 'win32';
+const windowsIt = it.runIf(onWindows);
+const linuxIt = it.runIf(!onWindows);
+/** A file inside the OS's own folders, and one of an installed program. */
+const SYSTEM_FILE = onWindows ? 'C:\\Windows\\System32\\drivers\\etc\\hosts' : '/etc/hosts';
+const PROGRAM_FILE = onWindows ? 'C:\\Program Files\\App\\config.ini' : '/opt/app/config.ini';
 
 const home = mkdtempSync(join(tmpdir(), 'harv-safety-'));
 vi.stubEnv('HARV_HOME', home);
 const { classify, classifyCommand, newFolders, pathsInCommand, ruleOf, rulesFor, splitCommand } = await import('./classify.ts');
-const { isInside, toWindowsPath } = await import('./paths.ts');
+const { isInside, fullPath } = await import('./paths.ts');
 
 const userDir = mkdtempSync(join(tmpdir(), 'harv-user-'));
 const userFile = join(userDir, 'notes.txt');
@@ -24,11 +32,20 @@ const tier = (tool: string, input: Record<string, unknown>) => classify(tool, in
 const cmd = (command: string) => classifyCommand(command).tier;
 
 describe('paths', () => {
-  it('understands Git Bash and relative paths', () => {
-    expect(toWindowsPath('/c/Users/me/a.txt')).toBe('C:\\Users\\me\\a.txt');
-    expect(toWindowsPath('C:/Windows/System32')).toBe('C:\\Windows\\System32');
+  windowsIt('understands Git Bash and relative paths', () => {
+    expect(fullPath('/c/Users/me/a.txt')).toBe('C:\\Users\\me\\a.txt');
+    expect(fullPath('C:/Windows/System32')).toBe('C:\\Windows\\System32');
     expect(isInside('c:\\windows\\system32\\x.dll', 'C:\\Windows')).toBe(true);
     expect(isInside('C:\\WindowsApps\\x', 'C:\\Windows')).toBe(false);
+  });
+
+  linuxIt('understands ~ and relative paths, with case', () => {
+    expect(fullPath('~/a.txt')).toBe(join(homedir(), 'a.txt'));
+    expect(fullPath('b/../c.txt', '/home/me')).toBe('/home/me/c.txt');
+    expect(isInside('/usr/bin/env', '/usr')).toBe(true);
+    expect(isInside('/usrx/a', '/usr')).toBe(false);
+    expect(isInside('/home/me/Docs', '/home/me/docs')).toBe(false);
+    expect(isInside('/anything', '/')).toBe(true);
   });
 });
 
@@ -71,15 +88,15 @@ describe('writing files', () => {
     expect(classify('Write', { file_path: join(userDir, 'new.txt') }).summary).toMatch(/^create /);
   });
 
-  it('blocks Windows, protected folders and Harv’s own data', () => {
-    expect(tier('Write', { file_path: 'C:\\Windows\\System32\\drivers\\etc\\hosts' })).toBe('blocked');
+  it('blocks the OS folders, protected folders and Harv’s own data', () => {
+    expect(tier('Write', { file_path: SYSTEM_FILE })).toBe('blocked');
     expect(tier('Edit', { file_path: join(protectedDir, 'a.jpg') })).toBe('blocked');
     expect(tier('Write', { file_path: join(home, 'harv.db') })).toBe('blocked');
     expect(tier('Write', { file_path: join(home, 'memory', 'x.md') })).toBe('blocked');
   });
 
   it('asks before changing installed programs', () => {
-    expect(tier('Write', { file_path: 'C:\\Program Files\\App\\config.ini' })).toBe('red');
+    expect(tier('Write', { file_path: PROGRAM_FILE })).toBe('red');
   });
 });
 
@@ -136,10 +153,59 @@ describe('shell commands', () => {
     'Remove-NetFirewallRule -DisplayName "Harv: block remote access"',
     'cmdkey /list',
     'cat ~/.claude/.credentials.json',
-    'Remove-Item C:\\Windows\\Temp\\x.log',
-    'del /c/Windows/System32/foo.dll',
+    // Linux
+    'mkfs.ext4 /dev/sdb1',
+    'wipefs -a /dev/sdb',
+    'dd if=/dev/zero of=/dev/sda bs=1M',
+    'rm -rf /',
+    'rm -rf --no-preserve-root /',
+    'sudo systemctl disable --now firewalld',
+    'sudo ufw disable',
+    'sudo setenforce 0',
+    'sudo cat /etc/shadow',
+    'secret-tool lookup service github',
+    'ls ~/.local/share/keyrings',
   ])('blocked: %s', (command) => {
     expect(cmd(command)).toBe('blocked');
+  });
+
+  windowsIt.each(['Remove-Item C:\\Windows\\Temp\\x.log', 'del /c/Windows/System32/foo.dll'])('blocked: %s', (command) => {
+    expect(cmd(command)).toBe('blocked');
+  });
+
+  linuxIt.each(['sudo rm /etc/hosts', 'sudo cp x /usr/bin/x', 'echo x | sudo tee /etc/hosts'])('blocked: %s', (command) => {
+    expect(cmd(command)).toBe('blocked');
+  });
+
+  it.each([
+    'free -h',
+    'lsblk',
+    'ps aux | grep firefox',
+    'systemctl status sshd',
+    'dnf list installed',
+    'rpm -qa',
+    'flatpak list',
+    'journalctl -u sshd -n 50',
+    'ip addr',
+    'sensors',
+    'xdg-open https://example.com',
+  ])('green on Linux: %s', (command) => {
+    expect(cmd(command)).toBe('green');
+  });
+
+  it.each([
+    ['sudo dnf install htop', /Installs/],
+    ['flatpak install flathub org.gimp.GIMP', /Installs/],
+    ['killall firefox', /Stops/],
+    ['systemctl restart sshd', /system settings/],
+    ['crontab -e', /system settings/],
+    ['ip link set wlan0 down', /./],
+    ['journalctl --vacuum-time=1d', /./],
+    ['sudo ls /root', /administrator/],
+  ])('red on Linux: %s', (command, reason) => {
+    const v = classifyCommand(command);
+    expect(v.tier).toBe('red');
+    expect(v.reason).toMatch(reason);
   });
 
   it('blocks changes to protected folders but still lets Harv look', () => {
@@ -161,7 +227,7 @@ describe('shell commands', () => {
     expect(v).toMatchObject({ tier: 'yellow', targets: [project] });
     expect(cmd(`mkdir "${join(home, 'workspace', 'scratch')}"`)).toBe('green');
     expect(cmd(`mkdir "${join(protectedDir, 'new')}"`)).toBe('blocked');
-    expect(cmd('mkdir C:\\Windows\\Harv')).toBe('blocked');
+    expect(cmd(onWindows ? 'mkdir C:\\Windows\\Harv' : 'mkdir /usr/harv')).toBe('blocked');
     // Already exists, or combined with something else: back to the normal rules.
     expect(newFolders(`mkdir "${userDir}"`)).toBeNull();
     expect(cmd(`mkdir "${project}"; Remove-Item x`)).toBe('red');
@@ -288,7 +354,7 @@ describe('project chats (trusted project folder)', () => {
   writeFileSync(join(project, 'src', 'a.ts'), 'x');
   const ctx = { project };
   const cmd = (command: string) => classifyCommand(command, '', ctx);
-  const claudeHome = join(process.env.USERPROFILE ?? '', '.claude');
+  const claudeHome = join(homedir(), '.claude');
 
   it('edits files inside the project freely, outside as usual', () => {
     expect(classify('Edit', { file_path: join(project, 'src', 'a.ts') }, ctx).tier).toBe('green');
@@ -488,7 +554,8 @@ describe('Don’t ask again rules', () => {
       expect(cmd('npm uninstall x')).toBe('red');
       // Blocked and protected things stay blocked.
       expect(cmd(`Remove-Item "${protectedDir}" -Recurse`)).toBe('blocked');
-      expect(cmd('Remove-Item C:\\Windows\\Temp\\x.log')).toBe('blocked');
+      if (onWindows) expect(cmd('Remove-Item C:\\Windows\\Temp\\x.log')).toBe('blocked');
+      else expect(cmd('sudo rm /etc/hosts')).toBe('blocked');
     } finally {
       writeFileSync(join(home, 'settings.json'), JSON.stringify({ protectedPaths: [protectedDir] }));
     }

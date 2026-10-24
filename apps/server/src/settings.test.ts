@@ -46,7 +46,8 @@ describe('settings', () => {
       warnWeekly: [],
       workDir: '',
     });
-    expect(cleanSettings({ workDir: ' D:\\Projects ' }).workDir).toBe('D:\\Projects');
+    const folder = process.platform === 'win32' ? 'D:\\Projects' : '/home/me/Projects';
+    expect(cleanSettings({ workDir: ` ${folder} ` }).workDir).toBe(folder);
   });
 
   it('saves a change on top of what is stored', () => {

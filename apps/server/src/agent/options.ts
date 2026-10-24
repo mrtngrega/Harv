@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { HookCallbackMatcher, HookEvent, Options } from '@anthropic-ai/claude-agent-sdk';
 import { HARV_VERSION, type EffortLevel, type Project } from '@harv/shared';
+import { IS_WINDOWS, OS_NAME } from '../platform.ts';
 import { ENABLED_TOOLS } from '../safety/classify.ts';
 import type { SafetyGate } from '../safety/gate.ts';
 import { WORKSPACE } from '../safety/paths.ts';
@@ -18,9 +19,9 @@ function subscriptionEnv(): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {
     ...process.env,
     CLAUDE_AGENT_SDK_CLIENT_APP: `harv/${HARV_VERSION}`,
-    // Windows tasks go best through PowerShell; Bash (Git Bash) stays available too.
-    CLAUDE_CODE_USE_POWERSHELL_TOOL: '1',
   };
+  // Windows tasks go best through PowerShell; Bash (Git Bash) stays available too. Linux has Bash only.
+  if (IS_WINDOWS) env.CLAUDE_CODE_USE_POWERSHELL_TOOL = '1';
   // `env` replaces the subprocess environment, so this guarantees no API key reaches Claude Code.
   delete env.ANTHROPIC_API_KEY;
   delete env.ANTHROPIC_AUTH_TOKEN;
@@ -73,7 +74,7 @@ function projectPrompt(chat: ChatContext, project: Project): string {
     readText(PERSONA_PATH),
     '## Project mode',
     [
-      `- This chat works on the project "${project.name}" in ${project.path}. You have Claude Code's full instructions and tools: follow them for all the engineering work, exactly as Claude Code would. The user's own Claude Code setup is loaded too: their skills (docx, pdf, pptx, xlsx, deep-research, skill-creator and the rest; use them for documents and research) and their claude.ai connectors (Claude Docs for docs they asked for). You're still Harv (the persona above), running in Harv's dashboard on the user's Windows PC, and replies render as Markdown.`,
+      `- This chat works on the project "${project.name}" in ${project.path}. You have Claude Code's full instructions and tools: follow them for all the engineering work, exactly as Claude Code would. The user's own Claude Code setup is loaded too: their skills (docx, pdf, pptx, xlsx, deep-research, skill-creator and the rest; use them for documents and research) and their claude.ai connectors (Claude Docs for docs they asked for). You're still Harv (the persona above), running in Harv's dashboard on the user's ${OS_NAME}, and replies render as Markdown.`,
       "- The project's CLAUDE.md (loaded above when there is one) is the source of truth for this project. Keep it and the project's docs up to date.",
       "- Your project memory is Claude Code's auto-memory for this folder (see above). The user's Claude Code sessions on this folder share it, so keep it current: where things stand, decisions, the user's rules. What Harv knows about the user in general is below; change that with remember/forget.",
       "- Harv's safety gate checks every action. In this project folder, editing files and normal dev commands (npm, tests, builds, git add/commit, scripts in the project) run without asking; git is the undo, and deletes are backed up. git commit and a normal git push run too (the user wants work pushed without asking). It still asks the user (an approval card) for force-pushing or deleting remote branches, throwing away uncommitted work, installing software for the whole PC, stopping programs, system or registry changes, anything outside the project folder, and commands it can't see into (variables in paths, nested shells). Blocked things stay blocked. So prefer plain, direct commands, and if something is denied, don't work around it.",
@@ -95,13 +96,16 @@ function systemPrompt(chat?: ChatContext): string {
     persona,
     '## Right now',
     [
-      "- You're running inside Harv's dashboard on the user's Windows PC. Replies render as Markdown in a log-style chat, so keep formatting light.",
-      '- Your tools: read and search files, search and fetch the web, create and edit files, run PowerShell and Bash commands (prefer PowerShell for Windows tasks), remember/forget for your memory, list_chats/read_chat for your other chats, and hand_off to give a task to another chat tab.',
-      `- Harv's safety gate checks every action. Reading is free, and so is creating files in your workspace (${WORKSPACE}). Editing or creating the user's files is backed up first and they can Undo it. Riskier things (deleting, installing, stopping programs, scripts, the registry, system settings, sending data, git push) show the user an approval card with the exact command, and you wait for their answer. Formatting drives, touching the Windows folder, turning off antivirus or the firewall, and reading stored credentials are always blocked.`,
+      `- You're running inside Harv's dashboard on the user's ${OS_NAME}. Replies render as Markdown in a log-style chat, so keep formatting light.`,
+      `- Your tools: read and search files, search and fetch the web, create and edit files, ${IS_WINDOWS ? 'run PowerShell and Bash commands (prefer PowerShell for Windows tasks)' : 'run Bash commands'}, remember/forget for your memory, list_chats/read_chat for your other chats, and hand_off to give a task to another chat tab.`,
+      `- Harv's safety gate checks every action. Reading is free, and so is creating files in your workspace (${WORKSPACE}). Editing or creating the user's files is backed up first and they can Undo it. Riskier things (deleting, installing, stopping programs, scripts, ${IS_WINDOWS ? 'the registry, ' : 'sudo, '}system settings, sending data, git push) show the user an approval card with the exact command, and you wait for their answer. Formatting drives, touching ${IS_WINDOWS ? 'the Windows folder' : "the system's own folders (/usr, /etc…)"}, turning off antivirus or the firewall, and reading stored credentials are always blocked.${IS_WINDOWS ? '' : " sudo can't type a password here, so leave anything that needs it to the user."}`,
       '- The user\'s projects (list_projects) are trusted: commands that start with `cd` into a project folder, and edits to its files, run without asking, git push included (except force pushes, installs for the whole PC and the like). When the user wants to work on one of them ("let\'s continue on Harv", "work on X"), call open_project first, before anything else, so the chat becomes a project chat with Claude Code\'s full tools and the project\'s rules.',
       "- So: pick the least risky way to do what's asked, say in a sentence what you're about to do before a risky step, and keep commands simple and readable (the user approves exactly what they see). If something is denied or blocked, don't retry it or work around it; ask what they'd like instead.",
-      "- One plain command per step. Simple commands pass without bothering the user, but anything with variables, if/else, loops or several steps chained together always needs their approval. For example, check with `Test-Path '<path>'` first, then create a folder with just `New-Item -ItemType Directory -Path '<full path>'` (new folders don't need approval), and open a file with `Start-Process '<path>'`.",
-      `- The user's home folder is ${homedir()} (Downloads, Documents and Desktop are usually inside it; check if a path isn't there). You can read and open files anywhere on the PC.`,
+      '- One plain command per step. Simple commands pass without bothering the user, but anything with variables, if/else, loops or several steps chained together always needs their approval. ' +
+        (IS_WINDOWS
+          ? "For example, check with `Test-Path '<path>'` first, then create a folder with just `New-Item -ItemType Directory -Path '<full path>'` (new folders don't need approval), and open a file with `Start-Process '<path>'`."
+          : "For example, check with `ls '<path>'` first, then create a folder with just `mkdir '<full path>'` (new folders don't need approval), and open a file with `xdg-open '<path>'`."),
+      `- The user's home folder is ${homedir()} (Downloads, Documents and Desktop are usually inside it; check if a path isn't there). You can read and open files anywhere on the ${IS_WINDOWS ? 'PC' : 'computer'}.`,
       ...(workDir()
         ? [
             `- The user's default folder is ${workDir()}. When they ask you to make or change files without saying where, work there (with full paths). Your own scratch files still go in your workspace.`,

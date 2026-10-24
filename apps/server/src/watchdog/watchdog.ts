@@ -72,8 +72,8 @@ const BUILT_IN_IGNORED = new Set(
 /** Crypto miners and remote-access tools that are almost never wanted. */
 const KNOWN_BAD =
   /^(xmrig|xmr-stak|nbminer|t-rex|lolminer|phoenixminer|nicehash\w*|ethminer|gminer|teamredminer|cpuminer|minerd|ccminer|bminer|nanominer|srbminer\w*|njrat|darkcomet|quasar|asyncrat|remcos|nanocore|netwire)(\.exe)?$/i;
-/** Folders real programs rarely run from; malware often does. */
-const ODD_FOLDER = /\\(appdata\\local\\temp|windows\\temp|users\\public|\$recycle\.bin)\\/i;
+/** Folders real programs rarely run from; malware often does (Temp and Public on Windows; /tmp and /dev/shm on Linux). */
+const ODD_FOLDER = /\\(appdata\\local\\temp|windows\\temp|users\\public|\$recycle\.bin)\\|^\/(tmp|var\/tmp|dev\/shm)\//i;
 
 export interface ProcessSample {
   pid: number;
@@ -93,8 +93,11 @@ export interface WatchdogHooks {
   emit: (alert: WatchdogAlert) => void;
   /** The user's settings: on/off and ignored programs (read on every check). */
   settings: () => { watchdog: boolean; watchdogIgnored: string[] };
-  /** Lowercase exe names of programs with a visible window (in use, like a game): not "background". */
-  windowed: () => Promise<Set<string>>;
+  /**
+   * Lowercase exe names of programs with a visible window (in use, like a game): not "background".
+   * Missing where windows can't be listed (Linux): then nothing is called a background hog.
+   */
+  windowed?: () => Promise<Set<string>>;
   /** When the last Defender detection was already known (survives restarts, so old ones never alert). */
   defenderSeen: { get: () => number | undefined; set: (at: number) => void };
   now?: () => number;
@@ -217,7 +220,7 @@ export class Watchdog {
           kind: 'suspicious',
           severity: 'critical',
           title: `${name} is running`,
-          detail: `That name belongs to a crypto miner or a remote-control tool, which is almost never something you want.${path ? ` It runs from ${path}.` : ''} If you didn't install it, run a Windows Security scan.`,
+          detail: `That name belongs to a crypto miner or a remote-control tool, which is almost never something you want.${path ? ` It runs from ${path}.` : ''} If you didn't install it, run a virus scan.`,
           app: name,
         });
         continue;
@@ -257,6 +260,7 @@ export class Watchdog {
   }
 
   private async reportHogs(hogs: { name: string; held: number; cpu: number }[], what: 'cpu' | 'gpu') {
+    if (!this.hooks.windowed) return;
     const due = hogs.filter((h) => h.held >= HOG_MS && (this.cooldown.get(`${what}:${h.name.toLowerCase()}`) ?? 0) <= this.now());
     if (due.length === 0) return;
     // Only background programs: one with a window open is in use (a game, a render, a video call).

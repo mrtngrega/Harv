@@ -37,6 +37,7 @@ import {
   search,
 } from './tools/fileOps.ts';
 import type { FileOp } from '@harv/shared';
+import { IS_WINDOWS, PLATFORM } from './platform.ts';
 import { TerminalManager } from './tools/terminal.ts';
 import { startWatchdog } from './watchdog/monitor.ts';
 
@@ -179,7 +180,7 @@ app.delete('/api/background', async () => {
 app.get('/api/files/places', async () => places());
 app.get<{ Querystring: { path?: string } }>('/api/files/list', async (req, reply) => {
   const path = cleanPath(req.query.path);
-  if (!path) return reply.code(400).send({ error: 'Expected an absolute path like C:\\Users' });
+  if (!path) return reply.code(400).send({ error: `Expected an absolute path like ${IS_WINDOWS ? 'C:\\Users' : '/home'}` });
   try {
     return listFolder(path);
   } catch (err) {
@@ -266,8 +267,8 @@ app.post<{ Body: FileOp }>('/api/files/op', async (req, reply) => {
       case 'recycle':
       case 'deleteForever': {
         const list = paths(body.paths);
-        // Never a whole drive.
-        if (!list.length || list.some((p) => !p || /^[a-z]:\\?$/i.test(p))) break;
+        // Never a whole drive (or the Linux root).
+        if (!list.length || list.some((p) => !p || p === '/' || /^[a-z]:\\?$/i.test(p))) break;
         return body.op === 'recycle' ? await recycle(list as string[]) : deleteForever(list as string[]);
       }
     }
@@ -290,8 +291,9 @@ app.post<{ Querystring: { dir?: string; name?: string } }>('/api/files/upload', 
 // Lets the dashboard retry starting the sensors (e.g. after the UAC prompt was declined).
 app.post('/api/sensors/start', async () => ({ result: await ensureLhmRunning() }));
 
-// Stopping and restarting Harv (scripts/harv.ps1, the desktop shortcuts and Settings' Restart button).
+// Stopping and restarting Harv (scripts/harv.ps1, harv.sh on Linux, the desktop shortcuts and Settings' Restart button).
 const HARV_SCRIPT = fileURLToPath(new URL('../../../scripts/harv.ps1', import.meta.url));
+const HARV_SH = fileURLToPath(new URL('../../../scripts/harv.sh', import.meta.url));
 const shutdown = (reason: string) => {
   app.log.info({ reason }, 'Shutting down');
   setTimeout(() => {
@@ -304,6 +306,12 @@ app.post('/api/shutdown', async () => {
   return { ok: true };
 });
 app.post('/api/restart', async () => {
+  if (!IS_WINDOWS) {
+    // Its own session (setsid), so stopping Harv doesn't stop the script; it waits, then starts Harv again.
+    spawn('setsid', ['bash', HARV_SH, 'restart', '--delay', '2', '--no-browser'], { detached: true, stdio: 'ignore' }).unref();
+    shutdown('restarting');
+    return { ok: true };
+  }
   // `start` detaches the script from Harv's process tree, so stopping Harv doesn't stop it; it waits, then starts Harv again.
   // Passed verbatim: Node would otherwise escape start's empty "" window title and break the command.
   const command = `start "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${HARV_SCRIPT}" -Action restart -Delay 2 -NoBrowser`;
@@ -335,6 +343,7 @@ app.get('/ws', { websocket: true }, (socket) => {
     background: backgroundVersion(),
     ui: loadUi(),
     projects: store.projects(),
+    platform: PLATFORM,
     startedAt: STARTED_AT,
   });
 

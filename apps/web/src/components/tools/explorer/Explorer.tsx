@@ -21,6 +21,7 @@ import {
   when,
   type MenuItem,
 } from './parts.tsx';
+import { baseName, dirOf, driveName, driveOf, osWords } from './paths.ts';
 
 type View = 'details' | 'icons' | 'list';
 type SortKey = 'name' | 'mtime' | 'type' | 'size';
@@ -45,12 +46,6 @@ function save(key: string, value: unknown) {
     // Not critical.
   }
 }
-
-const dirOf = (path: string) => {
-  const i = path.lastIndexOf('\\');
-  return i <= 2 ? path.slice(0, 3) : path.slice(0, i);
-};
-const driveOf = (path: string) => path.slice(0, 2).toLowerCase();
 
 /** A chat's file explorer (its view menu), laid out and behaving like Windows 11 File Explorer. `id` is the chat's. */
 export function Explorer({ id }: { id: string }) {
@@ -248,12 +243,12 @@ export function Explorer({ id }: { id: string }) {
     if (!paths.length) return;
     if (forever) return setConfirmDelete(paths);
     const result = await run({ op: 'recycle', paths }, false);
-    if (result?.paths.length) say(`${result.paths.length} item${result.paths.length > 1 ? 's' : ''} moved to the Recycle Bin.`);
+    if (result?.paths.length) say(`${result.paths.length} item${result.paths.length > 1 ? 's' : ''} moved to ${osWords().bin}.`);
     setSelected(new Set());
   };
   const rename = async (path: string, name: string) => {
     setRenaming(null);
-    const current = path.slice(path.lastIndexOf('\\') + 1);
+    const current = baseName(path);
     if (!name.trim() || name === current) return;
     await run({ op: 'rename', path, name });
   };
@@ -269,7 +264,7 @@ export function Explorer({ id }: { id: string }) {
         addAttachment(id, await files.attach(path, id));
         attached++;
       } catch (err) {
-        say(`${path.split('\\').at(-1)}: ${(err as Error).message}`);
+        say(`${baseName(path)}: ${(err as Error).message}`);
       }
     }
     if (attached) chat.setView(id, 'chat');
@@ -387,7 +382,7 @@ export function Explorer({ id }: { id: string }) {
       const paths = (JSON.parse(raw) as string[]).filter((p) => p !== dir);
       if (!paths.length) return;
       // Like Explorer: moving within a drive, copying to another one (Ctrl copies, Shift moves).
-      const sameDrive = paths.every((p) => driveOf(p) === driveOf(dir));
+      const sameDrive = paths.every((p) => driveOf(p, drives) === driveOf(dir, drives));
       const op = e.ctrlKey ? 'copy' : e.shiftKey ? 'move' : sameDrive ? 'move' : 'copy';
       await run({ op, paths, dest: dir }, dir === loc);
       return;
@@ -469,7 +464,10 @@ export function Explorer({ id }: { id: string }) {
     'sep',
     { label: 'Copy path', disabled: !selected.size, run: () => copyPath() },
     { label: 'Open in Terminal', disabled: !isFolder, run: () => openTerminal(loc) },
-    { label: 'Open in Windows Explorer', run: () => void files.open(isFolder ? loc : (places?.places[0]?.path ?? 'C:\\')) },
+    {
+      label: `Open in ${osWords().fileManager}`,
+      run: () => void files.open(isFolder ? loc : (places?.places[0]?.path ?? drives[0]?.path ?? '/')),
+    },
     'sep',
     { label: 'Properties', disabled: !isFolder && !selected.size, run: () => setPropsFor([...selected][0] ?? loc) },
   ];
@@ -490,9 +488,9 @@ export function Explorer({ id }: { id: string }) {
         ? ([
             { label: 'Open in new tab', run: () => openTab(entry.path) },
             { label: 'Open in Terminal', run: () => openTerminal(entry.path) },
-            { label: 'Open in Windows Explorer', run: () => void files.open(entry.path) },
+            { label: `Open in ${osWords().fileManager}`, run: () => void files.open(entry.path) },
           ] as MenuItem[])
-        : ([{ label: 'Show in Windows Explorer', run: () => void files.open(entry.path, true) }] as MenuItem[])),
+        : ([{ label: `Show in ${osWords().fileManager}`, run: () => void files.open(entry.path, true) }] as MenuItem[])),
       ...(search ? ([{ label: 'Open file location', run: () => go(dirOf(entry.path)) }] as MenuItem[]) : []),
       'sep',
       { label: 'Cut', hint: 'Ctrl+X', icon: <Icon name="cut" size={13} />, run: () => copy('cut', paths) },
@@ -530,7 +528,7 @@ export function Explorer({ id }: { id: string }) {
       ...newItems().map((i) => (i === 'sep' ? i : { ...i, label: `New ${i.label.toLowerCase()}` })),
       'sep',
       { label: 'Open in Terminal', disabled: !isFolder, run: () => openTerminal(loc) },
-      { label: 'Open in Windows Explorer', disabled: !isFolder, run: () => void files.open(loc) },
+      { label: `Open in ${osWords().fileManager}`, disabled: !isFolder, run: () => void files.open(loc) },
       { label: 'Properties', disabled: !isFolder, run: () => setPropsFor(loc) },
     ];
     setMenu({ x: e.clientX, y: e.clientY, items });
@@ -684,7 +682,7 @@ export function Explorer({ id }: { id: string }) {
           className={cmd}
           disabled={!selected.size}
           onClick={() => void remove()}
-          title="Delete (to the Recycle Bin)"
+          title={`Delete (to ${osWords().bin})`}
           aria-label="Delete"
         >
           <Icon name="delete" />
@@ -773,8 +771,8 @@ export function Explorer({ id }: { id: string }) {
           <div className="my-1 border-t border-line" />
           {places?.places.slice(1).map((p) => navItem(p.name, p.path, 'folder'))}
           <div className="my-1 border-t border-line" />
-          {navItem('This PC', THIS_PC, 'drive')}
-          {drives.map((d) => navItem(`${d.label} (${d.path.slice(0, 2)})`, d.path, 'drive', true))}
+          {navItem(osWords().computer, THIS_PC, 'drive')}
+          {drives.map((d) => navItem(driveName(d), d.path, 'drive', true))}
         </nav>
 
         {/* Items */}
@@ -859,9 +857,7 @@ export function Explorer({ id }: { id: string }) {
                       >
                         <FileIcon kind="drive" size={34} />
                         <span className="flex min-w-0 flex-1 flex-col gap-1">
-                          <span className="truncate">
-                            {d.label} ({d.path.slice(0, 2)})
-                          </span>
+                          <span className="truncate">{driveName(d)}</span>
                           {d.total > 0 && (
                             <>
                               <span className="h-1.5 rounded-full bg-white/10">
@@ -1019,7 +1015,7 @@ export function Explorer({ id }: { id: string }) {
       {confirmDelete && (
         <ConfirmDialog
           title="Delete permanently"
-          message={`Permanently delete ${confirmDelete.length === 1 ? `“${confirmDelete[0]!.split('\\').at(-1)}”` : `these ${confirmDelete.length} items`}? They won't go to the Recycle Bin and can't be brought back.`}
+          message={`Permanently delete ${confirmDelete.length === 1 ? `“${baseName(confirmDelete[0]!)}”` : `these ${confirmDelete.length} items`}? They won't go to ${osWords().bin} and can't be brought back.`}
           confirm="Delete"
           onYes={() =>
             void run({ op: 'deleteForever', paths: confirmDelete }, false).then((r) => {

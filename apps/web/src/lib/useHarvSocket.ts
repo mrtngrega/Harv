@@ -1,6 +1,7 @@
 import {
   DEFAULT_SETTINGS,
   type Catalog,
+  type HarvPlatform,
   type HarvSettings,
   type HarvStatus,
   type MetricsSnapshot,
@@ -16,10 +17,12 @@ export interface HarvConnection {
   /** The running tool while working. */
   detail?: string;
   version: string | null;
+  /** The OS the server runs on (Windows until the first hello says otherwise). */
+  platform: HarvPlatform;
 }
 
 // Separate stores so the 1 s metrics ticks only re-render what reads metrics.
-const connection = createStore<HarvConnection>({ connected: false, status: 'idle', version: null });
+const connection = createStore<HarvConnection>({ connected: false, status: 'idle', version: null, platform: 'windows' });
 const metrics = createStore<MetricsSnapshot | null>(null);
 const catalog = createStore<Catalog | null>(null);
 const usage = createStore<PlanUsage | null>(null);
@@ -35,7 +38,7 @@ onConnectionChange((connected) => connection.set((c) => ({ ...c, connected })));
 onServerMessage((msg) => {
   switch (msg.type) {
     case 'hello':
-      connection.set({ connected: true, status: msg.status, version: msg.version });
+      connection.set({ connected: true, status: msg.status, version: msg.version, platform: msg.platform ?? 'windows' });
       if (msg.metrics) metrics.set(msg.metrics);
       if (msg.catalog) catalog.set(msg.catalog);
       usage.set(msg.usage);
@@ -71,6 +74,8 @@ onServerMessage((msg) => {
 });
 
 export const useConnection = connection.use;
+/** The OS the server runs on, for code outside React. */
+export const getPlatform = () => connection.get().platform;
 export const useMetrics = metrics.use;
 export const useCatalog = catalog.use;
 export const useUsage = usage.use;

@@ -1,5 +1,6 @@
 import { uptime } from 'node:os';
 import type { MetricsSnapshot, ProcessUsage, VolumeMetrics } from '@harv/shared';
+import { IS_WINDOWS } from '../platform.ts';
 import { readingsFromLhm } from './fromLhm.ts';
 import { fetchLhm } from './lhm.ts';
 import { readNvidiaSmi } from './nvidia.ts';
@@ -81,7 +82,8 @@ export class MetricsCollector {
 
   private async tick() {
     const info = this.staticInfo!;
-    const sensors = await fetchLhm();
+    // LibreHardwareMonitor only exists on Windows.
+    const sensors = IS_WINDOWS ? await fetchLhm() : null;
     const lhm = sensors ? readingsFromLhm(sensors) : null;
 
     let gpu = lhm?.gpu;
@@ -100,7 +102,7 @@ export class MetricsCollector {
         this.lastFallbackAt = Date.now();
       }
       const fb = this.fallbackCache;
-      cpu ??= { name: info.cpuName, load: fb.cpuLoad, perThread: fb.perThread };
+      cpu ??= { name: info.cpuName, load: fb.cpuLoad, perThread: fb.perThread, tempC: fb.tempC };
       memory ??= {
         load: (fb.memUsed / fb.memTotal) * 100,
         usedBytes: fb.memUsed,

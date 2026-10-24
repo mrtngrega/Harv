@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ACCENTS, COMPACT_ROWS, DEFAULT_SETTINGS, WARN_CHOICES, type CompactRow, type HarvSettings } from '@harv/shared';
-import { projectActions, updateSettings, useBackground, useProjects, useSettings } from '../lib/useHarvSocket.ts';
+import { projectActions, updateSettings, useBackground, useConnection, useProjects, useSettings } from '../lib/useHarvSocket.ts';
 
 const ACCENT_NAMES: Record<string, string> = {
   '#A8C8E8': 'Ice blue',
@@ -8,6 +8,11 @@ const ACCENT_NAMES: Record<string, string> = {
   '#F2B880': 'Amber',
   '#C9B8F0': 'Lavender',
 };
+
+/** An example path in the form of the OS Harv runs on (C:\… on Windows, /home/… on Linux). */
+function useExample(windows: string, linux: string): string {
+  return useConnection().platform === 'windows' ? windows : linux;
+}
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -167,6 +172,7 @@ const ROW_NAMES: Record<CompactRow, string> = {
 };
 
 function WorkFolder() {
+  const example = useExample('C:\\Users\\you\\Projects', '/home/you/Projects');
   const { workDir } = useSettings();
   const [draft, setDraft] = useState<string | null>(null);
   const value = draft ?? workDir;
@@ -189,7 +195,7 @@ function WorkFolder() {
           id="harv-workdir"
           value={value}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="C:\Users\you\Projects"
+          placeholder={example}
           className="min-h-9 min-w-0 flex-1 rounded-lg border border-line bg-black/20 px-2.5 text-xs text-ink outline-none placeholder:text-faint focus:border-accent/60"
         />
         <button type="submit" className="min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 text-xs hover:bg-white/10">
@@ -228,6 +234,7 @@ function RestartButton() {
 }
 
 function Projects() {
+  const example = useExample('C:\\path\\to\\a\\project', '/path/to/a/project');
   const { list, error } = useProjects();
   const { projectsDir } = useSettings();
   const [path, setPath] = useState('');
@@ -275,13 +282,7 @@ function Projects() {
         <label htmlFor="harv-project-path" className="sr-only">
           Project folder to add
         </label>
-        <input
-          id="harv-project-path"
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-          placeholder="C:\path\to\a\project"
-          className={input}
-        />
+        <input id="harv-project-path" value={path} onChange={(e) => setPath(e.target.value)} placeholder={example} className={input} />
         <button type="submit" className={button}>
           Add
         </button>
@@ -377,12 +378,17 @@ function BackgroundPicker() {
 /** Settings › Watchdog: on/off and the programs it ignores (alerts show as toasts, not here). */
 function Watchdog() {
   const { watchdog, watchdogIgnored } = useSettings();
+  const onWindows = useConnection().platform === 'windows';
   return (
     <Section title="Watchdog">
       <Toggle
         on={watchdog}
         label="Watch my PC"
-        hint="Warns when something overheats for minutes, a program without a window hogs the CPU or GPU for 5+ minutes, Windows Defender finds a threat or is off, or a known miner or remote-control tool runs. Quiet by design: no Claude usage, at most one ordinary warning per 10 minutes."
+        hint={
+          onWindows
+            ? 'Warns when something overheats for minutes, a program without a window hogs the CPU or GPU for 5+ minutes, Windows Defender finds a threat or is off, or a known miner or remote-control tool runs. Quiet by design: no Claude usage, at most one ordinary warning per 10 minutes.'
+            : 'Warns when something overheats for minutes, a known miner or remote-control tool runs, or a program from /tmp keeps working. Quiet by design: no Claude usage, at most one ordinary warning per 10 minutes.'
+        }
         onChange={(on) => updateSettings({ watchdog: on })}
       />
       {watchdogIgnored.length > 0 && (
@@ -408,6 +414,7 @@ function Watchdog() {
 }
 
 function ProtectedFolders() {
+  const example = useExample('C:\\Users\\you\\Documents\\Taxes', '/home/you/Documents/Taxes');
   const { protectedPaths } = useSettings();
   const [draft, setDraft] = useState('');
 
@@ -449,7 +456,7 @@ function ProtectedFolders() {
           id="harv-protect"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="C:\Users\you\Documents\Taxes"
+          placeholder={example}
           className="min-h-9 min-w-0 flex-1 rounded-lg border border-line bg-black/20 px-2.5 text-xs text-ink outline-none placeholder:text-faint focus:border-accent/60"
         />
         <button type="submit" className="min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 text-xs hover:bg-white/10">
@@ -463,6 +470,7 @@ function ProtectedFolders() {
 /** Harv's settings, shown as a tab in the chat bar. Saved in ~/.harv/settings.json and applied at once in every window. */
 export function SettingsView() {
   const settings = useSettings();
+  const onWindows = useConnection().platform === 'windows';
   const lookChanged = LOOK_KEYS.some((k) => settings[k] !== DEFAULT_SETTINGS[k]);
   const resetLook = () => updateSettings(Object.fromEntries(LOOK_KEYS.map((k) => [k, DEFAULT_SETTINGS[k]])) as Partial<HarvSettings>);
 
@@ -703,12 +711,14 @@ export function SettingsView() {
           hint="After a restart, bring back the tabs, their files and terminals, and unsent messages, like Chrome."
           onChange={(restoreTabs) => updateSettings({ restoreTabs })}
         />
-        <Toggle
-          on={settings.startSensors}
-          label="Start the hardware sensors"
-          hint="Starts LibreHardwareMonitor with Harv (Windows asks for permission). Off, temperatures and fans stay hidden until you press Start sensors."
-          onChange={(startSensors) => updateSettings({ startSensors })}
-        />
+        {onWindows && (
+          <Toggle
+            on={settings.startSensors}
+            label="Start the hardware sensors"
+            hint="Starts LibreHardwareMonitor with Harv (Windows asks for permission). Off, temperatures and fans stay hidden until you press Start sensors."
+            onChange={(startSensors) => updateSettings({ startSensors })}
+          />
+        )}
         <RestartButton />
       </Section>
 

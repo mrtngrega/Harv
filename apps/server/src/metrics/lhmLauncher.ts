@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { LhmLaunchResult } from '@harv/shared';
+import { IS_WINDOWS } from '../platform.ts';
 import { fetchLhm } from './lhm.ts';
 
 const run = promisify(execFile);
@@ -33,6 +34,8 @@ async function isProcessRunning(): Promise<boolean> {
  * which shows a Windows UAC prompt. Does nothing if it's already running.
  */
 export async function ensureLhmRunning(): Promise<LhmLaunchResult> {
+  // A Windows program; Linux sensors come from systeminformation instead.
+  if (!IS_WINDOWS) return 'not-installed';
   if ((await fetchLhm()) || (await isProcessRunning())) return 'already-running';
   const exe = findLhmExe();
   if (!exe) return 'not-installed';

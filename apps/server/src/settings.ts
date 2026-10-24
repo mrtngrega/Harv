@@ -1,8 +1,9 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, win32 } from 'node:path';
+import { join } from 'node:path';
 import { COMPACT_ROWS, DEFAULT_SETTINGS, type HarvSettings } from '@harv/shared';
 import { HARV_HOME } from './paths.ts';
+import { osPath } from './platform.ts';
 
 const settingsPath = () => join(HARV_HOME, 'settings.json');
 
@@ -26,8 +27,8 @@ export function cleanSettings(raw: Raw, base: HarvSettings = DEFAULT_SETTINGS): 
   const folder = (v: unknown, fallback: string) => {
     if (typeof v !== 'string') return fallback;
     const path = v.trim();
-    // Only a full Windows path (or nothing).
-    return path === '' ? '' : win32.isAbsolute(path) ? win32.normalize(path) : fallback;
+    // Only a full path (or nothing).
+    return path === '' ? '' : osPath.isAbsolute(path) ? osPath.normalize(path) : fallback;
   };
   return {
     protectedPaths: paths,

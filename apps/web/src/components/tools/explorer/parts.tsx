@@ -4,6 +4,7 @@ import type { DriveInfo, FileEntry, FileProps } from '@harv/shared';
 import { files } from './api.ts';
 import { FileIcon, iconKind, isImage, isMedia, isPdf, isTextLike, typeName } from './fileTypes.tsx';
 import { bytes as formatSize } from './icons.tsx';
+import { baseName, dirOf, driveName, osWords, pathParts, typedPath } from './paths.ts';
 
 export const when = (ms?: number) => (ms ? new Date(ms).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : '');
 
@@ -120,11 +121,14 @@ export const THIS_PC = 'thispc';
 
 export function locationName(loc: string, drives: DriveInfo[]): string {
   if (loc === HOME) return 'Home';
-  if (loc === THIS_PC) return 'This PC';
+  if (loc === THIS_PC) return osWords().computer;
   const drive = drives.find((d) => d.path.toLowerCase() === loc.toLowerCase());
-  if (drive) return `${drive.label} (${drive.path.slice(0, 2)})`;
-  return loc.split('\\').filter(Boolean).at(-1) ?? loc;
+  if (drive) return driveName(drive);
+  return baseName(loc);
 }
+
+/** What the address bar shows when it turns into a text box. */
+const addressText = (loc: string) => (loc === HOME ? 'Home' : loc === THIS_PC ? osWords().computer : loc);
 
 /** "This PC › Local Disk (C:) › Users › you", each part clickable; click the empty space to type a path. */
 export function Breadcrumb({
@@ -150,15 +154,10 @@ export function Breadcrumb({
   const parts: { label: string; loc: string }[] = [];
   if (loc === HOME) parts.push({ label: 'Home', loc: HOME });
   else {
-    parts.push({ label: 'This PC', loc: THIS_PC });
+    parts.push({ label: osWords().computer, loc: THIS_PC });
     if (loc !== THIS_PC) {
-      const [drive, ...rest] = loc.split('\\').filter(Boolean);
-      let path = `${drive}\\`;
-      parts.push({ label: locationName(path, drives), loc: path });
-      for (const segment of rest) {
-        path = path.endsWith('\\') ? `${path}${segment}` : `${path}\\${segment}`;
-        parts.push({ label: segment, loc: path });
-      }
+      const [root, ...rest] = pathParts(loc);
+      parts.push({ label: locationName(root!.loc, drives), loc: root!.loc }, ...rest);
     }
   }
 
@@ -175,7 +174,7 @@ export function Breadcrumb({
           setEditing(false);
           const text = draft.trim();
           if (!text) return;
-          onGo(/^this pc$/i.test(text) ? THIS_PC : /^home$/i.test(text) ? HOME : text.replace(/\//g, '\\'));
+          onGo(/^(this pc|computer)$/i.test(text) ? THIS_PC : /^home$/i.test(text) ? HOME : typedPath(text));
         }}
       >
         <label className="sr-only" htmlFor="explorer-address">
@@ -199,7 +198,7 @@ export function Breadcrumb({
       className="flex min-h-8 min-w-0 flex-1 cursor-text items-center overflow-hidden rounded-lg border border-line bg-black/20 px-1 text-xs"
       onClick={(e) => {
         if (e.target !== e.currentTarget) return;
-        setDraft(loc === HOME ? 'Home' : loc === THIS_PC ? 'This PC' : loc);
+        setDraft(addressText(loc));
         setEditing(true);
       }}
       title="Click an empty spot to type a path"
@@ -250,7 +249,7 @@ export function Breadcrumb({
       <span
         className="min-w-8 flex-1 self-stretch"
         onClick={() => {
-          setDraft(loc === HOME ? 'Home' : loc === THIS_PC ? 'This PC' : loc);
+          setDraft(addressText(loc));
           setEditing(true);
         }}
       />
@@ -326,7 +325,7 @@ export function DetailsPane({ selected, folderName, count }: { selected: FileEnt
             <dt className="text-muted">Modified</dt>
             <dd className="m-0">{when(one.mtime)}</dd>
             <dt className="text-muted">Location</dt>
-            <dd className="m-0 break-all">{one.path.slice(0, one.path.lastIndexOf('\\')) || one.path}</dd>
+            <dd className="m-0 break-all">{dirOf(one.path)}</dd>
           </dl>
         </>
       ) : selected.length > 1 ? (
@@ -416,7 +415,7 @@ export function PropertiesDialog({ path, onClose }: { path: string; onClose: () 
   const rows: [string, string][] = props
     ? [
         ['Type', typeName(props)],
-        ['Location', path.slice(0, path.lastIndexOf('\\')) || path],
+        ['Location', dirOf(path)],
         ['Size', `${formatSize(props.size)} (${props.size.toLocaleString()} bytes)${props.partial ? ', at least' : ''}`],
         ...(props.dir ? [['Contains', `${props.files ?? 0} files, ${props.folders ?? 0} folders`] as [string, string]] : []),
         ['Created', when(props.created)],
@@ -426,7 +425,7 @@ export function PropertiesDialog({ path, onClose }: { path: string; onClose: () 
       ]
     : [];
   return (
-    <Dialog title={`${props?.name ?? path.split('\\').at(-1)} Properties`} onClose={onClose}>
+    <Dialog title={`${props?.name ?? baseName(path)} Properties`} onClose={onClose}>
       {error ? (
         <p className="m-0 text-warn">! {error}</p>
       ) : !props ? (

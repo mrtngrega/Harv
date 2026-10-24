@@ -8,7 +8,14 @@ const dir = mkdtempSync(join(tmpdir(), 'harv-files-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe('file explorer', () => {
-  it('accepts only absolute Windows paths', () => {
+  it.runIf(process.platform !== 'win32')('accepts only absolute Linux paths', () => {
+    expect(cleanPath('/home/me/../me/Docs/')).toBe('/home/me/Docs');
+    expect(cleanPath('/')).toBe('/');
+    expect(cleanPath('relative/path')).toBeNull();
+    expect(cleanPath(42)).toBeNull();
+  });
+
+  it.runIf(process.platform === 'win32')('accepts only absolute Windows paths', () => {
     expect(cleanPath('C:/Users/me/../me/Docs')).toBe('C:\\Users\\me\\Docs');
     expect(cleanPath('relative\\path')).toBeNull();
     expect(cleanPath('\\\\server\\share')).toBeNull();

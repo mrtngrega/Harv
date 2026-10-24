@@ -1,5 +1,6 @@
 import si from 'systeminformation';
 import type { ProcessUsage, VolumeMetrics } from '@harv/shared';
+import { IS_WINDOWS, isUserMount } from '../platform.ts';
 
 // systeminformation shells out to PowerShell/WMI on Windows, so each call costs
 // 0.5–5 s. It's only used for things LibreHardwareMonitor doesn't provide
@@ -62,19 +63,27 @@ export async function readProcesses(): Promise<{ byCpu: ProcessUsage[]; byMem: P
 export async function readVolumes(): Promise<VolumeMetrics[]> {
   const list = await si.fsSize();
   return list
-    .filter((v) => v.size > 0)
+    .filter((v) => v.size > 0 && (IS_WINDOWS || isUserMount(v.mount)))
     .map((v) => ({ mount: v.mount, usedBytes: v.used, totalBytes: v.size, load: v.use }))
     .sort((a, b) => a.mount.localeCompare(b.mount));
 }
 
-/** Fallback CPU + memory when LibreHardwareMonitor isn't running. */
+/** CPU temperature on Linux (read from /sys, cheap); Windows needs LibreHardwareMonitor for it. */
+async function linuxCpuTemp(): Promise<number | undefined> {
+  if (IS_WINDOWS) return undefined;
+  const t = await si.cpuTemperature().catch(() => null);
+  return t && typeof t.main === 'number' && t.main > 0 ? t.main : undefined;
+}
+
+/** Fallback CPU + memory when LibreHardwareMonitor isn't running (always on Linux). */
 export async function readCpuMemFallback() {
-  const [load, mem] = await Promise.all([si.currentLoad(), si.mem()]);
+  const [load, mem, tempC] = await Promise.all([si.currentLoad(), si.mem(), linuxCpuTemp()]);
   return {
     cpuLoad: load.currentLoad,
     perThread: load.cpus.map((c) => c.load),
     memUsed: mem.active,
     memAvailable: mem.available,
     memTotal: mem.total,
+    tempC,
   };
 }

@@ -1,7 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
-import { win32 } from 'node:path';
 import { promisify } from 'node:util';
 import {
   type Attachment,
@@ -25,6 +24,7 @@ import { buildContent, deleteAttachments } from './attachments.ts';
 import { sideQuestion } from './btw.ts';
 import { commandName, hiddenReason } from './commands.ts';
 import { formatTranscript, type HandOff, type ProjectTools } from './chatTools.ts';
+import { osPath, pathKey } from '../platform.ts';
 import { projectsDir } from '../settings.ts';
 import type { ProjectServerMessage } from '@harv/shared';
 import { ChatSession } from './session.ts';
@@ -755,9 +755,9 @@ export class ChatManager {
 
   /** Adds an existing folder as a project. */
   addProject(path: string, name?: string): string | undefined {
-    const folder = win32.normalize(path.trim());
-    if (!win32.isAbsolute(folder) || !existsSync(folder) || !statSync(folder).isDirectory()) return `No folder at ${path}.`;
-    this.store.addProject(name?.trim() || win32.basename(folder), folder);
+    const folder = osPath.normalize(path.trim());
+    if (!osPath.isAbsolute(folder) || !existsSync(folder) || !statSync(folder).isDirectory()) return `No folder at ${path}.`;
+    this.store.addProject(name?.trim() || osPath.basename(folder), folder);
     this.publishProjects();
     return undefined;
   }
@@ -780,12 +780,12 @@ export class ChatManager {
         .replace(/\s+/g, ' ')
         .replace(/[. ]+$/, '');
       if (!name) return 'That name has no usable characters for a folder; pick another.';
-      const path = win32.join(projectsDir(), name);
+      const path = osPath.join(projectsDir(), name);
       if (existsSync(path)) {
         return `${path} already exists. Ask the user whether to use it (open_project with that path) or pick another name.`;
       }
       mkdirSync(path, { recursive: true });
-      writeFileSync(win32.join(path, 'CLAUDE.md'), starterClaudeMd(name, description));
+      writeFileSync(osPath.join(path, 'CLAUDE.md'), starterClaudeMd(name, description));
       let git = 'a git repository';
       try {
         await promisify(execFile)('git', ['init', '-b', 'main'], { cwd: path, windowsHide: true });
@@ -800,10 +800,10 @@ export class ChatManager {
     open: async (tabId, nameOrPath) => {
       const wanted = nameOrPath.trim();
       let project = this.store.projects().find((p) => p.name.toLowerCase() === wanted.toLowerCase());
-      if (!project && win32.isAbsolute(wanted)) {
+      if (!project && osPath.isAbsolute(wanted)) {
         const error = this.addProject(wanted);
         if (error) return error;
-        project = this.store.projects().find((p) => p.path.toLowerCase() === win32.normalize(wanted).toLowerCase());
+        project = this.store.projects().find((p) => pathKey(p.path) === pathKey(osPath.normalize(wanted)));
       }
       if (!project) {
         const known =

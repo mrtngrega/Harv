@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { WatchdogAlert } from '@harv/shared';
 import type { MetricsCollector } from '../metrics/collector.ts';
 import { HARV_HOME } from '../paths.ts';
+import { IS_WINDOWS } from '../platform.ts';
 import { loadSettings } from '../settings.ts';
 import { defenderReport, gpuByPid, windowedApps } from './probes.ts';
 import { GPU_HOG_PCT, Watchdog, type ProcessSample } from './watchdog.ts';
@@ -32,10 +33,13 @@ export function startWatchdog(collector: MetricsCollector, emit: (alert: Watchdo
   const watchdog = new Watchdog({
     emit,
     settings: loadSettings,
-    windowed: async () => {
-      if (!windowed || Date.now() - windowed.at > WINDOWED_CACHE_MS) windowed = { at: Date.now(), names: await windowedApps() };
-      return windowed.names;
-    },
+    // Windows only: Linux has no reliable list of programs with a window (Wayland), so no hog alerts there.
+    windowed: IS_WINDOWS
+      ? async () => {
+          if (!windowed || Date.now() - windowed.at > WINDOWED_CACHE_MS) windowed = { at: Date.now(), names: await windowedApps() };
+          return windowed.names;
+        }
+      : undefined,
     defenderSeen: {
       get: () => seen,
       set: (at) => {
@@ -72,7 +76,7 @@ export function startWatchdog(collector: MetricsCollector, emit: (alert: Watchdo
   });
 
   const checkDefender = () => {
-    if (loadSettings().watchdog)
+    if (IS_WINDOWS && loadSettings().watchdog)
       void defenderReport().then(
         (r) => watchdog.onDefender(r),
         () => {},

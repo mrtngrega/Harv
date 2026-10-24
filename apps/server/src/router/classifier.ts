@@ -3,7 +3,7 @@ import type { Attachment } from '@harv/shared';
 import { buildOptions, SUBSCRIPTION_KEY_SOURCES } from '../agent/options.ts';
 import type { Classification } from './table.ts';
 
-const PROMPT = `You route messages for Harv, a personal assistant on a Windows PC, to the right Claude model. You never answer the message itself.
+const PROMPT = `You route messages for Harv, a personal assistant on the user's computer, to the right Claude model. You never answer the message itself.
 Reply with ONLY one JSON object, no prose:
 {"category": "<one or two words: chat, question, writing, research, code, debugging, analysis, planning, pc-task, math, ...>", "difficulty": <1-5>, "stakes": "low" | "normal" | "high", "ambiguous": <true|false>, "title": "<chat title>"}
 difficulty: 1 = trivial (a greeting, a fact, a one-liner), 2 = easy (a short explanation, a small edit), 3 = moderate (a normal task, some code, a few steps), 4 = hard (multi-step work, real code changes, careful reasoning), 5 = very hard (deep research, architecture, tricky debugging, long precise work).

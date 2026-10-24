@@ -2,11 +2,20 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { onlyPrompts, promptFolder, restoredLines, TerminalManager } from './terminal.ts';
+import { cdCommand, onlyPrompts, promptFolder, restoredLines, TerminalManager } from './terminal.ts';
+import { IS_WINDOWS } from '../platform.ts';
 import { cleanUi } from '../ui.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'harv-terms-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+/** The shell has shown its prompt: PowerShell's "PS C:\…>", or bash's "…$ ". */
+const prompted = (out: string) => (IS_WINDOWS ? out.includes('PS ') : /[$#] /.test(out));
+/** A command that prints the shell's folder. */
+const PWD = IS_WINDOWS ? '(Get-Location).Path' : 'pwd';
+const TMP = tmpdir()
+  .replace(/[\\/]$/, '')
+  .toLowerCase();
 
 const waitFor = async (check: () => boolean, ms = 15_000) => {
   const end = Date.now() + ms;
@@ -29,6 +38,11 @@ describe('terminal restore', () => {
     expect(lines.at(-1)).toMatch(/^── restored from 24 Oct, 13:05/);
   });
 
+  it('moves a shell to a folder in its own syntax', () => {
+    expect(cdCommand('powershell.exe', "C:\\it's")).toBe("Set-Location -LiteralPath 'C:\\it''s'");
+    expect(cdCommand('/bin/bash', "/home/me/it's")).toBe("cd -- '/home/me/it'\\''s'");
+  });
+
   it('tells a shell nobody typed in from one with output', () => {
     expect(onlyPrompts(['PS C:\\Users\\me> ', ''])).toBe(true);
     expect(onlyPrompts(['PS C:\\Users\\me> ls', 'file.txt'])).toBe(false);
@@ -47,7 +61,7 @@ describe('terminal restore', () => {
     let out = '';
     const first = new TerminalManager({ data: (_, d) => (out += d), exit: () => {} }, dir);
     first.attach(id, tmpdir());
-    await waitFor(() => out.includes('PS '));
+    await waitFor(() => prompted(out));
     first.input(id, 'echo harv-was-here\r');
     await waitFor(() => (out.match(/harv-was-here/g) ?? []).length >= 2);
     // Give the headless screen a moment to parse the last output.
@@ -59,10 +73,9 @@ describe('terminal restore', () => {
     const replay = second.attach(id)!;
     expect(replay.restored.join('\n')).toContain('harv-was-here');
     expect(replay.restored.at(-1)).toContain('restored from');
-    await waitFor(() => again.includes('PS '));
-    second.input(id, '(Get-Location).Path\r');
-    const folder = tmpdir().replace(/\\$/, '').toLowerCase();
-    await waitFor(() => again.toLowerCase().split(folder).length > 2);
+    await waitFor(() => prompted(again));
+    second.input(id, `${PWD}\r`);
+    await waitFor(() => again.toLowerCase().split(TMP).length > 2);
 
     // Closing it for good forgets the saved text.
     second.close(id);
@@ -78,17 +91,21 @@ describe('terminal restore', () => {
     let out = '';
     const terms = new TerminalManager({ data: (_, d) => (out += d), exit: () => {} }, dir);
     terms.attach(id, tmpdir());
-    await waitFor(() => out.includes('PS '));
+    await waitFor(() => prompted(out));
     const target = mkdtempSync(join(tmpdir(), 'harv-cd-'));
     const name = target.split(/[\\/]/).at(-1)!.toLowerCase();
     terms.attach(id, target);
-    await waitFor(() => out.toLowerCase().includes(`${name}>`));
+    terms.input(id, `${PWD}\r`);
+    // The name shows once in the typed cd, and again in pwd's answer (or the prompt).
+    await waitFor(() => out.toLowerCase().split(name).length > 2);
     terms.input(id, 'exit\r');
     await new Promise((r) => setTimeout(r, 1500));
     out = '';
     terms.attach(id, tmpdir());
-    await waitFor(() => out.includes('PS '));
-    expect(out.toLowerCase()).not.toContain(`${name}>`);
+    await waitFor(() => prompted(out));
+    terms.input(id, `${PWD}\r`);
+    await waitFor(() => out.toLowerCase().split(TMP).length > 2);
+    expect(out.toLowerCase()).not.toContain(name);
     terms.close(id);
     terms.closeAll();
     rmSync(target, { recursive: true, force: true });

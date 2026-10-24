@@ -9,6 +9,9 @@ export type HarvStatus = 'idle' | 'thinking' | 'working' | 'waiting' | 'paused';
 /** Result of POST /api/sensors/start (starting LibreHardwareMonitor). */
 export type LhmLaunchResult = 'already-running' | 'started' | 'declined' | 'not-installed' | 'failed';
 
+/** The OS the server runs on: paths, the file explorer's wording and the sensors depend on it. */
+export type HarvPlatform = 'windows' | 'linux' | 'mac';
+
 export type * from './metrics.ts';
 export * from './chat.ts';
 export type * from './safety.ts';
@@ -49,6 +52,8 @@ export type ServerMessage =
       ui: UiState;
       /** Folders Harv works on as projects. */
       projects: Project[];
+      /** The OS the server runs on. */
+      platform: HarvPlatform;
       /** When this server started (ms): a new value tells the dashboard Harv was restarted. */
       startedAt: number;
     }

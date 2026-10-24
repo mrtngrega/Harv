@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { LhmLaunchResult, MetricsSnapshot } from '@harv/shared';
 import { countDuplicates, duration, temperature, gb, ghz, pct, rate, sizePair, watts } from '../../lib/format.ts';
-import { useSettings } from '../../lib/useHarvSocket.ts';
+import { useConnection, useSettings } from '../../lib/useHarvSocket.ts';
 import { ActionLog } from './ActionLog.tsx';
 import { BarList, Card, Rows, ThreadBars } from './parts.tsx';
 
@@ -57,12 +57,14 @@ function SensorsOffline() {
 
 export function StatsDetails({ m }: { m: MetricsSnapshot }) {
   const { tempUnit } = useSettings();
+  // LibreHardwareMonitor is a Windows program; on Linux the sensors come without it.
+  const onWindows = useConnection().platform === 'windows';
   const deg = (n: number | undefined) => temperature(n, tempUnit);
   const { cpu, gpu, memory, network, cooling } = m;
 
   return (
     <>
-      {!m.sources.lhm && <SensorsOffline />}
+      {onWindows && !m.sources.lhm && <SensorsOffline />}
 
       <Card title="CPU" sub={`${shortCpu(cpu.name)} · ${cpu.cores}C/${cpu.threads}T`} value={pct(cpu.load)} load={cpu.load}>
         {cpu.perThread.length > 0 && <ThreadBars loads={cpu.perThread} />}
