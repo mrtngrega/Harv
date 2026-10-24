@@ -15,7 +15,7 @@ class FakeSession {
   static all = new Map<string, FakeSession>();
   busy = false;
   toolRunning = false;
-  sent: { content: unknown; model: string; effort: EffortLevel }[] = [];
+  sent: { content: unknown; model: string; effort: EffortLevel; raw?: boolean }[] = [];
 
   constructor(
     readonly tabId: string,
@@ -32,9 +32,9 @@ class FakeSession {
     FakeSession.all.set(tabId, this);
   }
 
-  async send(content: unknown, model: string, effort: EffortLevel) {
+  async send(content: unknown, model: string, effort: EffortLevel, raw = false) {
     this.busy = true;
-    this.sent.push({ content, model, effort });
+    this.sent.push({ content, model, effort, raw });
   }
 
   reply(text: string) {
@@ -79,7 +79,7 @@ function setup() {
     () => {},
   );
   const notices = (tabId: string) => sent.flatMap((m) => (m.type === 'chat.notice' && m.tabId === tabId ? [m.message] : []));
-  return { chats, meter, routes, store, notices };
+  return { chats, meter, routes, store, notices, sent };
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
@@ -323,5 +323,66 @@ describe('project mode', () => {
       rmSync(join(home, 'settings.json'), { force: true });
       rmSync(projectsRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe('messages typed while Harv works', () => {
+  it('queues them and runs them in order when the turn ends', async () => {
+    const { chats, sent } = setup();
+    await chats.send('q', 'first', 'sonnet', 'medium');
+    const session = FakeSession.all.get('q')!;
+    await chats.send('q', 'second', 'sonnet', 'medium');
+    await chats.send('q', 'third', 'haiku', 'low');
+    expect(session.sent.map((s) => s.content)).toEqual(['first']);
+    const queued = sent.filter((m) => m.type === 'chat.queued');
+    expect(queued.at(-1)).toMatchObject({ items: [{ text: 'second' }, { text: 'third' }] });
+    expect(
+      chats
+        .openChats()
+        .find((c) => c.id === 'q')
+        ?.queued?.map((q) => q.text),
+    ).toEqual(['second', 'third']);
+
+    session.finish();
+    await settle();
+    expect(session.sent.map((s) => s.content)).toEqual(['first', 'second']);
+    expect(sent.some((m) => m.type === 'chat.line' && m.tabId === 'q' && m.line.kind === 'you' && m.line.text === 'second')).toBe(true);
+    session.finish();
+    await settle();
+    expect(session.sent.at(-1)).toMatchObject({ content: 'third', model: 'haiku', effort: 'low' });
+    expect(sent.filter((m) => m.type === 'chat.queued').at(-1)).toMatchObject({ items: [] });
+  });
+
+  it('can drop a queued message before it runs', async () => {
+    const { chats } = setup();
+    await chats.send('u', 'first', 'sonnet', 'medium');
+    await chats.send('u', 'oops', 'sonnet', 'medium');
+    const [item] = chats.openChats().find((c) => c.id === 'u')!.queued!;
+    chats.unqueue('u', item!.id);
+    FakeSession.all.get('u')!.finish();
+    await settle();
+    expect(FakeSession.all.get('u')!.sent.map((s) => s.content)).toEqual(['first']);
+  });
+});
+
+describe('slash commands', () => {
+  it('sends a Claude Code command as typed, without the router, at the last model', async () => {
+    const { chats } = setup();
+    chats.catalog = { plan: 'Claude Pro', models: [], commands: [{ name: 'compact', description: '', argumentHint: '' }] };
+    await chats.send('s', 'hello', 'haiku', 'low');
+    const session = FakeSession.all.get('s')!;
+    session.finish();
+    await chats.send('s', '/compact keep the plan', 'auto', 'medium');
+    expect(session.sent.at(-1)).toEqual({ content: '/compact keep the plan', model: 'haiku', effort: 'low', raw: true });
+  });
+
+  it('refuses commands that could bill or only work in a terminal, and leaves other slashes alone', async () => {
+    const { chats, notices } = setup();
+    chats.catalog = { plan: 'Claude Pro', models: [], commands: [] };
+    await chats.send('r', '/ultrareview', 'sonnet', 'medium');
+    expect(notices('r').at(-1)).toMatch(/doesn’t run \/ultrareview.*subscription/);
+    expect(FakeSession.all.get('r')).toBeUndefined();
+    await chats.send('r2', '/c/Users/me/notes.txt what is in it', 'sonnet', 'medium');
+    expect(FakeSession.all.get('r2')!.sent[0]!.raw).toBe(false);
   });
 });

@@ -64,7 +64,7 @@ Harv runs only on the user's Claude subscription, which reaches Claude through t
 
 ## Developing Harv from inside Harv
 
-The user develops Harv from a Harv project chat, exactly like the Claude Code sessions that built it (same rules, same memory). That chat runs *inside* the Harv it's changing, so:
+Since 2026-10-24 (evening) the user develops Harv in **Claude Code** again ("it gets messy" from inside Harv). These rules still apply whenever a Harv chat works on Harv. From Claude Code, still don't restart Harv without asking: the user keeps it running. Such a chat runs *inside* the Harv it's changing, so:
 
 - **Never stop or restart Harv yourself.** Don't kill node/tsx/vite, don't touch ports 4317/5173, don't run `scripts/harv.ps1`, `npm run dev` or `npm run harv`, and skip "stop the dev servers" when wrapping up. Any of these ends your own session mid-reply.
 - Harv runs with `npm run harv`: the **server doesn't auto-restart**. Changes under `apps/web` show up at once (Vite hot reload). Changes under `apps/server` or `packages/shared` only take effect after a restart: finish the work, run the checks, commit, then ask the user to press **Settings › Startup › Restart Harv** (or the "Restart Harv" desktop shortcut). The chat comes back after the restart (tabs and sessions are restored); verify the change then.
@@ -97,7 +97,8 @@ The user develops Harv from a Harv project chat, exactly like the Claude Code se
   - Each session is a long-lived Agent SDK `query()` in streaming-input mode, fed by `AsyncQueue`.
   - Model changes use `q.setModel()`. Effort changes use `q.applyFlagSettings({ effortLevel })`, so context is kept.
   - `manager.ts` maps tabs to sessions, derives `idle`/`thinking`/`working`, asks the router for AUTO turns, and handles "Try harder" (`chat.harder`: re-asks one ladder step up).
-  - `catalog.ts` reads `accountInfo()` and `supportedModels()` without sending a prompt, so it uses no plan usage.
+  - `catalog.ts` reads `accountInfo()`, `supportedModels()` and `supportedCommands()` without sending a prompt, so it uses no plan usage.
+  - Messages sent while a chat is busy queue and run when the turn ends; `/name` runs a Claude Code command or skill as typed, and `commands.ts` refuses billed or terminal-only ones (`docs/PLAN.md` §6g).
   - `options.ts` builds every query:
     - an explicit `env` with no API key
     - `cwd` set to `~/.harv/workspace`

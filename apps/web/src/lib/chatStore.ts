@@ -8,6 +8,8 @@ import type {
   HistoryItem,
   LineKind,
   ModelChoice,
+  QueuedMessage,
+  SlashCommandInfo,
   ToolKind,
   UiState,
 } from '@harv/shared';
@@ -50,6 +52,10 @@ export interface Tab {
   stored?: boolean;
   /** The project this chat works on (project mode), if any. */
   projectId?: string;
+  /** Messages typed while Harv was answering, waiting for the turn to end. */
+  queued?: QueuedMessage[];
+  /** This chat's Claude Code commands once its session runs (otherwise the catalog's). */
+  commands?: SlashCommandInfo[];
 }
 
 /** The Settings tab's id in `activeId`; it sits in the tab bar after the chats. */
@@ -127,6 +133,8 @@ const fromSnapshot = (chat: ChatSnapshot): Tab => ({
   busy: false,
   currentId: null,
   ...(chat.context ? { context: chat.context } : {}),
+  ...(chat.queued?.length ? { queued: chat.queued } : {}),
+  ...(chat.commands ? { commands: chat.commands } : {}),
   lines: chat.lines.map((l) => ({
     id: newId(),
     at: l.at ?? Date.now(),
@@ -264,6 +272,12 @@ export function applyChatEvent(msg: ChatServerMessage): void {
       break;
     case 'chat.renamed':
       updateTab(msg.tabId, (t) => ({ ...t, title: msg.title }));
+      break;
+    case 'chat.queued':
+      updateTab(msg.tabId, (t) => ({ ...t, queued: msg.items }));
+      break;
+    case 'chat.commands':
+      updateTab(msg.tabId, (t) => ({ ...t, commands: msg.commands }));
       break;
     case 'chat.removed':
       store.set((s) => {
@@ -477,6 +491,12 @@ export const chat = {
     const tabId = chat.ensureTab();
     const { model, effort } = store.get();
     const files = attachments.map((a) => a.name);
+    // Harv is still answering: the server queues it (shown above the input) and runs it when the turn ends.
+    if (store.get().tabs.find((t) => t.id === tabId)?.busy) {
+      if (!sendMessage({ type: 'chat.send', tabId, text, model, effort, ...(attachments.length ? { attachments } : {}) }))
+        updateTab(tabId, (t) => ({ ...t, lines: [...t.lines, line('error', 'Not connected to the Harv server.')] }));
+      return;
+    }
     updateTab(tabId, (t) => ({
       ...t,
       title: t.title === 'New chat' ? titleFrom(text.replace(OVERRIDE_WORDS, '') || text || files[0] || 'Attachment') : t.title,
@@ -516,6 +536,12 @@ export const chat = {
 
   stop(tabId: string) {
     sendMessage({ type: 'chat.stop', tabId });
+  },
+
+  /** Drops a queued message before it runs. */
+  unqueue(tabId: string, id: string) {
+    sendMessage({ type: 'chat.unqueue', tabId, id });
+    updateTab(tabId, (t) => ({ ...t, queued: t.queued?.filter((q) => q.id !== id) }));
   },
 
   /** Activates the chat if it's already a tab, otherwise asks the server to reopen it. */

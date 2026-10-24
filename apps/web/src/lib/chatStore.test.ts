@@ -152,3 +152,18 @@ describe('start question (continue or new session)', () => {
     expect(ids()[at + 1]).toBe(c);
   });
 });
+
+describe('messages typed while Harv answers', () => {
+  it('sends them for the queue without adding a line, and shows the queue the server reports', () => {
+    const id = openTab();
+    chat.send('first');
+    expect(tab(id).busy).toBe(true);
+    const lines = tab(id).lines.length;
+    chat.send('second');
+    expect(tab(id).lines.length).toBe(lines);
+    applyChatEvent({ type: 'chat.queued', tabId: id, items: [{ id: 'q1', text: 'second' }] });
+    expect(tab(id).queued).toEqual([{ id: 'q1', text: 'second' }]);
+    chat.unqueue(id, 'q1');
+    expect(tab(id).queued).toEqual([]);
+  });
+});

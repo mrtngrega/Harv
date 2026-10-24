@@ -1,9 +1,10 @@
 import { query, type Query, type SDKMessage, type SDKRateLimitInfo, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { ChatServerMessage, EffortLevel, Project } from '@harv/shared';
+import type { ChatServerMessage, EffortLevel, Project, SlashCommandInfo } from '@harv/shared';
 import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
 import type { ContentBlockParam } from './attachments.ts';
 import type { Delegate, ProjectTools } from './chatTools.ts';
+import { toCommandInfo } from './commands.ts';
 import { describeTool, MEMORY_TOOLS } from './guard.ts';
 import { memoryChanges, memorySnapshot } from './memory.ts';
 import { buildOptions, SUBSCRIPTION_KEY_SOURCES } from './options.ts';
@@ -19,7 +20,14 @@ export interface SessionHooks {
   onResumeFailed: () => void;
   /** Live plan usage from Claude; `rejected` means a limit is hit. */
   onRateLimit: (info: SDKRateLimitInfo) => void;
+  /** The session's slash commands (on start, and when it finds new skills). */
+  onCommands?: (commands: SlashCommandInfo[]) => void;
 }
+
+/** What a local command like /context or /usage printed (it comes back as a user message). */
+const LOCAL_OUTPUT = /<local-command-std(?:out|err)>([\s\S]*?)<\/local-command-std(?:out|err)>/g;
+// eslint-disable-next-line no-control-regex -- terminal colour codes start with ESC
+const ANSI = /\x1b\[[0-9;]*m/g;
 
 const ERROR_TEXT: Record<string, string> = {
   rate_limit: 'Claude Pro usage limit reached. Harv will be able to continue after the limit resets.',
@@ -45,6 +53,8 @@ export class ChatSession {
   /** The memories this session knows about (its system prompt, plus notes since). */
   private memory = memorySnapshot();
   private usedMemoryTool = false;
+  /** Whether this turn showed any text (a slash command's only output may be its result). */
+  private said = false;
   busy = false;
   toolRunning = false;
   /** The tool running now, for the status pill ("working · Read"). */
@@ -69,7 +79,8 @@ export class ChatSession {
     void this.consume();
   }
 
-  async send(content: string | ContentBlockParam[], model: string, effort: EffortLevel): Promise<void> {
+  /** `raw`: a slash command, sent exactly as typed (a memory note in front would stop Claude Code seeing the command). */
+  async send(content: string | ContentBlockParam[], model: string, effort: EffortLevel, raw = false): Promise<void> {
     if (model !== this.model) {
       await this.q.setModel(model);
       this.model = model;
@@ -79,8 +90,10 @@ export class ChatSession {
       this.effort = effort;
     }
     this.stopping = false;
+    this.said = false;
     this.setBusy(true);
-    this.input.push({ type: 'user', message: { role: 'user', content: this.withMemoryNote(content) }, parent_tool_use_id: null });
+    const message = raw ? content : this.withMemoryNote(content);
+    this.input.push({ type: 'user', message: { role: 'user', content: message }, parent_tool_use_id: null });
   }
 
   /** Tells Claude about memories other chats saved or forgot since this one last knew. */
@@ -103,6 +116,11 @@ export class ChatSession {
     this.closed = true;
     this.input.end();
     this.q.close();
+  }
+
+  private say(text: string) {
+    this.said = true;
+    this.emit({ type: 'chat.assistant', tabId: this.tabId, text });
   }
 
   private setBusy(busy: boolean, toolRunning = false) {
@@ -131,8 +149,20 @@ export class ChatSession {
     const tabId = this.tabId;
     switch (msg.type) {
       case 'system':
+        if (msg.subtype === 'commands_changed') {
+          this.hooks.onCommands?.(toCommandInfo(msg.commands));
+          return;
+        }
+        if (msg.subtype === 'compact_boundary') {
+          this.emit({ type: 'chat.notice', tabId, message: 'Conversation compacted: the older part is summarized now.' });
+          return;
+        }
         if (msg.subtype !== 'init') return;
         this.started = true;
+        void this.q
+          .supportedCommands()
+          .then((commands) => this.hooks.onCommands?.(toCommandInfo(commands, msg.terminal_slash_commands ?? [])))
+          .catch(() => {});
         this.hooks.onSessionId(msg.session_id);
         if (!SUBSCRIPTION_KEY_SOURCES.has(msg.apiKeySource)) {
           // Hard stop: this would bill per token instead of using the subscription.
@@ -144,6 +174,15 @@ export class ChatSession {
           this.close();
         }
         return;
+
+      case 'user': {
+        if (msg.parent_tool_use_id) return;
+        const content = msg.message.content;
+        const text = typeof content === 'string' ? content : '';
+        const output = [...text.matchAll(LOCAL_OUTPUT)].map((m) => m[1]!.replace(ANSI, '').trim()).filter(Boolean);
+        if (output.length) this.say(output.join('\n\n'));
+        return;
+      }
 
       case 'stream_event': {
         if (msg.parent_tool_use_id) return;
@@ -171,7 +210,7 @@ export class ChatSession {
             if (MEMORY_TOOLS.includes(block.name)) this.usedMemoryTool = true;
             this.toolName = block.name.replace(/^mcp__harv__/, '');
             if (text) {
-              this.emit({ type: 'chat.assistant', tabId, text });
+              this.say(text);
               text = '';
             }
             const input = (block.input ?? {}) as Record<string, unknown>;
@@ -184,7 +223,7 @@ export class ChatSession {
             });
           }
         }
-        if (text) this.emit({ type: 'chat.assistant', tabId, text });
+        if (text) this.say(text);
         if (usedTool) this.setBusy(true, true);
         return;
       }
@@ -194,6 +233,8 @@ export class ChatSession {
         if (this.usedMemoryTool) this.memory = memorySnapshot();
         this.usedMemoryTool = false;
         const ok = msg.subtype === 'success' && !msg.is_error;
+        // A command that answered without a message (e.g. /clear) still shows what it said.
+        if (ok && !this.said && msg.result.trim()) this.say(msg.result.trim());
         let error: string | undefined;
         if (!ok && !this.stopping) error = msg.subtype === 'success' ? msg.result : msg.errors.join('; ') || msg.subtype;
         this.emit({

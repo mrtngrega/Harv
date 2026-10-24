@@ -5,7 +5,9 @@ export type Command = { kind: 'model'; model?: string; effort?: EffortLevel } | 
 
 export const HELP =
   'Commands: /model auto|opus|sonnet|haiku|fable [low|medium|high|xhigh|max] switches the model, /attach adds files, /new opens a tab. ' +
-  'Start a message with /opus, /sonnet, /max… to run just that message at that model or effort.';
+  'Start a message with /opus, /sonnet, /max… to run just that message at that model or effort. ' +
+  'Claude Code’s commands and skills (/compact, /context, /init, /code-review…) go straight to Claude: type / to see them all. ' +
+  'While Harv answers, what you send waits its turn; STOP ends the reply and runs it now.';
 
 const MODELS = ['auto', 'opus', 'sonnet', 'haiku', 'fable'];
 const EFFORT_ALIASES: Record<string, EffortLevel> = { med: 'medium' };

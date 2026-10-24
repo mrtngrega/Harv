@@ -15,6 +15,22 @@ export interface Catalog {
   /** e.g. "Claude Pro". */
   plan: string | null;
   models: ModelOption[];
+  /** Claude Code's slash commands (and skills) a plain chat offers; a chat's own list replaces it once its session runs. */
+  commands: SlashCommandInfo[];
+}
+
+/** A Claude Code slash command or skill, typed as `/name args` in the chat. */
+export interface SlashCommandInfo {
+  name: string;
+  description: string;
+  argumentHint: string;
+}
+
+/** A message typed while Harv was still answering: it runs when the turn ends. */
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  files?: string[];
 }
 
 /** "auto" lets Harv pick; anything else is a model id from the catalog. */
@@ -24,7 +40,7 @@ export type ModelChoice = 'auto' | (string & {});
 export const AUTO_FALLBACK = { model: 'sonnet', effort: 'medium' } as const satisfies { model: string; effort: EffortLevel };
 
 /** How a turn's model·effort was chosen. */
-export type RouteSource = 'manual' | 'override' | 'rule' | 'classifier' | 'followup' | 'harder' | 'fallback';
+export type RouteSource = 'manual' | 'override' | 'rule' | 'classifier' | 'followup' | 'harder' | 'fallback' | 'command';
 
 /** The model·effort a turn runs at, and why. */
 export interface RouteDecision {
@@ -79,6 +95,10 @@ export interface ChatSnapshot {
   context?: number;
   /** The project this chat works on (project mode), if any. */
   projectId?: string;
+  /** Messages waiting for the current turn to end. */
+  queued?: QueuedMessage[];
+  /** This chat's slash commands, once its session has started (otherwise the catalog's). */
+  commands?: SlashCommandInfo[];
 }
 
 export interface HistoryItem {
@@ -94,6 +114,8 @@ export interface HistoryItem {
 export type ChatClientMessage =
   | { type: 'chat.send'; tabId: string; text: string; model: ModelChoice; effort: EffortLevel; attachments?: Attachment[] }
   | { type: 'chat.stop'; tabId: string }
+  /** Drop a queued message before it runs. */
+  | { type: 'chat.unqueue'; tabId: string; id: string }
   /** Run the last message again one step up the model·effort ladder. */
   | { type: 'chat.harder'; tabId: string }
   | { type: 'chat.close'; tabId: string }
@@ -121,5 +143,9 @@ export type ChatServerMessage =
   | { type: 'chat.removed'; tabId: string }
   /** A chat's title changed (named automatically, or by the user). */
   | { type: 'chat.renamed'; tabId: string; title: string }
+  /** The messages waiting in a chat for its turn to end (the whole list, replacing the last one). */
+  | { type: 'chat.queued'; tabId: string; items: QueuedMessage[] }
+  /** A chat's slash commands changed (its session started, or found new skills). */
+  | { type: 'chat.commands'; tabId: string; commands: SlashCommandInfo[] }
   /** The history list; `query` echoes the search it answers ("" = everything). */
   | { type: 'history'; items: HistoryItem[]; query: string };

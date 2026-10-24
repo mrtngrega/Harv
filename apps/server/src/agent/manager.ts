@@ -10,8 +10,11 @@ import {
   type EffortLevel,
   type HarvStatus,
   type ModelChoice,
+  type QueuedMessage,
   type RouteDecision,
+  type SlashCommandInfo,
   type StoredLine,
+  AUTO_FALLBACK,
 } from '@harv/shared';
 import type { Router } from '../router/router.ts';
 import { parseOverride } from '../router/rules.ts';
@@ -19,6 +22,7 @@ import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
 import type { UsageMeter } from '../usage/meter.ts';
 import { buildContent, deleteAttachments } from './attachments.ts';
+import { commandName, hiddenReason } from './commands.ts';
 import { formatTranscript, type HandOff, type ProjectTools } from './chatTools.ts';
 import { projectsDir } from '../settings.ts';
 import type { ProjectServerMessage } from '@harv/shared';
@@ -63,6 +67,9 @@ const HANDOFF_WAIT_MS = 15 * 60 * 1000;
 /** The longest answer a hand-off brings back into the waiting chat. */
 const HANDOFF_REPLY_CHARS = 12_000;
 
+/** A message typed while its chat was busy; it runs when the turn ends (like Claude Code's queue). */
+type FollowUp = QueuedMessage & { message: string; choice: ModelChoice; effort: EffortLevel; attachments: Attachment[] };
+
 /** A message waiting for a plan limit to reset. */
 type Queued =
   | { tabId: string; kind: 'send'; message: string; choice: ModelChoice; effort: EffortLevel; files: Attachment[] }
@@ -93,6 +100,10 @@ export class ChatManager {
   private handoffs = new Map<string, string>();
   /** What a tab replies while another chat waits for it. */
   private replies = new Map<string, string[]>();
+  /** Messages typed while a tab was busy, in order. */
+  private followUps = new Map<string, FollowUp[]>();
+  /** Each running session's slash commands (otherwise the catalog's). */
+  private commands = new Map<string, SlashCommandInfo[]>();
   catalog: Catalog | null = null;
 
   constructor(
@@ -123,7 +134,42 @@ export class ChatManager {
   }
 
   openChats() {
-    return this.store.openChats();
+    return this.store.openChats().map((chat) => {
+      const queued = this.queuedOf(chat.id);
+      const commands = this.commands.get(chat.id);
+      return { ...chat, ...(queued.length ? { queued } : {}), ...(commands ? { commands } : {}) };
+    });
+  }
+
+  private queuedOf(tabId: string): QueuedMessage[] {
+    return (this.followUps.get(tabId) ?? []).map(({ id, text, files }) => ({ id, text, ...(files?.length ? { files } : {}) }));
+  }
+
+  private publishQueued(tabId: string) {
+    this.broadcast({ type: 'chat.queued', tabId, items: this.queuedOf(tabId) });
+  }
+
+  /** Drops a message from a tab's queue before it runs. */
+  unqueue(tabId: string, id: string): void {
+    const list = this.followUps.get(tabId);
+    if (!list?.some((f) => f.id === id)) return;
+    this.followUps.set(
+      tabId,
+      list.filter((f) => f.id !== id),
+    );
+    this.publishQueued(tabId);
+  }
+
+  /** The turn ended: the next queued message runs (a plan limit sends it to the limit queue instead). */
+  private async nextFollowUp(tabId: string): Promise<void> {
+    if (this.busy(tabId)) return;
+    const next = this.followUps.get(tabId)?.shift();
+    if (!next) return;
+    this.publishQueued(tabId);
+    this.addLine(tabId, { kind: 'you', text: next.message, ...(next.files?.length ? { files: next.files } : {}) });
+    await this.begin(tabId, next.message, next.choice, next.effort, next.attachments, false);
+    // A message that ended without a turn (a refused command, a plan limit) lets the next one go too.
+    if (!this.busy(tabId) && this.followUps.get(tabId)?.length) setTimeout(() => void this.nextFollowUp(tabId), 0);
   }
 
   private modelName(id: string): string {
@@ -173,6 +219,8 @@ export class ChatManager {
     if (msg.type === 'chat.done') {
       for (const resolve of this.waiters.get(msg.tabId) ?? []) resolve();
       this.waiters.delete(msg.tabId);
+      // Whatever ended the turn (done, error or Stop), the next queued message runs.
+      if (this.followUps.get(msg.tabId)?.length) setTimeout(() => void this.nextFollowUp(msg.tabId), 0);
     }
   };
 
@@ -242,6 +290,10 @@ export class ChatManager {
       {
         onStateChange: () => this.onStatus(this.status),
         onSessionId: (id) => this.store.setSession(tabId, id),
+        onCommands: (commands) => {
+          this.commands.set(tabId, commands);
+          this.broadcast({ type: 'chat.commands', tabId, commands });
+        },
         onRateLimit: (info) => {
           this.meter.rateLimit(info);
           if (info.status === 'rejected') this.limited.add(tabId);
@@ -272,13 +324,31 @@ export class ChatManager {
     // Leave `/opus`-style override words out of the title.
     this.store.ensureChat(tabId, titleFrom(parseOverride(message).text.trim() || message || (files[0]?.name ?? 'Attachment')));
     this.store.setOpen(tabId, true);
-    if (this.busy(tabId)) {
-      this.broadcast({ type: 'chat.notice', tabId, message: 'Harv is still answering in this tab. Wait, or press Stop.' });
+    if (this.busy(tabId) || this.followUps.get(tabId)?.length) {
+      // Like Claude Code: what's typed while Harv works waits its turn, and runs when this one ends.
+      const list = this.followUps.get(tabId) ?? [];
+      const names = files.map((f) => f.name);
+      list.push({
+        id: randomUUID(),
+        text: message,
+        ...(names.length ? { files: names } : {}),
+        message,
+        choice,
+        effort,
+        attachments: files,
+      });
+      this.followUps.set(tabId, list);
+      this.publishQueued(tabId);
+      if (!this.busy(tabId)) void this.nextFollowUp(tabId);
       return;
     }
     this.store.addLine(tabId, { kind: 'you', text: message, ...(files.length ? { files: files.map((f) => f.name) } : {}) });
     if (isNew) this.publishHistory();
+    await this.begin(tabId, message, choice, effort, files, isNew);
+  }
 
+  /** Runs a message whose "you" line is already in the chat: queued for a plan limit, a slash command, or a routed turn. */
+  private async begin(tabId: string, message: string, choice: ModelChoice, effort: EffortLevel, files: Attachment[], isNew: boolean) {
     // A plan limit is hit (or this tab still has queued work): wait for the reset instead of sending.
     if (this.meter.paused || this.queue.some((q) => q.tabId === tabId)) {
       this.enqueue({ tabId, kind: 'send', message, choice, effort, files });
@@ -287,11 +357,40 @@ export class ChatManager {
       this.broadcast({ type: 'chat.done', tabId, ok: true, stopped: false });
       return;
     }
+    const command = commandName(message);
+    if (command && !files.length && this.isCommand(tabId, command)) {
+      await this.runCommand(tabId, command, message.trim());
+      return;
+    }
     await this.start(tabId, message, choice, effort, files);
     // Manual mode and a one-message model override (/haiku …) skip the classifier, so a new chat gets its short name from one cheap call.
     if (isNew && (choice !== 'auto' || parseOverride(message).model)) {
       void this.router.name(parseOverride(message).text, files).then((title) => title && this.autoTitle(tabId, title));
     }
+  }
+
+  /** A Claude Code slash command this chat offers (or one Harv refuses), as opposed to a `/opus`-style word or a path. */
+  private isCommand(tabId: string, name: string): boolean {
+    if (hiddenReason(name)) return true;
+    const list = this.commands.get(tabId) ?? this.catalog?.commands ?? [];
+    return list.some((c) => c.name === name);
+  }
+
+  /**
+   * A slash command goes to Claude Code exactly as typed, at the chat's last model·effort
+   * (no router: the classifier can't judge "/compact", and skipping it saves a call).
+   */
+  private async runCommand(tabId: string, name: string, text: string) {
+    const refused = hiddenReason(name);
+    if (refused) {
+      this.emit({ type: 'chat.notice', tabId, message: `Harv doesn’t run /${name}. ${refused}` });
+      this.broadcast({ type: 'chat.done', tabId, ok: true, stopped: false });
+      return;
+    }
+    const last = this.lastRun.get(tabId) ?? this.lastTagged(tabId) ?? AUTO_FALLBACK;
+    const decision: RouteDecision = { model: last.model, effort: last.effort, source: 'command', reason: `Claude Code command /${name}` };
+    this.router.manual(tabId, decision);
+    await this.run(tabId, decision, false, text, true);
   }
 
   /** Harv's short name for what a chat is about; skipped once the user has named it. */
@@ -460,13 +559,13 @@ export class ChatManager {
     this.onStatus(this.status);
   }
 
-  private async run(tabId: string, decision: RouteDecision, auto: boolean, content: Parameters<ChatSession['send']>[0]) {
+  private async run(tabId: string, decision: RouteDecision, auto: boolean, content: Parameters<ChatSession['send']>[0], raw = false) {
     const { model, effort } = decision;
     const session = this.session(tabId, model, effort);
     this.lastRun.set(tabId, { model, effort });
     this.emit({ type: 'chat.started', tabId, model: this.modelName(model), effort, auto, reason: decision.reason });
     try {
-      await session.send(content, model, effort);
+      await session.send(content, model, effort, raw);
     } catch (err) {
       this.emit({ type: 'chat.error', tabId, message: `Couldn’t send: ${(err as Error).message}` });
       this.emit({ type: 'chat.done', tabId, ok: false, stopped: false });
@@ -494,6 +593,8 @@ export class ChatManager {
   /** Closing a tab keeps the chat in history; its Claude session can be resumed later. */
   close(tabId: string): void {
     this.dequeueTab(tabId);
+    this.followUps.delete(tabId);
+    this.commands.delete(tabId);
     this.gate.cancel(tabId);
     this.sessions.get(tabId)?.close();
     this.sessions.delete(tabId);
@@ -514,6 +615,8 @@ export class ChatManager {
 
   delete(tabId: string): void {
     this.dequeueTab(tabId);
+    this.followUps.delete(tabId);
+    this.commands.delete(tabId);
     this.gate.cancel(tabId);
     this.sessions.get(tabId)?.close();
     this.sessions.delete(tabId);

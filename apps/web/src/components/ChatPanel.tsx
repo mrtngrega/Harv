@@ -4,12 +4,13 @@ import remarkGfm from 'remark-gfm';
 import { formatSize, uploadAttachment } from '../lib/attachments.ts';
 import { lineTime, resetTime, tokens } from '../lib/format.ts';
 import { HELP, parseCommand } from '../lib/commands.ts';
-import { useSettings, useUsage } from '../lib/useHarvSocket.ts';
+import { useCatalog, useSettings, useUsage } from '../lib/useHarvSocket.ts';
 import { chat, getChatState, SETTINGS_TAB, startQuestions, useChat, type Line } from '../lib/chatStore.ts';
 import { useSafety } from '../lib/safetyStore.ts';
 import { ActionBadge, ApprovalCard } from './ApprovalCard.tsx';
 import { SettingsView } from './SettingsView.tsx';
 import { StartChoice } from './StartChoice.tsx';
+import { matchCommands, SlashMenu } from './SlashMenu.tsx';
 import { SpecialTab, TOOL_ICONS, ViewMenu } from './tools/TabParts.tsx';
 import { setDraftText, updatePending, useDrafts, useDraftTexts } from '../lib/drafts.ts';
 
@@ -172,6 +173,17 @@ export function ChatPanel() {
   // Chats from before Harv started ask "continue or new session?" in their own tab (not while a turn runs in them).
   const asking = startQuestions.use();
   const askHere = !inSettings && view === 'chat' && active && !active.busy && asking.includes(active.id);
+  // Typing "/" opens the command list (the dashboard's and Claude Code's); Esc closes it until the text changes.
+  const catalog = useCatalog();
+  const [menuIndex, setMenuIndex] = useState(0);
+  const [menuClosedAt, setMenuClosedAt] = useState<string | null>(null);
+  const menuItems = nonChat || menuClosedAt === draft ? [] : matchCommands(draft, active?.commands ?? catalog?.commands ?? []);
+  const menuAt = Math.min(menuIndex, Math.max(menuItems.length - 1, 0));
+  const pickCommand = (name: string) => {
+    setDraft(`/${name} `);
+    setMenuIndex(0);
+    inputRef.current?.focus();
+  };
 
   // Esc is the stop hotkey: it halts the active tab and denies its waiting approvals.
   useEffect(() => {
@@ -249,7 +261,8 @@ export function ChatPanel() {
       }
       return;
     }
-    if ((!text && ready.length === 0) || active?.busy || uploading) return;
+    // While Harv answers, a message waits its turn (queued on the server, shown above the input).
+    if ((!text && ready.length === 0) || uploading) return;
     chat.send(text, ready);
     setDraft('');
     if (activeId) updatePending(activeId, () => []);
@@ -466,6 +479,27 @@ export function ChatPanel() {
           </div>
         )}
 
+        {!nonChat && active?.queued && active.queued.length > 0 && (
+          <div className="flex flex-col gap-1 border-t border-line px-5 pt-2 text-xs">
+            {active.queued.map((q) => (
+              <div key={q.id} className="flex min-w-0 items-center gap-2">
+                <span className="flex-none text-faint">queued ›</span>
+                <span className="min-w-0 flex-1 truncate text-muted">{q.text || q.files?.join(', ')}</span>
+                <button
+                  type="button"
+                  onClick={() => chat.unqueue(active.id, q.id)}
+                  aria-label="Remove queued message"
+                  title="Remove"
+                  className="size-6 flex-none cursor-pointer rounded text-muted hover:bg-white/10"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <p className="text-[11px] text-faint">Runs when Harv finishes · STOP ends this reply and runs it now</p>
+          </div>
+        )}
+
         {!nonChat && pending.length > 0 && (
           <div className="flex flex-wrap gap-1.5 border-t border-line px-5 pt-2.5">
             {pending.map((p) => (
@@ -498,7 +532,8 @@ export function ChatPanel() {
         )}
 
         {!nonChat && (
-          <form onSubmit={send} className="flex items-end gap-2.5 border-t border-line py-2.5 pr-3 pl-5">
+          <form onSubmit={send} className="relative flex items-end gap-2.5 border-t border-line py-2.5 pr-3 pl-5">
+            {menuItems.length > 0 && <SlashMenu items={menuItems} index={menuAt} onPick={(c) => pickCommand(c.name)} />}
             <label htmlFor="harv-cmd" className="pb-3 leading-5 font-semibold text-accent">
               harv&gt;
             </label>
@@ -510,6 +545,26 @@ export function ChatPanel() {
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
+                if (menuItems.length > 0 && !e.nativeEvent.isComposing) {
+                  const typed = draft.slice(1).toLowerCase();
+                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setMenuIndex((menuAt + (e.key === 'ArrowDown' ? 1 : menuItems.length - 1)) % menuItems.length);
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setMenuClosedAt(draft);
+                    return;
+                  }
+                  // Tab, or Enter on a name not fully typed yet, completes it; Enter on a full name sends it.
+                  if (e.key === 'Tab' || (e.key === 'Enter' && menuItems[menuAt]!.name.toLowerCase() !== typed)) {
+                    e.preventDefault();
+                    pickCommand(menuItems[menuAt]!.name);
+                    return;
+                  }
+                }
                 if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
                 // Settings › Chat: Enter sends (Shift+Enter = new line), or Ctrl+Enter sends (Enter = new line).
                 const sends = sendKey === 'enter' ? !e.shiftKey : e.ctrlKey;
@@ -523,7 +578,7 @@ export function ChatPanel() {
                 e.preventDefault();
                 attach(e.clipboardData.files);
               }}
-              placeholder="ask anything · /help"
+              placeholder={active?.busy ? 'queue a message · it runs when Harv finishes' : 'ask anything · / for commands'}
               title={`${sendKey === 'enter' ? 'Enter sends, Shift+Enter' : 'Ctrl+Enter sends, Enter'} makes a new line. /help lists the commands.`}
               className="max-h-40 min-h-11 min-w-0 flex-1 resize-none overflow-y-hidden bg-transparent py-3 text-sm leading-5 outline-none placeholder:text-faint"
             />
