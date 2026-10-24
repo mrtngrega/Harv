@@ -379,7 +379,13 @@ export function ChatPanel() {
                     }}
                     className={`flex min-h-9 cursor-pointer items-center gap-1.5 truncate pr-1 pl-3 text-xs ${on ? 'text-ink' : 'text-muted'}`}
                   >
-                    {t.busy && <span aria-hidden="true" className="animate-blink size-1.5 flex-none rounded-full bg-accent" />}
+                    {approvals.some((a) => a.tabId === t.id) ? (
+                      <span title="Needs your approval" className="flex-none font-semibold text-warn">
+                        !
+                      </span>
+                    ) : (
+                      t.busy && <span aria-hidden="true" className="animate-blink size-1.5 flex-none rounded-full bg-accent" />
+                    )}
                     {!t.busy && asking.includes(t.id) && (
                       <span aria-hidden="true" title="Asks: continue or new session" className="flex-none text-accent">
                         ?

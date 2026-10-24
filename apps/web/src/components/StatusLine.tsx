@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { Tab } from '../lib/chatStore.ts';
+import { chat, useChat, type Tab } from '../lib/chatStore.ts';
 import { resetTime, tokens } from '../lib/format.ts';
 import { useSafety } from '../lib/safetyStore.ts';
 import { useConnection, useSettings, useUsage } from '../lib/useHarvSocket.ts';
@@ -27,7 +27,11 @@ export function StatusLine({ tab }: { tab: Tab | undefined }) {
   const conn = useConnection();
   const usage = useUsage();
   const { motion } = useSettings();
-  const waiting = useSafety().approvals.some((a) => a.tabId === tab?.id);
+  const { approvals } = useSafety();
+  const { tabs } = useChat();
+  const waiting = approvals.some((a) => a.tabId === tab?.id);
+  // An approval card in another chat is invisible from here: say so, with a way there.
+  const elsewhere = tabs.find((t) => t.id !== tab?.id && approvals.some((a) => a.tabId === t.id));
   const busy = Boolean(tab?.busy);
   const [now, setNow] = useState(() => Date.now());
   const [frame, setFrame] = useState(0);
@@ -77,6 +81,18 @@ export function StatusLine({ tab }: { tab: Tab | undefined }) {
         {label}
       </span>
       {extra && <span className="truncate text-faint">{extra}</span>}
+      {elsewhere && (
+        <button
+          type="button"
+          onClick={() => {
+            chat.setActive(elsewhere.id);
+            chat.setView(elsewhere.id, 'chat');
+          }}
+          className="ml-auto flex-none cursor-pointer rounded border border-warn/50 px-1.5 text-[11px] text-warn hover:bg-warn/15"
+        >
+          ! “{elsewhere.title}” needs your approval
+        </button>
+      )}
     </div>
   );
 }
