@@ -69,7 +69,8 @@ function HistoryRow({ item, active }: { item: HistoryItem; active: boolean }) {
 }
 
 export function HistorySidebar() {
-  const [open, setOpen] = useState(true);
+  // Starts collapsed (the user's wish); the ‹ › buttons match the stats panel's.
+  const [open, setOpen] = useState(false);
   const { items, query } = useHistory();
   const { activeId } = useChat();
   const [draft, setDraft] = useState(query);
@@ -92,9 +93,9 @@ export function HistorySidebar() {
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Expand history"
-          className="size-9 cursor-pointer rounded-lg text-sm hover:bg-white/5"
+          className="size-8 cursor-pointer rounded-lg text-[15px] text-ink hover:bg-white/5"
         >
-          »
+          ›
         </button>
         <span aria-hidden="true" className="text-[11px] tracking-[3px] text-muted [writing-mode:vertical-rl]">
           HISTORY
@@ -116,9 +117,9 @@ export function HistorySidebar() {
           type="button"
           onClick={() => setOpen(false)}
           aria-label="Collapse history"
-          className="size-8 cursor-pointer rounded-lg text-sm hover:bg-white/5"
+          className="size-8 cursor-pointer rounded-lg text-[15px] hover:bg-white/5"
         >
-          «
+          ‹
         </button>
       </div>
       <label htmlFor="history-search" className="sr-only">
