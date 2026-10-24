@@ -364,6 +364,9 @@ app.get('/ws', { websocket: true }, (socket) => {
       case 'chat.unqueue':
         chats.unqueue(msg.tabId, msg.id);
         break;
+      case 'chat.sendNow':
+        void chats.sendNow(msg.tabId, msg.id);
+        break;
       case 'chat.harder':
         void chats.harder(msg.tabId);
         break;

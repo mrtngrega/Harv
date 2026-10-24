@@ -160,6 +160,19 @@ export class ChatManager {
     this.publishQueued(tabId);
   }
 
+  /** "Send now" on a queued message: it moves to the front and the current reply stops, so it runs next. */
+  async sendNow(tabId: string, id: string): Promise<void> {
+    const list = this.followUps.get(tabId);
+    const item = list?.find((f) => f.id === id);
+    if (!list || !item) return;
+    this.followUps.set(tabId, [item, ...list.filter((f) => f !== item)]);
+    this.publishQueued(tabId);
+    if (!this.busy(tabId)) return void this.nextFollowUp(tabId);
+    // Stopping ends the turn (and denies its waiting approvals); chat.done then runs the queue's first message.
+    this.gate.cancel(tabId);
+    await this.sessions.get(tabId)?.stop();
+  }
+
   /** The turn ended: the next queued message runs (a plan limit sends it to the limit queue instead). */
   private async nextFollowUp(tabId: string): Promise<void> {
     if (this.busy(tabId)) return;

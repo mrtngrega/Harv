@@ -572,6 +572,11 @@ export const chat = {
     updateTab(tabId, (t) => ({ ...t, queued: t.queued?.filter((q) => q.id !== id) }));
   },
 
+  /** Runs a queued message now: the current reply stops. */
+  sendNow(tabId: string, id: string) {
+    sendMessage({ type: 'chat.sendNow', tabId, id });
+  },
+
   /** Activates the chat if it's already a tab, otherwise asks the server to reopen it. */
   openFromHistory(id: string) {
     if (store.get().tabs.some((t) => t.id === id)) chat.setActive(id);

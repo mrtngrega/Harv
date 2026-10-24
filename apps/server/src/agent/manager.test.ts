@@ -46,7 +46,11 @@ class FakeSession {
     this.emit({ type: 'chat.done', tabId: this.tabId, ok, stopped: false, usage: { inputTokens: 10, outputTokens: 5, durationMs: 1 } });
   }
 
-  async stop() {}
+  async stop() {
+    if (!this.busy) return;
+    this.busy = false;
+    this.emit({ type: 'chat.done', tabId: this.tabId, ok: false, stopped: true });
+  }
   close() {}
 }
 
@@ -362,6 +366,27 @@ describe('messages typed while Harv works', () => {
     FakeSession.all.get('u')!.finish();
     await settle();
     expect(FakeSession.all.get('u')!.sent.map((s) => s.content)).toEqual(['first']);
+  });
+
+  it('"send now" stops the reply and runs that message first', async () => {
+    const { chats } = setup();
+    await chats.send('n', 'first', 'sonnet', 'medium');
+    await chats.send('n', 'later', 'sonnet', 'medium');
+    await chats.send('n', 'urgent', 'sonnet', 'medium');
+    const urgent = chats
+      .openChats()
+      .find((c) => c.id === 'n')!
+      .queued!.find((q) => q.text === 'urgent')!;
+    await chats.sendNow('n', urgent.id);
+    await settle();
+    const session = FakeSession.all.get('n')!;
+    expect(session.sent.map((s) => s.content)).toEqual(['first', 'urgent']);
+    expect(
+      chats
+        .openChats()
+        .find((c) => c.id === 'n')!
+        .queued!.map((q) => q.text),
+    ).toEqual(['later']);
   });
 });
 

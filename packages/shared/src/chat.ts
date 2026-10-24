@@ -116,6 +116,8 @@ export type ChatClientMessage =
   | { type: 'chat.stop'; tabId: string }
   /** Drop a queued message before it runs. */
   | { type: 'chat.unqueue'; tabId: string; id: string }
+  /** Run a queued message now: the current reply stops and this one goes first. */
+  | { type: 'chat.sendNow'; tabId: string; id: string }
   /** Run the last message again one step up the model·effort ladder. */
   | { type: 'chat.harder'; tabId: string }
   | { type: 'chat.close'; tabId: string }

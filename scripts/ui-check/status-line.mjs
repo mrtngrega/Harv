@@ -33,6 +33,7 @@ console.log('thinking:', await status());
 await page.shot(`status-thinking-${width}`);
 await fake({ type: 'chat.tool', id: 'fake-tool', name: 'PowerShell', detail: 'Get-ChildItem Downloads' });
 await fake({ type: 'chat.progress', outputTokens: 1260 });
+await fake({ type: 'chat.queued', items: [{ id: 'q1', text: 'also check my Desktop folder' }] });
 await page.sleep(1100);
 console.log('working:', await status());
 await page.shot(`status-working-${width}`);

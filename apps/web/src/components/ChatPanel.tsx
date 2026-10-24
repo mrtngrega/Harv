@@ -488,6 +488,14 @@ export function ChatPanel() {
                 <span className="min-w-0 flex-1 truncate text-muted">{q.text || q.files?.join(', ')}</span>
                 <button
                   type="button"
+                  onClick={() => chat.sendNow(active.id, q.id)}
+                  title="Stop the current reply and send this now"
+                  className="flex-none cursor-pointer rounded border border-accent/50 px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent/15"
+                >
+                  send now
+                </button>
+                <button
+                  type="button"
                   onClick={() => chat.unqueue(active.id, q.id)}
                   aria-label="Remove queued message"
                   title="Remove"
@@ -497,7 +505,7 @@ export function ChatPanel() {
                 </button>
               </div>
             ))}
-            <p className="text-[11px] text-faint">Runs when Harv finishes · STOP ends this reply and runs it now</p>
+            <p className="text-[11px] text-faint">Runs when Harv finishes · “send now” stops this reply and sends it right away</p>
           </div>
         )}
 
