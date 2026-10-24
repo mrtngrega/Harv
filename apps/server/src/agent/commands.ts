@@ -55,7 +55,8 @@ export function toCommandInfo(commands: SlashCommand[], terminalOnly: string[] =
   const seen = new Set<string>(['btw']);
   const out: SlashCommandInfo[] = [BTW];
   for (const c of [...commands].sort((a, b) => Number(!!b.builtin) - Number(!!a.builtin))) {
-    if (HIDDEN.has(c.name) || terminalOnly.includes(c.name) || seen.has(c.name)) continue;
+    // Claude Code still lists some commands it has dropped, described as "(removed) …".
+    if (HIDDEN.has(c.name) || terminalOnly.includes(c.name) || seen.has(c.name) || /^\(removed\)/i.test(c.description)) continue;
     seen.add(c.name);
     out.push({ name: c.name, description: c.description, argumentHint: c.argumentHint });
   }

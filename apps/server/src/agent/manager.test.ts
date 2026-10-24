@@ -212,6 +212,17 @@ describe('chat names', () => {
     expect(store.title('blank')).toBe('Ideas');
     expect(store.titleLocked('blank')).toBe(true);
   });
+
+  it('forgets a chat without messages when its tab closes, keeps one with messages', () => {
+    const { chats, store } = setup();
+    chats.rename('tool', 'Terminal');
+    chats.close('tool');
+    expect(store.exists('tool')).toBe(false);
+    store.ensureChat('talk', 'Weather');
+    store.addLine('talk', { kind: 'you', text: 'rain?' });
+    chats.close('talk');
+    expect(store.exists('talk')).toBe(true);
+  });
 });
 
 describe('hand-off between chats', () => {

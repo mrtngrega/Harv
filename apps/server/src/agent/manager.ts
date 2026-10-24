@@ -676,7 +676,9 @@ export class ChatManager {
     this.sessions.get(tabId)?.close();
     this.sessions.delete(tabId);
     if (this.store.exists(tabId)) {
-      this.store.setOpen(tabId, false);
+      // A chat without messages (a renamed tool tab, an untouched project chat) isn't worth keeping.
+      if (this.store.snapshot(tabId)?.lines.length) this.store.setOpen(tabId, false);
+      else this.store.delete(tabId);
       this.publishHistory();
     }
     this.onStatus(this.status);

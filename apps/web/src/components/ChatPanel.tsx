@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type DragEvent, type FormEvent } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { formatSize, uploadAttachment } from '../lib/attachments.ts';
@@ -151,12 +151,26 @@ function dropSlot(bar: HTMLElement, x: number): { id: string; after: boolean } |
   return last ? { id: last.dataset.tab!, after: true } : null;
 }
 
+/** Tailwind's `sm` and up: room for the long placeholder on one line. */
+function useWide(): boolean {
+  const query = '(min-width: 640px)';
+  return useSyncExternalStore(
+    (onChange) => {
+      const mq = window.matchMedia(query);
+      mq.addEventListener('change', onChange);
+      return () => mq.removeEventListener('change', onChange);
+    },
+    () => window.matchMedia(query).matches,
+  );
+}
+
 export function ChatPanel() {
   const { tabs, activeId, settingsOpen, views } = useChat();
   const inSettings = activeId === SETTINGS_TAB;
   const { approvals } = useSafety();
   const usage = useUsage();
   const { density, sendKey } = useSettings();
+  const wide = useWide();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const pendingByTab = useDrafts();
   const draftTexts = useDraftTexts();
@@ -628,7 +642,15 @@ export function ChatPanel() {
                 e.preventDefault();
                 attach(e.clipboardData.files);
               }}
-              placeholder={active?.busy ? 'queue a message · it runs when Harv finishes' : 'ask anything · / for commands'}
+              placeholder={
+                active?.busy
+                  ? wide
+                    ? 'queue a message · it runs when Harv finishes'
+                    : 'queue a message'
+                  : wide
+                    ? 'ask anything · / for commands'
+                    : 'ask anything'
+              }
               title={`${sendKey === 'enter' ? 'Enter sends, Shift+Enter' : 'Ctrl+Enter sends, Enter'} makes a new line. /help lists the commands.`}
               className="max-h-40 min-h-11 min-w-0 flex-1 resize-none overflow-y-hidden bg-transparent py-3 text-sm leading-5 outline-none placeholder:text-faint"
             />
