@@ -293,15 +293,72 @@ export const onLayoutRestore = (fn: (ui: UiState) => void) => void restoreListen
 export const layoutRestored = () => restored;
 export const subscribeChat = store.subscribe;
 
+/**
+ * Chats from before Harv started that still wait for "continue or new session".
+ * Each chat asks on its own, inside its tab, whenever the user opens it.
+ */
+export const startQuestions = createStore<string[]>([]);
+
+/**
+ * Chats already answered since the server started (`boot` = its start time), kept
+ * in localStorage so a page reload (Vite reloads it on some edits) doesn't ask again.
+ */
+const ANSWERED_KEY = 'harv.startAnswered';
+let boot: number | null = null;
+function answered(): string[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(ANSWERED_KEY) ?? 'null') as { boot: number; ids: string[] } | null;
+    return saved?.boot === boot ? saved.ids : [];
+  } catch {
+    return [];
+  }
+}
+function markAnswered(id: string) {
+  try {
+    localStorage.setItem(ANSWERED_KEY, JSON.stringify({ boot, ids: [...answered(), id] }));
+  } catch {
+    // No storage: a reload just asks again.
+  }
+}
+
+/** On a fresh server start, every chat with messages asks once (unless answered before a reload). */
+function askOnStart(chats: ChatSnapshot[], startedAt: number | undefined) {
+  if (startedAt === boot) return;
+  const first = boot === null;
+  boot = startedAt ?? 0;
+  // A reconnect to the same server (no startedAt from an older server) isn't a new start.
+  if (!first && !startedAt) return;
+  const done = answered();
+  startQuestions.set(chats.filter((c) => c.lines.length > 0 && !done.includes(c.id)).map((c) => c.id));
+}
+
+/**
+ * The answer for one chat. "continue" keeps its tab and session. "new" swaps the
+ * tab for a blank chat in the same place (the old chat stays in history), so the
+ * next message starts a fresh session.
+ */
+export function answerStart(tabId: string, choice: 'continue' | 'new') {
+  startQuestions.set((ids) => ids.filter((id) => id !== tabId));
+  markAnswered(tabId);
+  if (choice === 'continue') return;
+  const at = store.get().tabs.findIndex((t) => t.id === tabId);
+  chat.closeTab(tabId);
+  const blank = blankTab();
+  store.set((s) => ({ ...s, tabs: [...s.tabs.slice(0, at), blank, ...s.tabs.slice(at)], activeId: blank.id }));
+}
+
 onServerMessage((msg) => {
   if (msg.type === 'hello') {
-    hydrate(msg.chats, restored ? undefined : msg.ui);
-    if (!restored) {
+    if (restored) {
+      hydrate(msg.chats);
+    } else {
+      hydrate(msg.chats, msg.ui);
       restored = true;
       // Settings › AUTO: start on AUTO instead of the last model picked.
       if (msg.settings.startModel === 'auto') store.set((s) => ({ ...s, model: 'auto' }));
       restoreListeners.forEach((fn) => fn(msg.ui));
     }
+    askOnStart(msg.chats, msg.startedAt);
     history.set({ items: msg.history, query: '' });
     if (history.get().query) sendMessage({ type: 'history.search', query: history.get().query });
   } else if (msg.type === 'chat.project') {

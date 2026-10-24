@@ -220,3 +220,5 @@ The user's wish: Harv is the only AI they use, half of it for dev sessions like 
 - Confirm Claude Code is logged in with that subscription (`claude` → `/status`).
 - ~~LibreHardwareMonitor~~: installed and configured by Claude (M1). Harv starts it.
 - ~~Extra usage~~: confirmed **off** via the `/usage` report (2026-10-22).
+
+**Update 2026-10-24 (evening):** every registered project folder is trusted from any chat, not only from project chats. A command that starts by changing into a project (`cd`, `Set-Location`, `git -C`), or an edit to a file in one, gets the project rules (`projectOfCommand` in `classify.ts`). Read-only chains that mix git reads, `sed -n` and other reads are green everywhere. Claude Code's project memory may be read by shell commands, and reading Harv's logs is allowed (changing Harv's data stays blocked). Plain chats are told to call `open_project` first when the user wants to work on a project. Why: a plain chat developing Harv got an approval card for every `grep`/`sed`/`npm test`.

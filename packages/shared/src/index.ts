@@ -47,6 +47,8 @@ export type ServerMessage =
       ui: UiState;
       /** Folders Harv works on as projects. */
       projects: Project[];
+      /** When this server started (ms): a new value tells the dashboard Harv was restarted. */
+      startedAt: number;
     }
   /** `detail` names the running tool while working. */
   | { type: 'harv.status'; status: HarvStatus; detail?: string }

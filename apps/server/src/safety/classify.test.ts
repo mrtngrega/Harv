@@ -247,3 +247,68 @@ describe('project chats (trusted project folder)', () => {
     expect(classify('Write', { file_path: join(claudeHome, 'projects', 'C--x', 'memory', '..', '..', 'x.md') }, ctx).tier).toBe('blocked');
   });
 });
+
+describe('registered projects, from any chat', () => {
+  const project = join(userDir, 'harv-repo');
+  mkdirSync(join(project, 'apps'), { recursive: true });
+  const bash = project.replace(/^([A-Za-z]):\\/, (_m, d: string) => `/${d.toLowerCase()}/`).replace(/\\/g, '/');
+  const ctx = { projects: [project] };
+  const run = (command: string) => classify('Bash', { command }, ctx).tier;
+
+  it('trusts commands that cd into a registered project (the cards from 2026-10-24)', () => {
+    expect(
+      run(
+        `cd "${bash}" && npm run typecheck 2>&1 | tail -15; npx eslint apps/web/src/App.tsx 2>&1 | tail -15; npx vitest run apps/web 2>&1 | tail -15`,
+      ),
+    ).toBe('green');
+    expect(run(`cd "${project}"; npm test`)).toBe('green');
+    expect(run(`Set-Location '${project}'; git add -A; git commit -m "x"`)).toBe('green');
+    expect(run(`git -C "${bash}" status`)).toBe('green');
+  });
+
+  it('keeps the risky kinds and anything outside the project asking', () => {
+    expect(run(`cd "${bash}" && git push`)).toBe('red');
+    expect(run(`cd "${bash}" && rm -rf "${userDir}"`)).toBe('red');
+    expect(run(`cd "${bash}" && rm -rf ../..`)).toBe('red');
+    expect(run(`cd "${userDir}" && npm test`)).toBe('red');
+    expect(run('npm test')).toBe('red');
+    expect(classify('Bash', { command: `cd "${bash}" && npm test` }).tier).toBe('red');
+  });
+
+  it('trusts file edits inside a registered project from any chat', () => {
+    expect(classify('Write', { file_path: join(project, 'apps', 'x.ts') }, ctx).tier).toBe('green');
+    expect(classify('Write', { file_path: join(project, '.env') }, ctx).tier).toBe('blocked');
+    expect(classify('Edit', { file_path: userFile }, ctx).tier).toBe('yellow');
+  });
+});
+
+describe('read-only command chains', () => {
+  it('lets git reads mix with other reads, and sed -n print lines', () => {
+    for (const c of [
+      'git status --short | head -20; git log --oneline | head -5; ls -la',
+      'sed -n 140,200p apps/web/src/lib/chatStore.ts; echo ----; grep -n close apps/web/src/lib/chatStore.ts | head',
+      "sed -n '1,12p' a.ts",
+      'cat a.ts | head -40',
+    ]) {
+      expect(cmd(c), c).toBe('green');
+    }
+    for (const c of ["sed -i 's/a/b/' a.ts", "sed 's/a/b/w out.txt' a.ts", 'git status; rm a.ts', 'git log; npm test']) {
+      expect(cmd(c), c).not.toBe('green');
+    }
+  });
+
+  it("reads Claude Code's project memory but nothing else under .claude", () => {
+    expect(cmd('ls ~/.claude/projects/C--My-files-Code-Harv/memory/')).toBe('green');
+    expect(cmd('cat ~/.claude/projects/C--x/memory/notes.md')).toBe('green');
+    expect(cmd('cat ~/.claude/.credentials.json')).toBe('blocked');
+    expect(cmd('cat ~/.claude/settings.json')).toBe('blocked');
+    expect(cmd('ls ~/.claude/projects/C--x/memory/ && cat ~/.claude/settings.json')).toBe('blocked');
+  });
+
+  it("reads Harv's logs, never changes Harv's data", () => {
+    expect(cmd('tail -n 25 ~/.harv/logs/harv.log')).toBe('green');
+    expect(cmd('f=$(ls -t ~/.harv/logs/*); tail "$f"')).toBe('red');
+    expect(cmd('rm ~/.harv/harv.db')).toBe('blocked');
+    expect(cmd('echo x > ~/.harv/settings.json')).toBe('blocked');
+  });
+});

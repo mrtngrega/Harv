@@ -20,6 +20,8 @@ export interface GateHooks {
   onChange: () => void;
   /** The project folder a chat works in (project mode trusts it), if any. */
   projectOf?: (tabId: string) => string | undefined;
+  /** Every registered project folder: trusted from any chat, not only project chats. */
+  projects?: () => string[];
 }
 
 type Decision = { approve: boolean; command?: string; why?: string };
@@ -102,7 +104,7 @@ export class SafetyGate {
 
   /** The PreToolUse hook. Red calls wait here until the user answers the approval card. */
   async preToolUse(tabId: string, tool: string, input: Record<string, unknown>, id: string, signal: AbortSignal): Promise<HookJSONOutput> {
-    const ctx = { project: this.hooks.projectOf?.(tabId) };
+    const ctx = { project: this.hooks.projectOf?.(tabId), projects: this.hooks.projects?.() };
     const verdict = classify(tool, input, ctx);
     const at = Date.now();
     // Red always asks; yellow asks too when the user turned on "confirm changes" in Settings.
@@ -204,7 +206,10 @@ export class SafetyGate {
 
   /** Backstop for Claude Code's own permission prompts: never let a red call through without an approval. */
   async canUseTool(tool: string, input: Record<string, unknown>, id: string, tabId?: string): Promise<PermissionResult> {
-    const verdict = classify(tool, input, { project: tabId ? this.hooks.projectOf?.(tabId) : undefined });
+    const verdict = classify(tool, input, {
+      project: tabId ? this.hooks.projectOf?.(tabId) : undefined,
+      projects: this.hooks.projects?.(),
+    });
     if (verdict.tier === 'blocked') return { behavior: 'deny', message: verdict.reason };
     if (verdict.tier === 'red' && !this.approved.has(id)) return { behavior: 'deny', message: 'This needs the user’s approval first.' };
     return { behavior: 'allow', updatedInput: input };

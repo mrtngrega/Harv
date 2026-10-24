@@ -26,3 +26,24 @@ How I want you to work (it's all in CLAUDE.md, harv/dev-rules.md and your memory
 - When I say bye or that we're done for today, do the full wrap-up (checks, docs, commit + push, memory, a resume phrase), but don't stop the servers.
 
 Start by opening the project and telling me where we ended.
+
+---
+
+## Update 2026-10-24 (later): start prompt, not committed yet
+
+Working tree changes (not committed or pushed):
+- `apps/web/src/lib/chatStore.ts`: on the first connect every chat comes back as before (`openRestored`). Chats that have messages go into `startQueue`, one per chat. `answerStart('continue' | 'new')` pops the queue. "New" closes that one tab with `chat.closeTab`, so the chat stays in history.
+- `apps/web/src/components/StartChoice.tsx` (new): a blurred dialog, "Continue “<title>”?", with "Continue session" / "New session", one chat at a time ("Chat 1 of N from last time"). Mounted in `App.tsx`.
+- `Harv_ideas.txt` is Martin's file and was already modified. Don't commit it without asking.
+
+Checks: typecheck, eslint and `vitest run apps/web` (22 tests) pass. Not yet looked at in the live dashboard.
+
+Open items:
+- Martin said the popups felt unnecessary. Ask whether he wants them at all, or a Settings switch to turn them off, before going further.
+- Martin said the whole Harv restarted when he didn't ask. Nothing in that session ran a restart. Find out why before any more restarts.
+- Martin's ideas list (`Harv_ideas.txt`) has 4 items: (1) startup prompt (done, needs his check); (2) memory across chats (answer: yes, a recent-chat list is in the prompt, and `list_chats` / `read_chat` are used on request); (3) Claude Code style tools (skills, MCP servers, an artifacts panel, scheduled routines; claude.ai's Claude Design and plugins don't run here); (4) "full Jarvis" ideas (voice, morning briefing, hotkey, PC watchdog, job-bot control, study helper, car log and more). He hasn't picked any yet.
+- Memory `no-unneeded-prompts` saved: no confirmation popups, full access to his files and projects, no restarts unless he asks.
+
+Resume phrase: "Continue Harv: read the handoff's 2026-10-24 (later) update, check the start prompt in the dashboard, and ask me whether I want it off."
+
+**Resolved later the same evening (Claude Code):** the start question now sits inside each chat's own tab (only that chat is blurred, answer whenever you open it, a `?` marks waiting tabs). "New session" swaps that tab for a blank chat in the same place. The "restart" was Vite reloading the dashboard page after `chatStore.ts` was edited; the server never restarted (harv-script.log). The cards came from a plain chat (not a project chat) working in the Harv folder: registered projects are now trusted from any chat, read-only chains are green, and plain chats call `open_project` first.

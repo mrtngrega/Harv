@@ -42,6 +42,8 @@ import { TerminalManager } from './tools/terminal.ts';
 const removed = stripBilledCredentials();
 ensureHarvHome();
 
+/** Sent in hello: the dashboard asks "continue or new session?" once per server start. */
+const STARTED_AT = Date.now();
 const app = Fastify({ logger: { level: 'info' } });
 await app.register(websocket);
 
@@ -79,6 +81,7 @@ const gate = new SafetyGate(actions, {
   onChange: () => chats.refreshStatus(),
   // Project chats: the project folder is trusted (docs/PLAN.md §6f).
   projectOf: (tabId) => store.projectOf(tabId)?.path,
+  projects: () => store.projects().map((p) => p.path),
 });
 const routes = new RouteStore(join(HARV_HOME, 'harv.db'));
 const meter = new UsageMeter(
@@ -325,6 +328,7 @@ app.get('/ws', { websocket: true }, (socket) => {
     background: backgroundVersion(),
     ui: loadUi(),
     projects: store.projects(),
+    startedAt: STARTED_AT,
   });
 
   const unsubscribe = metrics.onSnapshot((snapshot) => send({ type: 'metrics.tick', metrics: snapshot }));

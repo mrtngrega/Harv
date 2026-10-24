@@ -72,6 +72,27 @@ export function isClaudeMemory(p: string): boolean {
 /** Where a call runs: in a project chat, the project folder (trusted, and the base for relative paths). */
 export interface ClassifyContext {
   project?: string;
+  /**
+   * Every registered project folder. Any chat working inside one gets the project's
+   * trust (a command that starts with `cd <project>`, or a file in it).
+   */
+  projects?: string[];
+}
+
+/** Claude Code's project memory folders named in a command (allowed, although they're under .claude). */
+const CLAUDE_MEMORY_IN_COMMAND = /\S*\.claude[\\/]projects[\\/][^\s"'\\/]+[\\/]memory\b[^\s"']*/gi;
+
+/** The registered project a command works in: it starts with `cd`/`Set-Location`/`pushd` (or `git -C`) into one. */
+export function projectOfCommand(command: string, projects: string[]): string | undefined {
+  const [first = ''] = splitCommand(command);
+  const ws = words(first).map(unquote);
+  const cmd = (ws[0] ?? '').toLowerCase();
+  let target: string | undefined;
+  if (['cd', 'chdir', 'set-location', 'sl', 'pushd'].includes(cmd)) target = ws.slice(1).find((w) => !w.startsWith('-'));
+  else if (cmd === 'git' && ws[1] === '-C') target = ws[2];
+  if (!target || /[$`%*?]/.test(target)) return undefined;
+  const path = toWindowsPath(target);
+  return projects.find((p) => isInside(path, p));
 }
 
 export function classify(tool: string, input: Record<string, unknown>, ctx: ClassifyContext = {}): Verdict {
@@ -87,9 +108,17 @@ export function classify(tool: string, input: Record<string, unknown>, ctx: Clas
     return verdict('green', 'Reading and searching is always allowed.', `${tool} ${paths[0] ?? str(input, 'query') ?? str(input, 'url')}`);
   }
 
-  if (FILE_WRITE_TOOLS.includes(tool)) return classifyFileWrite(tool, str(input, 'file_path') || str(input, 'notebook_path'), ctx);
+  if (FILE_WRITE_TOOLS.includes(tool)) {
+    const file = str(input, 'file_path') || str(input, 'notebook_path');
+    const inProject = ctx.project ?? (file ? ctx.projects?.find((p) => isInside(toWindowsPath(file), p)) : undefined);
+    return classifyFileWrite(tool, file, { ...ctx, project: inProject });
+  }
 
-  if (SHELL_TOOLS.includes(tool)) return classifyCommand(str(input, 'command'), str(input, 'description'), ctx);
+  if (SHELL_TOOLS.includes(tool)) {
+    const command = str(input, 'command');
+    const inProject = ctx.project ?? projectOfCommand(command, ctx.projects ?? []);
+    return classifyCommand(command, str(input, 'description'), { ...ctx, project: inProject });
+  }
 
   return verdict('blocked', `${tool} isn't one of Harv's tools.`, tool);
 }
@@ -276,6 +305,8 @@ function isGreenSegment(segment: string): boolean {
     return !/\s-(pl|r|ac|lgc|pm|rac)\b|--(power-limit|gpu-reset|applications-clocks|lock-gpu-clocks)/i.test(segment);
   if (first === 'ipconfig') return !/\/(release|renew)/i.test(segment);
   if (first === 'find') return !/-(delete|exec|execdir|ok|fprint)/.test(segment);
+  // Printing lines (`sed -n '5,20p' file`); anything else sed can do may write.
+  if (first === 'sed') return /^sed\s+-n\s+(["']?)[\d,$;p]+\1(\s|$)/.test(segment) && !/\s(-i|--in-place)/.test(segment);
   if (/^get-[a-z]+$/.test(first)) return !/get-(credential|storedcredential)/.test(first);
   return GREEN_COMMANDS.has(first);
 }
@@ -289,7 +320,7 @@ export function classifyCommand(command: string, description = '', ctx: Classify
   for (const [re, what] of BLOCKED_COMMANDS) {
     if (re.test(command)) return verdict('blocked', `Blocked: this ${what}. Only you can unblock that, in Harv's settings.`, summary);
   }
-  if (SENSITIVE_PATHS.some((re) => re.test(command.replace(/["']/g, ' ')))) {
+  if (SENSITIVE_PATHS.some((re) => re.test(command.replace(CLAUDE_MEMORY_IN_COMMAND, ' ').replace(/["']/g, ' ')))) {
     return verdict('blocked', 'Blocked: it touches files that may hold credentials or secrets.', summary);
   }
 
@@ -298,13 +329,16 @@ export function classifyCommand(command: string, description = '', ctx: Classify
   const tokens = segments.flatMap((s) => words(s).map((w) => unquote(w).toLowerCase()));
   const changing = tokens.some((t) => CHANGING_WORDS.has(t)) || CHANGING_CMDLET.test(command);
 
+  // git's read-only subcommands and `sed -n` are fine although "git" and "sed" are on the changing list.
+  const readOnly = (segment: string) => {
+    if (!isGreenSegment(segment)) return false;
+    const ws = words(segment).map((w) => unquote(w).toLowerCase());
+    return ['git', 'sed'].includes(ws[0] ?? '') || !ws.some((t) => CHANGING_WORDS.has(t));
+  };
+
   if (!substitutes && !writesFile(command) && segments.length > 0) {
     if (segments.length === 1 && isOpenApp(segments[0]!)) return verdict('green', 'Opens an app, page or document.', summary);
-    if (!changing && segments.every(isGreenSegment)) return verdict('green', 'Only reads information.', summary);
-    // git's read-only subcommands are fine even though "git" is on the changing list.
-    if (segments.every((s) => /^git\s/i.test(s) && isGreenSegment(s)) && !CHANGING_CMDLET.test(command)) {
-      return verdict('green', 'Only reads information.', summary);
-    }
+    if (segments.every(readOnly) && !CHANGING_CMDLET.test(command)) return verdict('green', 'Only reads information.', summary);
   }
 
   const folders = newFolders(command, cwd);
@@ -318,7 +352,8 @@ export function classifyCommand(command: string, description = '', ctx: Classify
   if (mentions(isWindowsDir, /\b[a-z]:[\\/]windows\b|\/c\/windows\b|%windir%|%systemroot%|\$env:(windir|systemroot)/i)) {
     return verdict('blocked', 'Blocked: Harv never changes the Windows folder.', summary);
   }
-  if (mentions(isHarvData, /\.harv[\\/](?!workspace)/i)) {
+  // Reading Harv's logs or settings is fine; anything that could change them is blocked.
+  if ((changing || writesFile(command)) && mentions(isHarvData, /\.harv[\\/](?!workspace)/i)) {
     return verdict('blocked', "Blocked: Harv's database, backups and memory are only changed by Harv itself.", summary);
   }
   if (ctx.project) {

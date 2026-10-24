@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { applyChatEvent, chat, getChatState } from './chatStore.ts';
+import { answerStart, applyChatEvent, chat, getChatState, startQuestions } from './chatStore.ts';
 
 vi.mock('./socket.ts', () => ({ onServerMessage: () => {}, sendMessage: () => true }));
 
@@ -13,7 +13,10 @@ const tab = (id: string) => getChatState().tabs.find((t) => t.id === id)!;
 describe('tab order', () => {
   it('moves a tab before or after another', () => {
     const [a, b, c] = [openTab(), openTab(), openTab()];
-    const order = () => getChatState().tabs.map((t) => t.id).filter((id) => [a, b, c].includes(id));
+    const order = () =>
+      getChatState()
+        .tabs.map((t) => t.id)
+        .filter((id) => [a, b, c].includes(id));
     expect(order()).toEqual([a, b, c]);
     chat.moveTab(c, a, false);
     expect(order()).toEqual([c, a, b]);
@@ -127,5 +130,25 @@ describe('blank tabs', () => {
     expect(tab(tabId).stored).toBeFalsy();
     chat.send('hello');
     expect(tab(tabId).stored).toBe(true);
+  });
+});
+
+describe('start question (continue or new session)', () => {
+  it('asks each chat on its own; "new" swaps just that tab for a blank chat in the same place', () => {
+    const [a, b, c] = [openTab(), openTab(), openTab()];
+    startQuestions.set([a, b]);
+    answerStart(a, 'continue');
+    expect(startQuestions.get()).toEqual([b]);
+    expect(tab(a)).toBeDefined();
+
+    const ids = () => getChatState().tabs.map((t) => t.id);
+    const at = ids().indexOf(b);
+    answerStart(b, 'new');
+    expect(startQuestions.get()).toEqual([]);
+    expect(ids()).not.toContain(b);
+    const blank = ids()[at]!;
+    expect(tab(blank).lines).toEqual([]);
+    expect(getChatState().activeId).toBe(blank);
+    expect(ids()[at + 1]).toBe(c);
   });
 });

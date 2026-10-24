@@ -5,10 +5,11 @@ import { formatSize, uploadAttachment } from '../lib/attachments.ts';
 import { lineTime, resetTime, tokens } from '../lib/format.ts';
 import { HELP, parseCommand } from '../lib/commands.ts';
 import { useSettings, useUsage } from '../lib/useHarvSocket.ts';
-import { chat, getChatState, SETTINGS_TAB, useChat, type Line } from '../lib/chatStore.ts';
+import { chat, getChatState, SETTINGS_TAB, startQuestions, useChat, type Line } from '../lib/chatStore.ts';
 import { useSafety } from '../lib/safetyStore.ts';
 import { ActionBadge, ApprovalCard } from './ApprovalCard.tsx';
 import { SettingsView } from './SettingsView.tsx';
+import { StartChoice } from './StartChoice.tsx';
 import { SpecialTab, TOOL_ICONS, ViewMenu } from './tools/TabParts.tsx';
 import { setDraftText, updatePending, useDrafts, useDraftTexts } from '../lib/drafts.ts';
 
@@ -168,6 +169,9 @@ export function ChatPanel() {
   const waiting = approvals.filter((a) => a.tabId === activeId);
   // "Try harder" sits on the newest reply, once the tab is idle.
   const lastReplyId = active?.lines.findLast((l) => l.kind === 'harv' && l.tag)?.id;
+  // Chats from before Harv started ask "continue or new session?" in their own tab (not while a turn runs in them).
+  const asking = startQuestions.use();
+  const askHere = !inSettings && view === 'chat' && active && !active.busy && asking.includes(active.id);
 
   // Esc is the stop hotkey: it halts the active tab and denies its waiting approvals.
   useEffect(() => {
@@ -362,6 +366,11 @@ export function ChatPanel() {
                     className={`flex min-h-9 cursor-pointer items-center gap-1.5 truncate pr-1 pl-3 text-xs ${on ? 'text-ink' : 'text-muted'}`}
                   >
                     {t.busy && <span aria-hidden="true" className="animate-blink size-1.5 flex-none rounded-full bg-accent" />}
+                    {!t.busy && asking.includes(t.id) && (
+                      <span aria-hidden="true" title="Asks: continue or new session" className="flex-none text-accent">
+                        ?
+                      </span>
+                    )}
                     {t.projectId && (
                       <span aria-hidden="true" title="Project chat" className="flex-none text-accent">
                         ▣
@@ -417,144 +426,148 @@ export function ChatPanel() {
         {active && <ViewMenu tabId={active.id} />}
       </div>
 
-      {inSettings ? (
-        <div className="flex flex-1 flex-col overflow-y-auto px-5 py-4">
-          <SettingsView />
-        </div>
-      ) : active && view === 'terminal' ? (
-        <Suspense fallback={<p className="m-auto text-muted">Starting the terminal…</p>}>
-          <TerminalView key={active.id} chatId={active.id} />
-        </Suspense>
-      ) : active && view === 'files' ? (
-        <Suspense fallback={<p className="m-auto text-muted">Opening the explorer…</p>}>
-          <Explorer key={active.id} id={active.id} />
-        </Suspense>
-      ) : (
-        <div
-          ref={logRef}
-          className={`flex flex-1 flex-col overflow-y-auto px-5 ${density === 'compact' ? 'gap-1.5 py-3 leading-normal' : 'gap-3.5 py-4 leading-relaxed'}`}
-        >
-          {!active || active.lines.length === 0 ? (
-            <p className="m-auto text-center text-muted">
-              {active ? 'New chat. Ask Harv anything.' : 'No chat open. Press + to start one.'}
-            </p>
-          ) : (
-            active.lines.map((l) => (
-              <ChatLine key={l.id} line={l} onHarder={!active.busy && l.id === lastReplyId ? () => chat.harder(active.id) : undefined} />
-            ))
-          )}
-          {waiting.map((a) => (
-            <ApprovalCard key={a.id} approval={a} />
-          ))}
-        </div>
-      )}
-
-      {dragging && (
-        <div className="pointer-events-none absolute inset-2 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-[rgb(10_16_24/0.7)] text-accent">
-          drop files to attach
-        </div>
-      )}
-
-      {!nonChat && pending.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 border-t border-line px-5 pt-2.5">
-          {pending.map((p) => (
-            <FileChip
-              key={p.key}
-              name={p.name}
-              detail={p.error ? `! ${p.error}` : p.file ? formatSize(p.size) : 'uploading…'}
-              onRemove={() => activeId && updatePending(activeId, (list) => list.filter((x) => x.key !== p.key))}
-            />
-          ))}
-        </div>
-      )}
-
-      {!nonChat && usage?.pausedUntil && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 pt-2 text-xs text-warn">
-          <span>
-            Claude Pro limit reached: messages queue until {resetTime(usage.pausedUntil)}
-            {usage.queued > 0 && ` (${usage.queued} waiting)`}.
-          </span>
-          {active && usage.queued > 0 && (
-            <button
-              type="button"
-              onClick={() => chat.stop(active.id)}
-              className="cursor-pointer rounded px-1.5 text-muted hover:bg-white/10 hover:text-ink"
-            >
-              cancel this tab’s queue
-            </button>
-          )}
-        </div>
-      )}
-
-      {!nonChat && (
-        <form onSubmit={send} className="flex items-end gap-2.5 border-t border-line py-2.5 pr-3 pl-5">
-          <label htmlFor="harv-cmd" className="pb-3 leading-5 font-semibold text-accent">
-            harv&gt;
-          </label>
-          <textarea
-            ref={inputRef}
-            id="harv-cmd"
-            rows={1}
-            autoComplete="off"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
-              // Settings › Chat: Enter sends (Shift+Enter = new line), or Ctrl+Enter sends (Enter = new line).
-              const sends = sendKey === 'enter' ? !e.shiftKey : e.ctrlKey;
-              if (!sends) return;
-              e.preventDefault();
-              e.currentTarget.form?.requestSubmit();
-            }}
-            onPaste={(e) => {
-              // Pasted screenshots arrive as files.
-              if (e.clipboardData.files.length === 0) return;
-              e.preventDefault();
-              attach(e.clipboardData.files);
-            }}
-            placeholder="ask anything · /help"
-            title={`${sendKey === 'enter' ? 'Enter sends, Shift+Enter' : 'Ctrl+Enter sends, Enter'} makes a new line. /help lists the commands.`}
-            className="max-h-40 min-h-11 min-w-0 flex-1 resize-none overflow-y-hidden bg-transparent py-3 text-sm leading-5 outline-none placeholder:text-faint"
-          />
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              if (e.target.files) attach(e.target.files);
-              e.target.value = '';
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            aria-label="Attach files"
-            title="Attach files (or drop them on the chat, or paste a screenshot)"
-            className="min-h-11 cursor-pointer rounded-[10px] border border-[rgb(220_232_245/0.2)] bg-white/5 px-3.5 text-xs hover:bg-white/10"
+      {/* Everything under the tab bar, so a chat's start question covers only this part. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {inSettings ? (
+          <div className="flex flex-1 flex-col overflow-y-auto px-5 py-4">
+            <SettingsView />
+          </div>
+        ) : active && view === 'terminal' ? (
+          <Suspense fallback={<p className="m-auto text-muted">Starting the terminal…</p>}>
+            <TerminalView key={active.id} chatId={active.id} />
+          </Suspense>
+        ) : active && view === 'files' ? (
+          <Suspense fallback={<p className="m-auto text-muted">Opening the explorer…</p>}>
+            <Explorer key={active.id} id={active.id} />
+          </Suspense>
+        ) : (
+          <div
+            ref={logRef}
+            className={`flex flex-1 flex-col overflow-y-auto px-5 ${density === 'compact' ? 'gap-1.5 py-3 leading-normal' : 'gap-3.5 py-4 leading-relaxed'}`}
           >
-            +<span className="hidden sm:inline"> ATTACH</span>
-          </button>
-          {active?.busy ? (
+            {!active || active.lines.length === 0 ? (
+              <p className="m-auto text-center text-muted">
+                {active ? 'New chat. Ask Harv anything.' : 'No chat open. Press + to start one.'}
+              </p>
+            ) : (
+              active.lines.map((l) => (
+                <ChatLine key={l.id} line={l} onHarder={!active.busy && l.id === lastReplyId ? () => chat.harder(active.id) : undefined} />
+              ))
+            )}
+            {waiting.map((a) => (
+              <ApprovalCard key={a.id} approval={a} />
+            ))}
+          </div>
+        )}
+
+        {dragging && (
+          <div className="pointer-events-none absolute inset-2 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-[rgb(10_16_24/0.7)] text-accent">
+            drop files to attach
+          </div>
+        )}
+
+        {!nonChat && pending.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 border-t border-line px-5 pt-2.5">
+            {pending.map((p) => (
+              <FileChip
+                key={p.key}
+                name={p.name}
+                detail={p.error ? `! ${p.error}` : p.file ? formatSize(p.size) : 'uploading…'}
+                onRemove={() => activeId && updatePending(activeId, (list) => list.filter((x) => x.key !== p.key))}
+              />
+            ))}
+          </div>
+        )}
+
+        {!nonChat && usage?.pausedUntil && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 pt-2 text-xs text-warn">
+            <span>
+              Claude Pro limit reached: messages queue until {resetTime(usage.pausedUntil)}
+              {usage.queued > 0 && ` (${usage.queued} waiting)`}.
+            </span>
+            {active && usage.queued > 0 && (
+              <button
+                type="button"
+                onClick={() => chat.stop(active.id)}
+                className="cursor-pointer rounded px-1.5 text-muted hover:bg-white/10 hover:text-ink"
+              >
+                cancel this tab’s queue
+              </button>
+            )}
+          </div>
+        )}
+
+        {!nonChat && (
+          <form onSubmit={send} className="flex items-end gap-2.5 border-t border-line py-2.5 pr-3 pl-5">
+            <label htmlFor="harv-cmd" className="pb-3 leading-5 font-semibold text-accent">
+              harv&gt;
+            </label>
+            <textarea
+              ref={inputRef}
+              id="harv-cmd"
+              rows={1}
+              autoComplete="off"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+                // Settings › Chat: Enter sends (Shift+Enter = new line), or Ctrl+Enter sends (Enter = new line).
+                const sends = sendKey === 'enter' ? !e.shiftKey : e.ctrlKey;
+                if (!sends) return;
+                e.preventDefault();
+                e.currentTarget.form?.requestSubmit();
+              }}
+              onPaste={(e) => {
+                // Pasted screenshots arrive as files.
+                if (e.clipboardData.files.length === 0) return;
+                e.preventDefault();
+                attach(e.clipboardData.files);
+              }}
+              placeholder="ask anything · /help"
+              title={`${sendKey === 'enter' ? 'Enter sends, Shift+Enter' : 'Ctrl+Enter sends, Enter'} makes a new line. /help lists the commands.`}
+              className="max-h-40 min-h-11 min-w-0 flex-1 resize-none overflow-y-hidden bg-transparent py-3 text-sm leading-5 outline-none placeholder:text-faint"
+            />
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => {
+                if (e.target.files) attach(e.target.files);
+                e.target.value = '';
+              }}
+            />
             <button
               type="button"
-              onClick={() => chat.stop(active.id)}
-              title="Stop (Esc)"
-              className="min-h-11 cursor-pointer rounded-[10px] bg-warn px-4 text-xs font-semibold text-[#0f1620]"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Attach files"
+              title="Attach files (or drop them on the chat, or paste a screenshot)"
+              className="min-h-11 cursor-pointer rounded-[10px] border border-[rgb(220_232_245/0.2)] bg-white/5 px-3.5 text-xs hover:bg-white/10"
             >
-              STOP ■
+              +<span className="hidden sm:inline"> ATTACH</span>
             </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={uploading}
-              className="min-h-11 cursor-pointer rounded-[10px] bg-accent px-4 text-xs font-semibold text-[#0f1620] disabled:cursor-wait disabled:opacity-60"
-            >
-              RUN ⏎
-            </button>
-          )}
-        </form>
-      )}
+            {active?.busy ? (
+              <button
+                type="button"
+                onClick={() => chat.stop(active.id)}
+                title="Stop (Esc)"
+                className="min-h-11 cursor-pointer rounded-[10px] bg-warn px-4 text-xs font-semibold text-[#0f1620]"
+              >
+                STOP ■
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={uploading}
+                className="min-h-11 cursor-pointer rounded-[10px] bg-accent px-4 text-xs font-semibold text-[#0f1620] disabled:cursor-wait disabled:opacity-60"
+              >
+                RUN ⏎
+              </button>
+            )}
+          </form>
+        )}
+        {askHere && <StartChoice key={active.id} tabId={active.id} title={active.title} />}
+      </div>
     </section>
   );
 }
