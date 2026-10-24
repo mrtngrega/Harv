@@ -99,16 +99,22 @@ export const DEFAULT_WARN: WarnThresholds = { session: [75, 90, 95], weekly: [75
 
 /**
  * The thresholds a meter has newly crossed: the highest one only, so a jump
- * from 70% to 96% gives one warning, not three. `warned` remembers what was
- * said per window (its reset time), and is updated.
+ * from 70% to 96% gives one warning, not three. `warned` remembers which marks
+ * were already announced, and is updated.
  */
 export function newWarning(m: PlanMeter, thresholds: WarnThresholds, warned: Set<string>): UsageWarning | null {
   const kind = m.kind === 'session' ? 'session' : m.kind === 'weekly_all' ? 'weekly' : null;
   if (!kind || m.percent >= 100) return null;
-  const window = `${kind}:${m.resetsAt ?? 'unknown'}`;
-  const crossed = thresholds[kind].filter((t) => m.percent >= t && !warned.has(`${window}:${t}`));
+  // Not keyed on the reset time: /usage and live events report it slightly differently,
+  // which used to repeat a warning. A window counts as new once usage falls well below
+  // the lowest mark (a real reset); small wobbles around a mark stay quiet.
+  const marks = thresholds[kind];
+  if (marks.length > 0 && m.percent < Math.min(...marks) - 10) {
+    for (const t of marks) warned.delete(`${kind}:${t}`);
+  }
+  const crossed = marks.filter((t) => m.percent >= t && !warned.has(`${kind}:${t}`));
   if (crossed.length === 0) return null;
-  for (const t of crossed) warned.add(`${window}:${t}`);
+  for (const t of crossed) warned.add(`${kind}:${t}`);
   return { kind, label: m.label, percent: Math.round(m.percent), threshold: Math.max(...crossed), resetsAt: m.resetsAt };
 }
 

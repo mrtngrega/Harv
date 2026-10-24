@@ -127,7 +127,12 @@ describe('usage warnings and refresh pace', () => {
     // A jump past two thresholds gives one warning.
     expect(newWarning(session(96), DEFAULT_WARN, warned)?.threshold).toBe(95);
     expect(newWarning(session(97), DEFAULT_WARN, warned)).toBeNull();
-    // A new window (new reset time) starts over.
+    // A different reset time or a small dip around a mark doesn't repeat it.
+    expect(newWarning(session(96, 1001), DEFAULT_WARN, warned)).toBeNull();
+    expect(newWarning(session(74, 1002), DEFAULT_WARN, warned)).toBeNull();
+    expect(newWarning(session(76, 1003), DEFAULT_WARN, warned)).toBeNull();
+    // A real reset (usage far below the first mark) starts over.
+    expect(newWarning(session(5, 2000), DEFAULT_WARN, warned)).toBeNull();
     expect(newWarning(session(78, 2000), DEFAULT_WARN, warned)?.threshold).toBe(75);
     // At 100% the pause banner says it instead.
     expect(newWarning(session(100, 3000), DEFAULT_WARN, warned)).toBeNull();
