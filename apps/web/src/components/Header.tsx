@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ModelSwitcher } from './ModelSwitcher.tsx';
+import { Icon } from './tools/explorer/icons.tsx';
 import { chat, SETTINGS_TAB, useChat } from '../lib/chatStore.ts';
 
 function useClock(): string {
@@ -29,9 +30,9 @@ export function Header() {
         aria-label="Settings"
         aria-pressed={activeId === SETTINGS_TAB}
         title="Settings (opens as a tab)"
-        className={`size-9 cursor-pointer rounded-lg text-[15px] hover:bg-white/5 hover:text-ink ${activeId === SETTINGS_TAB ? 'text-accent' : 'text-muted'}`}
+        className={`grid size-9 cursor-pointer place-items-center rounded-lg hover:bg-white/5 hover:text-ink ${activeId === SETTINGS_TAB ? 'text-accent' : 'text-muted'}`}
       >
-        ⚙
+        <Icon name="gear" size={17} />
       </button>
     </header>
   );

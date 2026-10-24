@@ -134,21 +134,26 @@ describe('Linux: the Trash and the drives', () => {
     vi.unstubAllEnvs();
   });
 
-  it('lists the root, home and plugged-in drives from df, nothing else', () => {
+  it('lists the root, home and plugged-in drives from df, one per device, nothing else', () => {
     const out = [
-      'Type     Mounted on                       1024-blocks      Available',
-      'btrfs    /                                  243000000      183000000',
-      'tmpfs    /tmp                                 8000000        7900000',
-      'ext4     /boot                                 1000000         600000',
-      'vfat     /boot/efi                              600000         580000',
-      'btrfs    /home                              243000000      183000000',
-      'exfat    /run/media/me/USB STICK             30000000       20000000',
-      'squashfs /var/lib/snapd/snap/core/1               1000              0',
+      'Filesystem     Type     Mounted on                       1024-blocks      Available',
+      '/dev/nvme0n1p3 btrfs    /                                  243000000      183000000',
+      'tmpfs          tmpfs    /tmp                                 8000000        7900000',
+      '/dev/nvme0n1p2 ext4     /boot                                 1000000         600000',
+      '/dev/nvme0n1p1 vfat     /boot/efi                              600000         580000',
+      '/dev/nvme0n1p3 btrfs    /home                              243000000      183000000',
+      '/dev/sda1      exfat    /run/media/me/USB STICK             30000000       20000000',
+      '/dev/loop0     squashfs /var/lib/snapd/snap/core/1               1000              0',
     ].join('\n');
+    // Fedora's /home is the same btrfs disk as /, so it isn't listed twice.
     expect(parseDf(out, '/home/me')).toEqual([
       { path: '/', label: 'File System', total: 243000000 * 1024, free: 183000000 * 1024 },
-      { path: '/home', label: 'Home', total: 243000000 * 1024, free: 183000000 * 1024 },
       { path: '/run/media/me/USB STICK', label: 'USB STICK', total: 30000000 * 1024, free: 20000000 * 1024 },
     ]);
+    // A /home on a disk of its own is its own drive.
+    expect(parseDf(out.replace('/dev/nvme0n1p3 btrfs    /home', '/dev/sdb1      ext4     /home'), '/home/me')[1]).toMatchObject({
+      path: '/home',
+      label: 'Home drive',
+    });
   });
 });

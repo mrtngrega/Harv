@@ -5,7 +5,15 @@ import { useConnection, useSettings } from '../../lib/useHarvSocket.ts';
 import { ActionLog } from './ActionLog.tsx';
 import { BarList, Card, Rows, ThreadBars } from './parts.tsx';
 
-const shortCpu = (name: string) => name.replace(/^AMD |^Intel\(R\) Core\(TM\) /, '').replace(/ \d+-Core Processor$/, '');
+/** "1 volume", "4 volumes". */
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/** "Ryzen 7 5700X3D", "Ryzen 5 PRO 5650U": without the maker, the core count or the built-in graphics. */
+const shortCpu = (name: string) =>
+  name
+    .replace(/^AMD |^Intel\(R\) Core\(TM\) /, '')
+    .replace(/ \d+-Core Processor$/, '')
+    .replace(/ with Radeon .*$/, '');
 const shortGpu = (name: string) => name.replace(/^NVIDIA GeForce |^AMD Radeon /, '');
 
 /** "38% · 377 / 377 rpm", or whichever half is available. */
@@ -118,7 +126,10 @@ export function StatsDetails({ m }: { m: MetricsSnapshot }) {
       </Card>
 
       {(m.volumes.length > 0 || m.drives.length > 0) && (
-        <Card title="Storage" sub={`${m.volumes.length} volumes · ${m.drives.length} drives`}>
+        <Card
+          title="Storage"
+          sub={[plural(m.volumes.length, 'volume'), m.drives.length ? plural(m.drives.length, 'drive') : ''].filter(Boolean).join(' · ')}
+        >
           <BarList
             title="Volumes"
             items={m.volumes.map((v) => ({ name: v.mount, value: sizePair(v.usedBytes, v.totalBytes), share: v.load }))}

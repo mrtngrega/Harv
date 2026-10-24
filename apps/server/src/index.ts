@@ -470,13 +470,24 @@ if (process.env.HARV_START_LHM !== '0' && loadSettings().startSensors) {
   void ensureLhmRunning().then((result) => app.log.info({ result }, 'LibreHardwareMonitor'));
 }
 
-loadCatalog()
-  .then((catalog) => {
-    chats.catalog = catalog;
-    broadcast({ type: 'catalog', catalog });
-    app.log.info({ plan: catalog.plan, models: catalog.models.map((m) => m.id) }, 'Claude models');
-  })
-  .catch((err: Error) => app.log.error({ err: err.message }, 'Could not load Claude models'));
+// The plan and model names. Harv may start before Claude Code is logged in (a new machine), so
+// without a plan it asks again: after 1 minute, then 2, 4… up to every 15 (no tokens, a short-lived process).
+let catalogTries = 0;
+const refreshCatalog = () => {
+  const retry = () => setTimeout(refreshCatalog, Math.min(60_000 * 2 ** catalogTries++, 15 * 60_000)).unref();
+  loadCatalog()
+    .then((catalog) => {
+      chats.catalog = catalog;
+      broadcast({ type: 'catalog', catalog });
+      app.log.info({ plan: catalog.plan, models: catalog.models.map((m) => m.id) }, 'Claude models');
+      if (!catalog.plan) retry();
+    })
+    .catch((err: Error) => {
+      app.log.error({ err: err.message }, 'Could not load Claude models');
+      retry();
+    });
+};
+refreshCatalog();
 
 // Plan usage: /usage now and every 10 minutes (no tokens), plus live rate-limit events.
 meter.start();

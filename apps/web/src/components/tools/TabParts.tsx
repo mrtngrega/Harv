@@ -1,10 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { ChatView, ToolKind } from '@harv/shared';
 import { chat, useChat } from '../../lib/chatStore.ts';
 import { useProjects } from '../../lib/useHarvSocket.ts';
+import { Icon } from './explorer/icons.tsx';
 
-export const TOOL_ICONS: Record<ChatView | 'settings', string> = { chat: '≡', terminal: '›_', files: '▤', settings: '⚙' };
+export const TOOL_ICONS: Record<ChatView | 'settings', ReactNode> = {
+  chat: '≡',
+  terminal: '›_',
+  files: '▤',
+  settings: <Icon name="gear" size={12} />,
+};
 
 /** A non-chat tab in the chat bar (Settings). */
 export function SpecialTab({
@@ -14,7 +20,7 @@ export function SpecialTab({
   onSelect,
   onClose,
 }: {
-  icon: string;
+  icon: ReactNode;
   title: string;
   active: boolean;
   onSelect: () => void;
@@ -34,7 +40,7 @@ export function SpecialTab({
         onClick={onSelect}
         className={`flex min-h-9 cursor-pointer items-center gap-1.5 truncate pr-1 pl-3 text-xs whitespace-nowrap ${active ? 'text-ink' : 'text-muted'}`}
       >
-        <span aria-hidden="true" className="text-accent">
+        <span aria-hidden="true" className="flex text-accent">
           {icon}
         </span>
         <span className="truncate">{title}</span>

@@ -14,3 +14,4 @@ Notes:
 - The dashboard's layout is shared with the user's open window (it's saved on the server), so a check that opens tabs or changes views should close what it opened.
 - `click` calls `scrollIntoView` on its target; the app root is `overflow-clip`, so that can't shift the page any more.
 - Checks that send messages to Harv use the user's plan; prefer Haiku·low and say so.
+- Works on Windows and Linux: it finds Chrome (or Chromium) itself; `HARV_CHROME=/path/to/chrome` picks another.

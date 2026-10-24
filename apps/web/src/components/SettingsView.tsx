@@ -235,6 +235,7 @@ function RestartButton() {
 
 function Projects() {
   const example = useExample('C:\\path\\to\\a\\project', '/path/to/a/project');
+  const defaultRoot = useExample('your home\\Projects', 'your home/Projects');
   const { list, error } = useProjects();
   const { projectsDir } = useSettings();
   const [path, setPath] = useState('');
@@ -303,7 +304,7 @@ function Projects() {
           id="harv-projects-dir"
           value={root ?? projectsDir}
           onChange={(e) => setRoot(e.target.value)}
-          placeholder="your home\Projects"
+          placeholder={defaultRoot}
           className={input}
         />
         <button type="submit" className={button}>
@@ -369,7 +370,7 @@ function BackgroundPicker() {
         }}
       />
       <p className="m-0 text-[11px] text-faint">
-        {status ?? 'JPEG, PNG or WebP up to 20 MB. It stays on this PC (in ~/.harv), blurred behind the dashboard.'}
+        {status ?? 'JPEG, PNG or WebP up to 20 MB. It stays on this computer (in ~/.harv), blurred behind the dashboard.'}
       </p>
     </Section>
   );
@@ -477,7 +478,7 @@ export function SettingsView() {
   return (
     <div className="animate-fade-in mx-auto grid w-full max-w-[920px] grid-cols-1 content-start gap-2.5 md:grid-cols-2">
       <p className="m-0 px-1 text-xs text-muted md:col-span-2">
-        Saved on this PC in ~/.harv/settings.json. Changes apply at once in every Harv window.
+        Saved on this computer in ~/.harv/settings.json. Changes apply at once in every Harv window.
       </p>
 
       <Section title="Look">

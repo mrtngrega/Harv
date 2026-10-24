@@ -83,8 +83,10 @@ start_harv() {
 
   local out="$logs/harv.log"
   [ -f "$out" ] && mv -f "$out" "$logs/harv.previous.log"
-  (cd "$repo" && setsid npm run harv > "$out" 2>&1 < /dev/null &
-   echo $! > "$pid_file")
+  # The whole group is redirected and becomes npm (exec), so nothing keeps this terminal's
+  # (or an SSH session's) output open, and the pid file holds npm itself.
+  (cd "$repo" && exec setsid npm run harv) > "$out" 2>&1 < /dev/null &
+  echo $! > "$pid_file"
 
   for _ in $(seq 180); do
     if up "$server/api/health" && up "$dashboard"; then

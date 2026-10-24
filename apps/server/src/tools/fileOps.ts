@@ -347,18 +347,23 @@ export function drives(): Promise<DriveInfo[]> {
 /** File systems that hold the user's files (not memory, snapshots or system views). */
 const REAL_FS = /^(ext[234]|btrfs|xfs|f2fs|zfs|vfat|exfat|ntfs3?|fuseblk|fuse\.\w+|nfs4?|cifs|smb3)$/;
 
-/** Linux: the root, a separate /home, and drives mounted under /run/media, /media or /mnt (from df). */
+/**
+ * Linux: the root, a separate /home, and drives mounted under /run/media, /media or /mnt (from df).
+ * One entry per device: on Fedora, / and /home are parts (btrfs subvolumes) of the same disk.
+ */
 export function parseDf(out: string, home = homedir()): DriveInfo[] {
   const list: DriveInfo[] = [];
+  const devices = new Set<string>();
   for (const line of out.trim().split('\n').slice(1)) {
-    // df escapes nothing, so a mount point with spaces is everything before the three numbers.
-    const m = /^(\S+)\s+(.+?)\s+(\d+)\s+(\d+)$/.exec(line.trim());
+    // df escapes nothing, so a mount point with spaces is everything between the type and the two numbers.
+    const m = /^(\S+)\s+(\S+)\s+(.+?)\s+(\d+)\s+(\d+)$/.exec(line.trim());
     if (!m) continue;
-    const [, fstype, target, size, avail] = m as unknown as [string, string, string, string, string];
+    const [, device, fstype, target, size, avail] = m as unknown as [string, string, string, string, string, string];
     if (!REAL_FS.test(fstype) || /^\/(boot|efi)(\/|$)/.test(target) || target.startsWith('/var/lib/')) continue;
-    if (!isUserMount(target, home)) continue;
-    if (list.some((d) => d.path === target)) continue;
-    const label = target === '/' ? 'File System' : target === '/home' || target === home ? 'Home' : osPath.basename(target);
+    if (!isUserMount(target, home) || devices.has(device)) continue;
+    devices.add(device);
+    // "Home drive", so it isn't mistaken for the Home place (the user's own folder).
+    const label = target === '/' ? 'File System' : target === '/home' || target === home ? 'Home drive' : osPath.basename(target);
     list.push({ path: target, label, total: Number(size) * 1024, free: Number(avail) * 1024 });
   }
   return list;
@@ -366,7 +371,7 @@ export function parseDf(out: string, home = homedir()): DriveInfo[] {
 
 function linuxDrives(): Promise<DriveInfo[]> {
   return new Promise((resolve) => {
-    const df = spawn('df', ['-k', '--output=fstype,target,size,avail']);
+    const df = spawn('df', ['-k', '--output=source,fstype,target,size,avail']);
     let out = '';
     df.stdout.on('data', (d: Buffer) => (out += d.toString()));
     df.on('error', () => resolve([{ path: '/', label: 'File System', total: 0, free: 0 }]));

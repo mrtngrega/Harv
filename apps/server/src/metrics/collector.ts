@@ -3,6 +3,7 @@ import type { MetricsSnapshot, ProcessUsage, VolumeMetrics } from '@harv/shared'
 import { IS_WINDOWS } from '../platform.ts';
 import { readingsFromLhm } from './fromLhm.ts';
 import { fetchLhm } from './lhm.ts';
+import { readLinuxGpu, readLinuxNetwork } from './linux.ts';
 import { readNvidiaSmi } from './nvidia.ts';
 import { readCpuMemFallback, readProcesses, readStaticInfo, readVolumes, type ProcessInfo, type StaticInfo } from './system.ts';
 
@@ -86,7 +87,8 @@ export class MetricsCollector {
     const sensors = IS_WINDOWS ? await fetchLhm() : null;
     const lhm = sensors ? readingsFromLhm(sensors) : null;
 
-    let gpu = lhm?.gpu;
+    // Linux: an AMD GPU from sysfs (integrated Radeon included).
+    let gpu = lhm?.gpu ?? (IS_WINDOWS ? undefined : readLinuxGpu(info.gpuName ?? 'GPU'));
     let nvidiaSmi = false;
     if (!gpu) {
       gpu = (await readNvidiaSmi()) ?? undefined;
@@ -132,7 +134,7 @@ export class MetricsCollector {
       },
       volumes: this.volumes,
       drives: lhm?.drives ?? [],
-      network: lhm?.network,
+      network: lhm?.network ?? (IS_WINDOWS ? undefined : readLinuxNetwork()),
       cooling: lhm?.cooling,
       sources: { lhm: lhm !== null, nvidiaSmi },
     };

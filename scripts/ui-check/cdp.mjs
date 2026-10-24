@@ -3,10 +3,17 @@
 // Used by the other scripts here; see README.md.
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { fileURLToPath } from 'node:url';
+
+/** Chrome on Windows or Linux (Chromium too); HARV_CHROME picks another. */
+const CHROME =
+  process.env.HARV_CHROME ??
+  (process.platform === 'win32'
+    ? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+    : (['/usr/bin/google-chrome', '/usr/bin/chromium-browser', '/usr/bin/chromium'].find((p) => existsSync(p)) ?? 'google-chrome'));
 
 const require = createRequire(import.meta.url);
 const WebSocket = require('ws');
@@ -18,7 +25,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export async function launch({ width = 1500, height = 900, port = 9333 } = {}) {
   const chrome = spawn(
-    'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    CHROME,
     [
       '--headless=new',
       `--remote-debugging-port=${port}`,
