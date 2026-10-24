@@ -14,12 +14,12 @@ export * from './chat.ts';
 export type * from './safety.ts';
 export type * from './usage.ts';
 export * from './settings.ts';
-export type * from './tools.ts';
+export * from './tools.ts';
 import type { MetricsSnapshot } from './metrics.ts';
 import type { ActionEntry, ApprovalRequest, SafetyClientMessage, SafetyServerMessage } from './safety.ts';
 import type { PlanUsage, UsageServerMessage } from './usage.ts';
 import type { HarvSettings, SettingsClientMessage, SettingsServerMessage } from './settings.ts';
-import type { ToolClientMessage, ToolServerMessage, ToolTab } from './tools.ts';
+import type { ToolClientMessage, ToolServerMessage, UiState } from './tools.ts';
 import type { Catalog, ChatClientMessage, ChatServerMessage, ChatSnapshot, HistoryItem } from './chat.ts';
 
 /** Messages the server pushes to the dashboard over /ws. */
@@ -41,8 +41,8 @@ export type ServerMessage =
       settings: HarvSettings;
       /** Background photo version (null = none set). */
       background: number | null;
-      /** Open terminal and files tabs. */
-      tools: ToolTab[];
+      /** The dashboard's saved layout (~/.harv/ui.json). */
+      ui: UiState;
     }
   /** `detail` names the running tool while working. */
   | { type: 'harv.status'; status: HarvStatus; detail?: string }

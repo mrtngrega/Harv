@@ -2,7 +2,7 @@ import { createReadStream, readFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
-import { HARV_VERSION, MAX_ATTACHMENT_BYTES, SERVER_PORT, type ClientMessage, type ServerMessage } from '@harv/shared';
+import { HARV_VERSION, MAX_ATTACHMENT_BYTES, SERVER_PORT, terminalId, type ClientMessage, type ServerMessage } from '@harv/shared';
 import { isValidTab, saveAttachment } from './agent/attachments.ts';
 import { loadCatalog } from './agent/catalog.ts';
 import { ChatManager } from './agent/manager.ts';
@@ -18,6 +18,7 @@ import { ChatStore } from './store/chats.ts';
 import { RouteStore } from './store/routes.ts';
 import { UsageMeter } from './usage/meter.ts';
 import { loadSettings, updateSettings } from './settings.ts';
+import { loadUi, saveUi } from './ui.ts';
 import { cleanPath, listFolder, openWithDefault, places, previewType } from './tools/files.ts';
 import {
   copyItems,
@@ -34,7 +35,6 @@ import {
   search,
 } from './tools/fileOps.ts';
 import type { FileOp } from '@harv/shared';
-import { ToolRegistry } from './tools/registry.ts';
 import { TerminalManager } from './tools/terminal.ts';
 
 const removed = stripBilledCredentials();
@@ -87,16 +87,13 @@ const meter = new UsageMeter(
   },
   () => routes.summary(),
 );
-// Terminal and files tabs in the chat bar.
-const terminals = new TerminalManager({
-  data: (id, data) => broadcast({ type: 'term.data', id, data }),
-  exit: (id, code) => broadcast({ type: 'term.exit', id, code }),
-});
-const tools = new ToolRegistry(
+// Each chat's terminal (its view menu); saved in ~/.harv/terminals across restarts.
+const terminals = new TerminalManager(
   {
-    terminal: { open: (id, { cwd }) => terminals.open(id, cleanPath(cwd) ?? undefined), close: (id) => terminals.close(id) },
+    data: (id, data) => broadcast({ type: 'term.data', id, data }),
+    exit: (id, code) => broadcast({ type: 'term.exit', id, code }),
   },
-  (tabs) => broadcast({ type: 'tools', tabs }),
+  join(HARV_HOME, 'terminals'),
 );
 
 const router = new Router(
@@ -108,6 +105,11 @@ const router = new Router(
 const chats = new ChatManager(store, gate, router, meter, broadcast, (status) =>
   broadcast({ type: 'harv.status', status, detail: chats.statusDetail }),
 );
+// Terminals of chats closed while Harv was off aren't coming back.
+{
+  const live = new Set([...store.openChats().map((c) => c.id), ...loadUi().blanks].map(terminalId));
+  terminals.prune((id) => live.has(id));
+}
 
 app.get('/api/health', async () => ({ ok: true, version: HARV_VERSION, status: chats.status, home: HARV_HOME }));
 
@@ -274,7 +276,7 @@ app.get('/ws', { websocket: true }, (socket) => {
     usage: meter.snapshot(),
     settings: loadSettings(),
     background: backgroundVersion(),
-    tools: tools.list(),
+    ui: loadUi(),
   });
 
   const unsubscribe = metrics.onSnapshot((snapshot) => send({ type: 'metrics.tick', metrics: snapshot }));
@@ -305,12 +307,14 @@ app.get('/ws', { websocket: true }, (socket) => {
         break;
       case 'chat.close':
         chats.close(msg.tabId);
+        terminals.close(terminalId(msg.tabId));
         break;
       case 'chat.open':
         chats.open(msg.tabId);
         break;
       case 'chat.delete':
         chats.delete(msg.tabId);
+        terminals.close(terminalId(msg.tabId));
         break;
       case 'chat.rename':
         chats.rename(msg.tabId, msg.title);
@@ -321,16 +325,20 @@ app.get('/ws', { websocket: true }, (socket) => {
       case 'action.undo':
         gate.undo(msg.id);
         break;
-      case 'tool.open':
-        tools.open(msg.id, msg.kind, { cwd: msg.cwd }).catch((err: Error) => {
-          app.log.error({ err: err.message }, 'Could not open tool tab');
-        });
+      case 'ui.save':
+        saveUi(msg.state);
         break;
-      case 'tool.close':
-        tools.close(msg.id);
+      case 'term.attach': {
+        try {
+          const replay = terminals.attach(msg.id, cleanPath(msg.cwd) ?? undefined);
+          if (replay) send({ type: 'term.data', id: msg.id, data: replay.data, reset: true, restored: replay.restored });
+        } catch (err) {
+          app.log.error({ err: (err as Error).message }, 'Could not start a terminal');
+        }
         break;
-      case 'term.attach':
-        if (tools.has(msg.id, 'terminal')) send({ type: 'term.data', id: msg.id, data: terminals.replay(msg.id) ?? '', reset: true });
+      }
+      case 'term.close':
+        terminals.close(msg.id);
         break;
       case 'term.input':
         if (typeof msg.data === 'string') terminals.input(msg.id, msg.data);

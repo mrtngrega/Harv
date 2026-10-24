@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ToolKind } from '@harv/shared';
-import { chat } from '../../lib/chatStore.ts';
+import type { ChatView, ToolKind } from '@harv/shared';
+import { chat, useChat } from '../../lib/chatStore.ts';
 
-export const TOOL_ICONS: Record<ToolKind | 'settings', string> = { terminal: '›_', files: '▤', settings: '⚙' };
+export const TOOL_ICONS: Record<ChatView | 'settings', string> = { chat: '≡', terminal: '›_', files: '▤', settings: '⚙' };
 
-/** A non-chat tab in the chat bar (terminal, files, settings). */
+/** A non-chat tab in the chat bar (Settings). */
 export function SpecialTab({
   icon,
   title,
@@ -49,26 +49,33 @@ export function SpecialTab({
   );
 }
 
-const ITEMS: { label: string; icon: string; hint: string; run: () => void }[] = [
-  { label: 'New chat', icon: '+', hint: 'Ctrl+click + for this directly', run: () => chat.newTab() },
-  { label: 'Terminal', icon: TOOL_ICONS.terminal, hint: 'PowerShell', run: () => chat.openTool('terminal') },
-  { label: 'File Explorer', icon: TOOL_ICONS.files, hint: 'File Explorer', run: () => chat.openTool('files') },
+const VIEWS: { view: ChatView; label: string }[] = [
+  { view: 'chat', label: 'Chat' },
+  { view: 'files', label: 'File Explorer' },
+  { view: 'terminal', label: 'Terminal' },
 ];
 
-/** The + at the end of the chat bar: a new chat, a terminal or the file explorer. */
-export function NewTabMenu() {
-  const [open, setOpen] = useState(false);
+/**
+ * The small menu at the right of the chat bar: switches the active chat between
+ * its log and its tools (file explorer, terminal). Each chat has its own.
+ */
+export function ViewMenu({ tabId }: { tabId: string }) {
+  const { views, tools } = useChat();
+  const view = views[tabId] ?? 'chat';
+  const open = tools[tabId] ?? [];
+  const [shown, setShown] = useState(false);
   const [at, setAt] = useState({ left: 0, top: 0 });
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  const current = VIEWS.find((v) => v.view === view)!;
 
   useEffect(() => {
-    if (!open) return;
-    menu.current?.querySelector('button')?.focus();
+    if (!shown) return;
+    menu.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
     const close = (e: Event) => {
       if (e instanceof KeyboardEvent && e.key !== 'Escape') return;
       if (e instanceof MouseEvent && (menu.current?.contains(e.target as Node) || button.current?.contains(e.target as Node))) return;
-      setOpen(false);
+      setShown(false);
     };
     window.addEventListener('mousedown', close);
     window.addEventListener('keydown', close);
@@ -76,57 +83,78 @@ export function NewTabMenu() {
       window.removeEventListener('mousedown', close);
       window.removeEventListener('keydown', close);
     };
-  }, [open]);
+  }, [shown]);
 
   return (
     <>
       <button
         ref={button}
         type="button"
-        aria-label="New tab"
         aria-haspopup="menu"
-        aria-expanded={open}
-        title="New chat, terminal or file explorer"
+        aria-expanded={shown}
+        title="Switch this chat to its file explorer or terminal"
         onClick={(e) => {
-          if (e.ctrlKey) return chat.newTab();
           const r = e.currentTarget.getBoundingClientRect();
-          // The tab bar scrolls sideways, so the menu is placed on the page, not inside it.
-          setAt({ left: Math.min(r.left, window.innerWidth - 230), top: r.bottom + 4 });
-          setOpen((o) => !o);
+          setAt({ left: Math.max(8, Math.min(r.right - 210, window.innerWidth - 218)), top: r.bottom + 4 });
+          setShown((o) => !o);
         }}
-        className="size-9 flex-none cursor-pointer text-base hover:text-accent"
+        className={`mb-1.5 flex min-h-7 flex-none cursor-pointer items-center gap-1.5 rounded-md px-2 text-[11px] whitespace-nowrap hover:bg-white/10 ${
+          shown ? 'bg-white/10 text-ink' : 'text-muted'
+        }`}
       >
-        +
+        <span aria-hidden="true" className="text-accent">
+          {TOOL_ICONS[view]}
+        </span>
+        <span>{current.label.toLowerCase()}</span>
+        <span aria-hidden="true" className="text-[9px]">
+          ▾
+        </span>
       </button>
-      {open &&
+      {shown &&
         createPortal(
           <div
             ref={menu}
             role="menu"
-            aria-label="New tab"
-            className="fixed z-40 flex w-[220px] flex-col gap-0.5 rounded-xl border border-[rgb(220_232_245/0.16)] bg-[rgb(16_24_34/0.94)] p-1.5 shadow-[0_12px_32px_rgb(0_0_0/0.4)] backdrop-blur-[22px]"
+            aria-label="Show in this chat"
+            className="fixed z-40 flex w-[210px] flex-col gap-0.5 rounded-xl border border-[rgb(220_232_245/0.16)] bg-[rgb(16_24_34/0.94)] p-1.5 shadow-[0_12px_32px_rgb(0_0_0/0.4)] backdrop-blur-[22px]"
             style={{ left: at.left, top: at.top }}
           >
-            {ITEMS.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false);
-                  item.run();
-                }}
-                className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs hover:bg-white/10 focus:bg-white/10 focus:outline-none"
-              >
-                <span aria-hidden="true" className="w-5 text-center text-accent">
-                  {item.icon}
-                </span>
-                <span className="flex flex-col">
-                  <span className="text-ink">{item.label}</span>
-                  <span className="text-[11px] text-faint">{item.hint}</span>
-                </span>
-              </button>
-            ))}
+            {VIEWS.map((item) => {
+              const running = item.view !== 'chat' && open.includes(item.view);
+              return (
+                <div key={item.view} className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={view === item.view}
+                    onClick={() => {
+                      setShown(false);
+                      chat.setView(tabId, item.view);
+                    }}
+                    className={`flex min-h-8 flex-1 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-white/10 focus:bg-white/10 focus:outline-none ${
+                      view === item.view ? 'text-ink' : 'text-muted'
+                    }`}
+                  >
+                    <span aria-hidden="true" className="w-5 text-center text-accent">
+                      {TOOL_ICONS[item.view]}
+                    </span>
+                    <span className="flex-1">{item.label}</span>
+                    {running && <span aria-label="open" title="Open" className="size-1.5 rounded-full bg-accent/70" />}
+                  </button>
+                  {running && (
+                    <button
+                      type="button"
+                      aria-label={`Close ${item.label}`}
+                      title={`Close ${item.label}`}
+                      onClick={() => chat.closeTool(tabId, item.view as ToolKind)}
+                      className="size-7 flex-none cursor-pointer rounded-md text-[13px] text-muted hover:bg-white/10 hover:text-ink"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>,
           document.body,
         )}

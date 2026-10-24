@@ -1,11 +1,49 @@
-/** Tabs in the chat bar that aren't chats: a terminal and the file explorer. (A browser tab existed in a3d96e0; removed for now.) */
+import type { Attachment } from './chat.ts';
+
+/** Tools a chat can switch to from its view menu. (A browser existed in a3d96e0; removed for now.) */
 export type ToolKind = 'terminal' | 'files';
 
-export interface ToolTab {
-  id: string;
-  kind: ToolKind;
-  title: string;
+/** What a chat shows: its conversation or one of its tools. */
+export type ChatView = 'chat' | ToolKind;
+
+/** A chat's terminal id on the server. */
+export const terminalId = (chatId: string) => `terminal-${chatId}`;
+
+/**
+ * The dashboard's layout, saved in ~/.harv/ui.json so it comes back after a
+ * restart like Chrome's tabs: which tab was showing, the order, each chat's
+ * tools and view, unsent drafts.
+ */
+export interface UiState {
+  /** A chat's id, "settings", or null. */
+  activeId: string | null;
+  settingsOpen: boolean;
+  /** Tab order (chat ids). */
+  order: string[];
+  /** Chats opened with + that have no messages yet (the server doesn't know them otherwise). */
+  blanks: string[];
+  /** Tools each chat has open. */
+  tools: Record<string, ToolKind[]>;
+  views: Record<string, ChatView>;
+  /** Where each chat's file explorer is. */
+  explorer: Record<string, string>;
+  /** Unsent message text per chat. */
+  drafts: Record<string, string>;
+  /** Files attached to a draft (already uploaded) per chat. */
+  attachments: Record<string, Attachment[]>;
 }
+
+export const EMPTY_UI: UiState = {
+  activeId: null,
+  settingsOpen: false,
+  order: [],
+  blanks: [],
+  tools: {},
+  views: {},
+  explorer: {},
+  drafts: {},
+  attachments: {},
+};
 
 /** One entry in a folder listing. */
 export interface FileEntry {
@@ -70,17 +108,18 @@ export interface FilePlaces {
 }
 
 export type ToolClientMessage =
-  /** Opens a tool tab; the dashboard picks the id. */
-  /** `cwd`: the folder a terminal starts in. */
-  | { type: 'tool.open'; id: string; kind: ToolKind; cwd?: string }
-  | { type: 'tool.close'; id: string }
-  /** Asks for a terminal's output so far (after a reload). */
-  | { type: 'term.attach'; id: string }
+  /** Saves the dashboard's layout (debounced on the dashboard's side). */
+  | { type: 'ui.save'; state: UiState }
+  /** Shows a terminal, starting it (in `cwd`, or where it was before a restart) if it isn't running. */
+  | { type: 'term.attach'; id: string; cwd?: string }
+  /** Ends a terminal (its chat closed the tool). */
+  | { type: 'term.close'; id: string }
   | { type: 'term.input'; id: string; data: string }
   | { type: 'term.resize'; id: string; cols: number; rows: number };
 
 export type ToolServerMessage =
-  | { type: 'tools'; tabs: ToolTab[] }
-  /** Terminal output; `reset` replaces what the tab shows (the replay after attach). */
-  | { type: 'term.data'; id: string; data: string; reset?: boolean }
-  | { type: 'term.exit'; id: string; code: number };
+  /**
+   * Terminal output; `reset` replaces what the view shows (the replay after attach).
+   * `restored`: plain lines from before a restart, shown in grey above the new shell.
+   */
+  { type: 'term.data'; id: string; data: string; reset?: boolean; restored?: string[] } | { type: 'term.exit'; id: string; code: number };

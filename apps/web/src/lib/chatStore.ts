@@ -3,14 +3,17 @@ import type {
   ChatServerMessage,
   ClientMessage,
   ChatSnapshot,
+  ChatView,
   EffortLevel,
   HistoryItem,
   LineKind,
   ModelChoice,
   ToolKind,
-  ToolTab,
+  UiState,
 } from '@harv/shared';
+import { terminalId } from '@harv/shared';
 import { createStore } from './createStore.ts';
+import { dropDrafts } from './drafts.ts';
 import { onServerMessage, sendMessage } from './socket.ts';
 
 export type { LineKind };
@@ -54,8 +57,10 @@ export interface ChatState {
   activeId: string | null;
   /** The Settings tab is in the tab bar. */
   settingsOpen: boolean;
-  /** Terminal and files tabs (the server's list). */
-  tools: ToolTab[];
+  /** What each chat shows: its log or one of its tools (missing = the log). */
+  views: Record<string, ChatView>;
+  /** Tools each chat has open, in the order they were opened. */
+  tools: Record<string, ToolKind[]>;
   model: ModelChoice;
   effort: EffortLevel;
   /** What AUTO ran last, e.g. "Sonnet 5.5 · medium". */
@@ -92,7 +97,8 @@ const store = createStore<ChatState>({
   tabs: [first],
   activeId: first.id,
   settingsOpen: false,
-  tools: [],
+  views: {},
+  tools: {},
   ...loadSelection(),
   routed: null,
 });
@@ -125,17 +131,44 @@ const fromSnapshot = (chat: ChatSnapshot): Tab => ({
   })),
 });
 
-/** Saved chats from the server replace ours; unsent blank tabs are kept. */
-function hydrate(chats: ChatSnapshot[]) {
+/** Keeps only the entries of a per-chat map whose chat is still a tab. */
+const onlyTabs = <T>(map: Record<string, T>, tabs: Tab[]) =>
+  Object.fromEntries(Object.entries(map).filter(([id]) => tabs.some((t) => t.id === id)));
+
+/**
+ * Saved chats from the server replace ours; unsent blank tabs are kept. `ui`
+ * (the saved layout) is given on the first connect only: it brings back blank
+ * tabs, the tab order, which tab was showing and each chat's tools, like
+ * Chrome reopening its tabs. After a reconnect the dashboard's own layout wins.
+ */
+function hydrate(chats: ChatSnapshot[], ui?: UiState) {
   store.set((s) => {
     const saved = chats.map(fromSnapshot);
     // The untouched starter tab gives way to saved chats; blank tabs the user opened stay.
     const blanks = s.tabs.filter((t) => t.lines.length === 0 && t.id !== first.id && !saved.some((c) => c.id === t.id));
-    const tabs = [...saved, ...blanks];
+    for (const id of ui?.blanks ?? []) {
+      if (!saved.some((c) => c.id === id) && !blanks.some((t) => t.id === id)) blanks.push({ ...blankTab(), id });
+    }
+    let tabs = [...saved, ...blanks];
+    if (ui?.order.length) {
+      const rank = (id: string) => {
+        const i = ui.order.indexOf(id);
+        return i === -1 ? Infinity : i;
+      };
+      tabs = tabs
+        .map((t, i) => ({ t, i }))
+        .sort((a, b) => rank(a.t.id) - rank(b.t.id) || a.i - b.i)
+        .map(({ t }) => t);
+    }
     if (tabs.length === 0) tabs.push(s.tabs.find((t) => t.id === first.id) ?? blankTab());
-    const keep = s.activeId === SETTINGS_TAB || tabs.some((t) => t.id === s.activeId) || s.tools.some((t) => t.id === s.activeId);
-    const activeId = keep ? s.activeId : tabs.at(-1)!.id;
-    return { ...s, tabs, activeId };
+
+    const settingsOpen = s.settingsOpen || !!ui?.settingsOpen;
+    const wanted = ui ? ui.activeId : s.activeId;
+    const valid = (id: string | null) => (id === SETTINGS_TAB && settingsOpen) || tabs.some((t) => t.id === id);
+    const activeId = valid(wanted) ? wanted : valid(s.activeId) ? s.activeId : tabs.at(-1)!.id;
+    const views = onlyTabs(ui ? { ...ui.views, ...s.views } : s.views, tabs);
+    const tools = onlyTabs(ui ? { ...ui.tools, ...s.tools } : s.tools, tabs);
+    return { ...s, tabs, activeId, settingsOpen, views, tools };
   });
 }
 
@@ -227,7 +260,7 @@ export function applyChatEvent(msg: ChatServerMessage): void {
     case 'chat.removed':
       store.set((s) => {
         const tabs = s.tabs.filter((t) => t.id !== msg.tabId);
-        return { ...s, tabs, activeId: s.activeId === msg.tabId ? (tabs.at(-1)?.id ?? null) : s.activeId };
+        return { ...withoutChat(s, msg.tabId), tabs, activeId: s.activeId === msg.tabId ? (tabs.at(-1)?.id ?? null) : s.activeId };
       });
       break;
     case 'history':
@@ -237,22 +270,37 @@ export function applyChatEvent(msg: ChatServerMessage): void {
   }
 }
 
+/** A chat's views and tools, forgotten when it closes. */
+function withoutChat(s: ChatState, id: string): ChatState {
+  const { [id]: _view, ...views } = s.views;
+  const { [id]: _tools, ...tools } = s.tools;
+  return { ...s, views, tools };
+}
+
+let restored = false;
+/** Listeners for the saved layout on the first connect (drafts, explorer folders). */
+const restoreListeners = new Set<(ui: UiState) => void>();
+export const onLayoutRestore = (fn: (ui: UiState) => void) => void restoreListeners.add(fn);
+/** True once the first hello brought the saved layout back; saving before that would wipe it. */
+export const layoutRestored = () => restored;
+export const subscribeChat = store.subscribe;
+
 onServerMessage((msg) => {
   if (msg.type === 'hello') {
-    store.set((s) => ({ ...s, tools: msg.tools }));
-    hydrate(msg.chats);
+    hydrate(msg.chats, restored ? undefined : msg.ui);
+    if (!restored) {
+      restored = true;
+      restoreListeners.forEach((fn) => fn(msg.ui));
+    }
     history.set({ items: msg.history, query: '' });
     if (history.get().query) sendMessage({ type: 'history.search', query: history.get().query });
-  } else if (msg.type === 'tools') {
-    // The server's list wins; a closed tool tab that was showing gives way to the last chat.
-    store.set((s) => {
-      const gone = !msg.tabs.some((t) => t.id === s.activeId) && s.tools.some((t) => t.id === s.activeId);
-      return { ...s, tools: msg.tabs, activeId: gone ? (s.tabs.at(-1)?.id ?? null) : s.activeId };
-    });
   } else if (msg.type.startsWith('chat.') || msg.type === 'history') {
     applyChatEvent(msg as ChatServerMessage);
   }
 });
+
+/** Folders a chat's terminal should start in (from the explorer's "Open in Terminal"). */
+export const terminalStart = new Map<string, string>();
 
 export const chat = {
   setModel(model: ModelChoice) {
@@ -265,36 +313,56 @@ export const chat = {
   },
   setActive: (activeId: string) => store.set((s) => ({ ...s, activeId })),
 
-  newTab() {
+  /** Opens a new chat (optionally straight into one of its tools) and returns its id. */
+  newTab(view: ChatView = 'chat'): string {
     const tab = blankTab();
-    store.set((s) => ({ ...s, tabs: [...s.tabs, tab], activeId: tab.id }));
+    store.set((s) => ({
+      ...s,
+      tabs: [...s.tabs, tab],
+      activeId: tab.id,
+      ...(view !== 'chat' ? { views: { ...s.views, [tab.id]: view }, tools: { ...s.tools, [tab.id]: [view] } } : {}),
+    }));
+    return tab.id;
   },
 
   closeTab(id: string) {
+    // The server ends the chat's terminal too.
     sendMessage({ type: 'chat.close', tabId: id });
+    dropDrafts(id);
     store.set((s) => {
       const tabs = s.tabs.filter((t) => t.id !== id);
       const activeId = s.activeId === id ? (tabs.at(-1)?.id ?? (s.settingsOpen ? SETTINGS_TAB : null)) : s.activeId;
-      return { ...s, tabs, activeId };
+      return { ...withoutChat(s, id), tabs, activeId };
     });
   },
 
-  /** Opens a terminal (optionally in `cwd`) or files tab, switches to it, and returns its id. */
-  openTool(kind: ToolKind, cwd?: string): string {
-    const id = newId();
-    const title = { terminal: 'PowerShell', files: 'Files' }[kind];
-    store.set((s) => ({ ...s, tools: [...s.tools, { id, kind, title }], activeId: id }));
-    sendMessage({ type: 'tool.open', id, kind, ...(cwd ? { cwd } : {}) });
-    return id;
+  /** Shows a chat's log or one of its tools, opening the tool if it isn't yet. */
+  setView(tabId: string, view: ChatView) {
+    store.set((s) => {
+      const open = s.tools[tabId] ?? [];
+      const tools = view === 'chat' || open.includes(view) ? s.tools : { ...s.tools, [tabId]: [...open, view] };
+      return { ...s, tools, views: { ...s.views, [tabId]: view } };
+    });
   },
 
-  closeTool(id: string) {
-    sendMessage({ type: 'tool.close', id });
+  /** Closes one of a chat's tools; the chat goes back to its log. */
+  closeTool(tabId: string, kind: ToolKind) {
+    if (kind === 'terminal') sendMessage({ type: 'term.close', id: terminalId(tabId) });
     store.set((s) => ({
       ...s,
-      tools: s.tools.filter((t) => t.id !== id),
-      activeId: s.activeId === id ? (s.tabs.at(-1)?.id ?? null) : s.activeId,
+      tools: { ...s.tools, [tabId]: (s.tools[tabId] ?? []).filter((k) => k !== kind) },
+      views: s.views[tabId] === kind ? { ...s.views, [tabId]: 'chat' } : s.views,
     }));
+  },
+
+  /** The chat's terminal in `dir`: a new one starts there, a running one changes folder. */
+  terminalAt(tabId: string, dir: string) {
+    if (getChatState().tools[tabId]?.includes('terminal')) {
+      sendMessage({ type: 'term.input', id: terminalId(tabId), data: `Set-Location -LiteralPath '${dir.replace(/'/g, "''")}'\r` });
+    } else {
+      terminalStart.set(tabId, dir);
+    }
+    chat.setView(tabId, 'terminal');
   },
 
   /** Opens Settings as a tab in the chat bar (or switches to it). */

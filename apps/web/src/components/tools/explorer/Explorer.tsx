@@ -3,6 +3,7 @@ import type { DriveInfo, FileEntry, FilePlaces, FolderListing } from '@harv/shar
 import { chat } from '../../../lib/chatStore.ts';
 import { addAttachment } from '../../../lib/drafts.ts';
 import { dateGroup } from '../../../lib/format.ts';
+import { explorerPaths, saveLayoutSoon } from '../../../lib/layout.ts';
 import { clipboard, files } from './api.ts';
 import { FileIcon, iconKind, isImage, typeName } from './fileTypes.tsx';
 import { bytes as formatSize, Icon } from './icons.tsx';
@@ -29,9 +30,6 @@ const DEFAULT_SORT: Sort = { key: 'mtime', desc: true };
 /** Date and size start with the biggest/newest on top, like Explorer's column headers. */
 const startsDesc = (key: SortKey) => key === 'mtime' || key === 'size';
 
-/** Where each explorer tab was, so switching tabs and back keeps the folder. */
-export const explorerPaths = new Map<string, string>();
-
 function load<T>(key: string, fallback: T): T {
   try {
     return (JSON.parse(localStorage.getItem(key) ?? 'null') as T) ?? fallback;
@@ -53,7 +51,7 @@ const dirOf = (path: string) => {
 };
 const driveOf = (path: string) => path.slice(0, 2).toLowerCase();
 
-/** The file explorer tab, laid out and behaving like Windows 11 File Explorer. */
+/** A chat's file explorer (its view menu), laid out and behaving like Windows 11 File Explorer. `id` is the chat's. */
 export function Explorer({ id }: { id: string }) {
   const [loc, setLoc] = useState(() => explorerPaths.get(id) ?? HOME);
   const [back, setBack] = useState<string[]>([]);
@@ -127,7 +125,9 @@ export function Explorer({ id }: { id: string }) {
   }, []);
 
   useEffect(() => {
+    // Kept per chat (and saved), so switching away and back, or restarting, keeps the folder.
     explorerPaths.set(id, loc);
+    saveLayoutSoon();
     // refresh() only sets state after its request comes back, not during the effect.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh(loc);
@@ -256,21 +256,21 @@ export function Explorer({ id }: { id: string }) {
     void navigator.clipboard.writeText(paths.map((p) => `"${p}"`).join('\r\n'));
     say('Path copied.');
   };
+  /** Attaches the files to this chat's message and switches back to the chat to write it. */
   const sendToChat = async (paths = [...selected]) => {
-    const tabId = chat.ensureTab();
+    let attached = 0;
     for (const path of paths) {
       try {
-        addAttachment(tabId, await files.attach(path, tabId));
+        addAttachment(id, await files.attach(path, id));
+        attached++;
       } catch (err) {
         say(`${path.split('\\').at(-1)}: ${(err as Error).message}`);
       }
     }
+    if (attached) chat.setView(id, 'chat');
   };
-  const openTerminal = (dir: string) => chat.openTool('terminal', dir);
-  const openTab = (dir: string) => {
-    const tab = chat.openTool('files');
-    explorerPaths.set(tab, dir);
-  };
+  const openTerminal = (dir: string) => chat.terminalAt(id, dir);
+  const openTab = (dir: string) => explorerPaths.set(chat.newTab('files'), dir);
   const runSearch = async (query: string) => {
     if (!query.trim() || !isFolder) return setSearch(null);
     setSearch({ query, results: [], complete: false, loading: true });
@@ -670,7 +670,7 @@ export function Explorer({ id }: { id: string }) {
           className={cmd}
           disabled={!selected.size || selectedEntries.some((x) => x.dir)}
           onClick={() => void sendToChat()}
-          title="Send to chat (attach to your last chat)"
+          title="Attach to this chat's next message"
         >
           <Icon name="share" /> <span>Send to chat</span>
         </button>

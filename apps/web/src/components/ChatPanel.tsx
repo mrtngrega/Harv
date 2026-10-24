@@ -10,9 +10,9 @@ import { useSafety } from '../lib/safetyStore.ts';
 import { ActionBadge, ApprovalCard } from './ApprovalCard.tsx';
 import { SettingsView } from './SettingsView.tsx';
 import { Explorer } from './tools/explorer/Explorer.tsx';
-import { NewTabMenu, SpecialTab, TOOL_ICONS } from './tools/TabParts.tsx';
+import { SpecialTab, TOOL_ICONS, ViewMenu } from './tools/TabParts.tsx';
 import { TerminalView } from './tools/TerminalView.tsx';
-import { updatePending, useDrafts } from '../lib/drafts.ts';
+import { setDraftText, updatePending, useDrafts, useDraftTexts } from '../lib/drafts.ts';
 
 function FileChip({ name, detail, onRemove }: { name: string; detail?: string; onRemove?: () => void }) {
   return (
@@ -133,15 +133,12 @@ function ToolLine({ line }: { line: Line }) {
 }
 
 export function ChatPanel() {
-  const { tabs, activeId, settingsOpen, tools } = useChat();
+  const { tabs, activeId, settingsOpen, views } = useChat();
   const inSettings = activeId === SETTINGS_TAB;
-  const activeTool = tools.find((t) => t.id === activeId);
-  /** Settings or a tool tab is showing: no chat input or attachments. */
-  const nonChat = inSettings || !!activeTool;
   const { approvals } = useSafety();
   const usage = useUsage();
-  const [draft, setDraft] = useState('');
   const pendingByTab = useDrafts();
+  const draftTexts = useDraftTexts();
   const [dragging, setDragging] = useState(false);
   /** The tab whose name is being edited (right-click or F2 on it). */
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -149,6 +146,13 @@ export function ChatPanel() {
   const logRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const active = tabs.find((t) => t.id === activeId) ?? null;
+  /** The active chat's log, or one of its tools (the view menu). */
+  const view = active ? (views[active.id] ?? 'chat') : 'chat';
+  /** Settings or a tool is showing: no chat input or attachments. */
+  const nonChat = inSettings || view !== 'chat';
+  // Each chat keeps its own unsent text.
+  const draft = (active && draftTexts[active.id]) || '';
+  const setDraft = (text: string) => setDraftText(active?.id ?? chat.ensureTab(), text);
   const pending = (activeId && pendingByTab[activeId]) || [];
   const uploading = pending.some((p) => !p.file && !p.error);
   const waiting = approvals.filter((a) => a.tabId === activeId);
@@ -220,14 +224,15 @@ export function ChatPanel() {
     <section
       aria-label="Chat"
       onDragOver={(e) => {
-        if (!e.dataTransfer.types.includes('Files')) return;
+        // The explorer takes its own drops (copying files into the folder).
+        if (nonChat || !e.dataTransfer.types.includes('Files')) return;
         e.preventDefault();
         setDragging(true);
       }}
       onDragLeave={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
       }}
-      onDrop={onDrop}
+      onDrop={(e) => !nonChat && onDrop(e)}
       className="glass relative flex max-h-[calc(100vh-110px)] min-w-0 flex-[999_1_520px] flex-col overflow-hidden rounded-2xl"
     >
       <div role="tablist" aria-label="Open chats" className="flex items-end gap-1 overflow-x-auto border-b border-line px-2 pt-2">
@@ -282,6 +287,11 @@ export function ChatPanel() {
                   className={`flex min-h-9 cursor-pointer items-center gap-1.5 truncate pr-1 pl-3 text-xs ${on ? 'text-ink' : 'text-muted'}`}
                 >
                   {t.busy && <span aria-hidden="true" className="animate-blink size-1.5 flex-none rounded-full bg-accent" />}
+                  {views[t.id] && views[t.id] !== 'chat' && (
+                    <span aria-hidden="true" className="flex-none text-accent">
+                      {TOOL_ICONS[views[t.id]!]}
+                    </span>
+                  )}
                   <span className="truncate">{t.title}</span>
                 </button>
               )}
@@ -296,16 +306,6 @@ export function ChatPanel() {
             </div>
           );
         })}
-        {tools.map((t) => (
-          <SpecialTab
-            key={t.id}
-            icon={TOOL_ICONS[t.kind]}
-            title={t.title}
-            active={t.id === activeId}
-            onSelect={() => chat.setActive(t.id)}
-            onClose={() => chat.closeTool(t.id)}
-          />
-        ))}
         {settingsOpen && (
           <SpecialTab
             icon={TOOL_ICONS.settings}
@@ -315,23 +315,32 @@ export function ChatPanel() {
             onClose={chat.closeSettings}
           />
         )}
-        <NewTabMenu />
+        <button
+          type="button"
+          aria-label="New chat"
+          title="New chat"
+          onClick={() => chat.newTab()}
+          className="size-9 flex-none cursor-pointer text-base hover:text-accent"
+        >
+          +
+        </button>
         <div className="flex-1" />
-        {active?.context && (
+        {view === 'chat' && active?.context && (
           <div className="px-2 pb-2.5 text-[11px] whitespace-nowrap text-muted" title="Tokens Harv sent with the last message in this chat">
             context · {tokens(active.context)} tokens
           </div>
         )}
+        {active && <ViewMenu tabId={active.id} />}
       </div>
 
       {inSettings ? (
         <div className="flex flex-1 flex-col overflow-y-auto px-5 py-4">
           <SettingsView />
         </div>
-      ) : activeTool?.kind === 'terminal' ? (
-        <TerminalView key={activeTool.id} id={activeTool.id} />
-      ) : activeTool?.kind === 'files' ? (
-        <Explorer key={activeTool.id} id={activeTool.id} />
+      ) : active && view === 'terminal' ? (
+        <TerminalView key={active.id} chatId={active.id} />
+      ) : active && view === 'files' ? (
+        <Explorer key={active.id} id={active.id} />
       ) : (
         <div ref={logRef} className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-4 leading-relaxed">
           {!active || active.lines.length === 0 ? (

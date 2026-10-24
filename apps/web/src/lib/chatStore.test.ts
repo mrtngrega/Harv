@@ -77,3 +77,29 @@ describe('the Settings tab', () => {
     expect(tab(tabId)).toBeDefined();
   });
 });
+
+describe('chat views (files and terminal inside a chat)', () => {
+  it('opens a tool in a chat, switches back, and forgets it when the chat closes', () => {
+    const tabId = openTab();
+    expect(getChatState().views[tabId]).toBeUndefined();
+    chat.setView(tabId, 'files');
+    chat.setView(tabId, 'terminal');
+    chat.setView(tabId, 'chat');
+    expect(getChatState().tools[tabId]).toEqual(['files', 'terminal']);
+    expect(getChatState().views[tabId]).toBe('chat');
+
+    chat.setView(tabId, 'terminal');
+    chat.closeTool(tabId, 'terminal');
+    expect(getChatState().tools[tabId]).toEqual(['files']);
+    expect(getChatState().views[tabId]).toBe('chat');
+
+    chat.closeTab(tabId);
+    expect(getChatState().tools[tabId]).toBeUndefined();
+    expect(getChatState().views[tabId]).toBeUndefined();
+  });
+
+  it('can open a new chat straight into its explorer', () => {
+    const tabId = chat.newTab('files');
+    expect(getChatState()).toMatchObject({ activeId: tabId, views: { [tabId]: 'files' }, tools: { [tabId]: ['files'] } });
+  });
+});

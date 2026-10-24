@@ -16,5 +16,10 @@ export function createStore<T>(initial: T) {
       listeners.forEach((l) => l());
     },
     use: () => useSyncExternalStore(subscribe, get),
+    /** Listens outside React (e.g. to save state); returns the unsubscribe. */
+    subscribe: (listener: () => void) => {
+      subscribe(listener);
+      return () => void listeners.delete(listener);
+    },
   };
 }

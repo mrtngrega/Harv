@@ -6,6 +6,7 @@ import '@fontsource/ibm-plex-mono/600.css';
 import './index.css';
 import { App } from './App.tsx';
 import { startSocket } from './lib/socket.ts';
+import './lib/layout.ts';
 
 startSocket();
 
