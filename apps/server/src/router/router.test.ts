@@ -16,7 +16,7 @@ const c = (difficulty: Classification['difficulty'], extra: Partial<Classificati
   ...extra,
 });
 
-function newRouter(classify = vi.fn(async (): Promise<Classification | null> => c(3))) {
+function newRouter(classify: (text: string, ...rest: unknown[]) => Promise<Classification | null> = vi.fn(async () => c(3))) {
   const log = new RouteStore(join(mkdtempSync(join(tmpdir(), 'harv-routes-')), 'harv.db'));
   return { router: new Router(log, classify), classify, log };
 }
