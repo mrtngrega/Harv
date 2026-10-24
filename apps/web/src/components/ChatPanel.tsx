@@ -10,6 +10,7 @@ import { useSafety } from '../lib/safetyStore.ts';
 import { ActionBadge, ApprovalCard } from './ApprovalCard.tsx';
 import { SettingsView } from './SettingsView.tsx';
 import { StartChoice } from './StartChoice.tsx';
+import { StatusLine } from './StatusLine.tsx';
 import { matchCommands, SlashMenu } from './SlashMenu.tsx';
 import { SpecialTab, TOOL_ICONS, ViewMenu } from './tools/TabParts.tsx';
 import { setDraftText, updatePending, useDrafts, useDraftTexts } from '../lib/drafts.ts';
@@ -531,8 +532,10 @@ export function ChatPanel() {
           </div>
         )}
 
+        {!nonChat && <StatusLine tab={active ?? undefined} />}
+
         {!nonChat && (
-          <form onSubmit={send} className="relative flex items-end gap-2.5 border-t border-line py-2.5 pr-3 pl-5">
+          <form onSubmit={send} className="relative flex items-end gap-2.5 pt-1 pr-3 pb-2.5 pl-5">
             {menuItems.length > 0 && <SlashMenu items={menuItems} index={menuAt} onPick={(c) => pickCommand(c.name)} />}
             <label htmlFor="harv-cmd" className="pb-3 leading-5 font-semibold text-accent">
               harv&gt;

@@ -130,6 +130,8 @@ export type ChatServerMessage =
   /** A turn began; `model`/`effort` are what actually runs (AUTO resolved). */
   | { type: 'chat.started'; tabId: string; model: string; effort: EffortLevel; auto: boolean; reason: string }
   | { type: 'chat.delta'; tabId: string; text: string }
+  /** Tokens Claude has written this turn so far (estimated while a message streams, exact after it), for the status line. */
+  | { type: 'chat.progress'; tabId: string; outputTokens: number }
   /** Final text of one assistant message (replaces the streamed text). */
   | { type: 'chat.assistant'; tabId: string; text: string }
   | { type: 'chat.tool'; tabId: string; id: string; name: string; detail: string }

@@ -24,8 +24,8 @@ The mockup is board "2b" at https://claude.ai/artifact/NAbsVqrzJ1MQMSmn3couH4. I
 
 - IBM Plex Mono throughout.
 - The user's misty forest photo, blurred, behind a dark scrim of `rgba(10,16,24,0.55)`. Frosted glass panels use `rgba(16,24,34,0.5)` with a 22px blur and a thin light border. The accent is ice blue `#A8C8E8`, with amber `#F2B880` for warnings at 85% or above.
-- Header: a small status pill (idle, thinking or working), then the model switcher with **AUTO** first, then `auto → model · effort`.
-- Left: a collapsible chat history. Center: Chrome-style chat tabs over a log-style chat, with attachment chips and a `harv>` command line. Right: a stats panel that starts narrow (label, % and thin bar) and expands to show everything, including Claude plan usage and Harv's own tracking.
+- Header: the model switcher with **AUTO** first, then `auto → model · effort`. Harv's status is a Claude Code-style line just above the `harv>` prompt (`StatusLine.tsx`: `✻ thinking… (12s · ↓ 340 tokens · esc to stop)`, fed by `chat.progress`), the user's wish since 2026-10-24.
+- Left: a collapsible chat history (starts collapsed). Center: Chrome-style chat tabs over a log-style chat, with attachment chips and a `harv>` command line. Right: a stats panel that starts narrow (label, % and thin bar) and expands to show everything, including Claude plan usage and Harv's own tracking.
 - Animations are subtle, with a toggle to turn motion off.
 
 ## Auto router

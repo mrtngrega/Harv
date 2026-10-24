@@ -56,6 +56,12 @@ export interface Tab {
   queued?: QueuedMessage[];
   /** This chat's Claude Code commands once its session runs (otherwise the catalog's). */
   commands?: SlashCommandInfo[];
+  /** The status line above the input (like Claude Code's): when this turn began, its output tokens so far, the tool running. */
+  startedAt?: number;
+  outTokens?: number;
+  activity?: string;
+  /** How the last finished turn went, shown faintly when idle. */
+  lastTurn?: { ms: number; tokens: number };
 }
 
 /** The Settings tab's id in `activeId`; it sits in the tab bar after the chats. */
@@ -212,6 +218,9 @@ function withCurrent(tab: Tab, update: (text: string) => string): Tab {
   return { ...tab, lines: [...tab.lines, fresh], currentId: fresh.id };
 }
 
+/** A turn begins: the status line's clock starts (a turn already running keeps its own). */
+const turnStart = (t: Tab): Partial<Tab> => (t.busy && t.startedAt ? {} : { startedAt: Date.now(), outTokens: 0, activity: undefined });
+
 export function applyChatEvent(msg: ChatServerMessage): void {
   switch (msg.type) {
     case 'chat.started': {
@@ -222,16 +231,19 @@ export function applyChatEvent(msg: ChatServerMessage): void {
         const waiting = t.lines.find((l) => l.id === t.currentId && l.text === '');
         if (waiting) {
           const lines = t.lines.map((l) => (l === waiting ? { ...l, tag, reason } : l));
-          return { ...t, busy: true, tag, reason, lines };
+          return { ...t, ...turnStart(t), busy: true, tag, reason, lines };
         }
         const pending = line('harv', '', { tag, reason, streaming: true });
-        return { ...t, busy: true, tag, reason, lines: [...t.lines, pending], currentId: pending.id };
+        return { ...t, ...turnStart(t), busy: true, tag, reason, lines: [...t.lines, pending], currentId: pending.id };
       });
       if (msg.auto) store.set((s) => ({ ...s, routed: `${msg.model} · ${msg.effort}`, routedReason: msg.reason }));
       break;
     }
     case 'chat.delta':
-      updateTab(msg.tabId, (t) => withCurrent(t, (text) => text + msg.text));
+      updateTab(msg.tabId, (t) => ({ ...withCurrent(t, (text) => text + msg.text), activity: undefined }));
+      break;
+    case 'chat.progress':
+      updateTab(msg.tabId, (t) => ({ ...t, outTokens: msg.outputTokens }));
       break;
     case 'chat.assistant':
       updateTab(msg.tabId, (t) => withCurrent(t, () => msg.text));
@@ -239,7 +251,11 @@ export function applyChatEvent(msg: ChatServerMessage): void {
     case 'chat.tool':
       updateTab(msg.tabId, (t) => {
         const done = finishCurrent(t);
-        return { ...done, lines: [...done.lines, line('tool', msg.detail ? `${msg.name} · ${msg.detail}` : msg.name, { ref: msg.id })] };
+        return {
+          ...done,
+          activity: msg.name,
+          lines: [...done.lines, line('tool', msg.detail ? `${msg.name} · ${msg.detail}` : msg.name, { ref: msg.id })],
+        };
       });
       break;
     case 'chat.done':
@@ -249,7 +265,19 @@ export function applyChatEvent(msg: ChatServerMessage): void {
         if (msg.stopped) extra.push(line('notice', 'Stopped.'));
         if (msg.error) extra.push(line('error', msg.error));
         const context = msg.usage?.inputTokens || done.context;
-        return { ...done, busy: false, ...(context ? { context } : {}), lines: [...done.lines, ...extra] };
+        const lastTurn = {
+          ms: msg.usage?.durationMs ?? (done.startedAt ? Date.now() - done.startedAt : 0),
+          tokens: msg.usage?.outputTokens ?? done.outTokens ?? 0,
+        };
+        return {
+          ...done,
+          busy: false,
+          startedAt: undefined,
+          activity: undefined,
+          lastTurn,
+          ...(context ? { context } : {}),
+          lines: [...done.lines, ...extra],
+        };
       });
       break;
     case 'chat.notice':
@@ -519,7 +547,7 @@ export const chat = {
       return;
     }
     const pending = line('harv', '', { streaming: true });
-    updateTab(tabId, (t) => ({ ...t, busy: true, lines: [...t.lines, pending], currentId: pending.id }));
+    updateTab(tabId, (t) => ({ ...t, ...turnStart(t), busy: true, lines: [...t.lines, pending], currentId: pending.id }));
   },
 
   /** A line from the dashboard itself (command help, errors); not saved. */

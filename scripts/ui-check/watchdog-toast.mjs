@@ -8,7 +8,7 @@ const page = await launch({ width, height: 900 });
 await page.send('Page.addScriptToEvaluateOnNewDocument', {
   source: `(() => {
     const Real = window.WebSocket;
-    window.WebSocket = function (...args) { const ws = new Real(...args); window.__harvSocket = ws; return ws; };
+    window.WebSocket = function (...args) { const ws = new Real(...args); if (String(args[0]).endsWith("/ws")) window.__harvSocket = ws; return ws; };
     window.WebSocket.prototype = Real.prototype;
     Object.assign(window.WebSocket, { OPEN: 1, CLOSED: 3, CONNECTING: 0, CLOSING: 2 });
   })();`,

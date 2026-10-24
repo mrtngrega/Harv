@@ -5,10 +5,9 @@ import { ChatPanel } from './components/ChatPanel.tsx';
 import { StatsPanel } from './components/StatsPanel.tsx';
 import { UsageToast } from './components/UsageToast.tsx';
 import { WatchdogToast } from './components/WatchdogToast.tsx';
-import { useBackground, useConnection, useSettings } from './lib/useHarvSocket.ts';
+import { useBackground, useSettings } from './lib/useHarvSocket.ts';
 
 export function App() {
-  const conn = useConnection();
   const { accent, motion, backgroundBlur, scrim, glass, uiScale, density } = useSettings();
   const { version } = useBackground();
   // Before the server says, try the photo anyway; after a removal, show the plain ground colour.
@@ -37,7 +36,7 @@ export function App() {
       <div aria-hidden="true" className="absolute inset-0" style={{ background: `rgb(10 16 24 / ${scrim / 100})` }} />
 
       <div className="relative flex min-h-[var(--app-h)] flex-col gap-3.5 p-4">
-        <Header conn={conn} />
+        <Header />
         {/* Three columns that shrink from 1024px up; stacked below that. */}
         <main className="flex flex-1 flex-col items-stretch gap-3.5 lg:min-h-0 lg:flex-row">
           <HistorySidebar />

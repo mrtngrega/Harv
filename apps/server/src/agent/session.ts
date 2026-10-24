@@ -59,6 +59,10 @@ export class ChatSession {
   toolRunning = false;
   /** The tool running now, for the status pill ("working · Read"). */
   toolName: string | undefined;
+  /** This turn's output tokens: finished messages (exact) plus the streaming one (characters / 4). */
+  private turnTokens = 0;
+  private streamChars = 0;
+  private progressAt = 0;
 
   constructor(
     readonly tabId: string,
@@ -91,6 +95,8 @@ export class ChatSession {
     }
     this.stopping = false;
     this.said = false;
+    this.turnTokens = 0;
+    this.streamChars = 0;
     this.setBusy(true);
     const message = raw ? content : this.withMemoryNote(content);
     this.input.push({ type: 'user', message: { role: 'user', content: message }, parent_tool_use_id: null });
@@ -121,6 +127,23 @@ export class ChatSession {
   private say(text: string) {
     this.said = true;
     this.emit({ type: 'chat.assistant', tabId: this.tabId, text });
+  }
+
+  /** Live token count for the status line, like Claude Code's "↓ 1.2k tokens" (at most twice a second). */
+  private countTokens(ev: { type: string; delta?: unknown; usage?: unknown }) {
+    if (ev.type === 'content_block_delta') {
+      const d = ev.delta as { text?: string; thinking?: string; partial_json?: string };
+      this.streamChars += (d.text ?? d.thinking ?? d.partial_json ?? '').length;
+    } else if (ev.type === 'message_delta') {
+      this.turnTokens += (ev.usage as { output_tokens?: number } | undefined)?.output_tokens ?? Math.ceil(this.streamChars / 4);
+      this.streamChars = 0;
+    } else {
+      return;
+    }
+    const now = Date.now();
+    if (ev.type !== 'message_delta' && now - this.progressAt < 500) return;
+    this.progressAt = now;
+    this.emit({ type: 'chat.progress', tabId: this.tabId, outputTokens: this.turnTokens + Math.ceil(this.streamChars / 4) });
   }
 
   private setBusy(busy: boolean, toolRunning = false) {
@@ -192,6 +215,7 @@ export class ChatSession {
         } else if (ev.type === 'message_start' && this.toolRunning) {
           this.setBusy(true, false);
         }
+        this.countTokens(ev);
         return;
       }
 
