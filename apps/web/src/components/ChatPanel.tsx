@@ -62,7 +62,7 @@ function ChatLine({ line, onHarder }: { line: Line; onHarder?: () => void }) {
   switch (line.kind) {
     case 'you':
       return (
-        <div className="animate-fade-in whitespace-pre-wrap">
+        <div className="animate-fade-in rounded-md border-l-2 border-accent bg-accent/10 px-2.5 py-1.5 whitespace-pre-wrap text-white">
           <Time at={line.at} />
           <span className="text-accent">you ›</span> {line.text}
           {line.files && (
