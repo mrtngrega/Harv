@@ -8,7 +8,7 @@ Harv is a personal AI assistant in the spirit of Jarvis, with a local web dashbo
 
 Stack: TypeScript everywhere, using npm workspaces. `apps/server` runs Node 24 with Fastify, ws, `@anthropic-ai/claude-agent-sdk`, systeminformation, nvidia-smi, LibreHardwareMonitor and SQLite. `apps/web` is React, Vite and Tailwind. `apps/desktop` (Tauri 2) comes later.
 
-The user's hardware: Ryzen 7 5700X3D (8 cores / 16 threads), RTX 3060 Ti 8 GB, 32 GB RAM, Windows 11. Plan: **Claude Pro** (tight limits; the router is tuned for it, see `docs/PLAN.md` §5).
+The user's hardware: Ryzen 7 5700X3D (8 cores / 16 threads), RTX 3060 Ti 8 GB, 32 GB RAM, Windows 11. A notebook on Fedora 44 (KDE Plasma) will run its own Harv, synced with the PC (`docs/PLAN.md` §6m, M10). Plan: **Claude Pro** (tight limits; the router is tuned for it, see `docs/PLAN.md` §5).
 
 ## Harv's identity: same rules for you
 
