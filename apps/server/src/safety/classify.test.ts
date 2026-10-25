@@ -415,6 +415,16 @@ describe('project chats (trusted project folder)', () => {
     expect(cmd('format D:').tier).toBe('blocked');
   });
 
+  it('lets project chats check on and talk to their background agents (blocked as "not one of Harv\'s tools" before)', () => {
+    for (const tool of ['ListAgents', 'SendMessage', 'TaskOutput', 'TaskStop', 'TaskList']) {
+      expect(classify(tool, { to: 'aad748f984eda78f2', message: 'x' }, ctx).tier, tool).toBe('green');
+      expect(classify(tool, {}).tier, tool).toBe('blocked');
+    }
+    expect(classify('Monitor', { command: 'tail -f build.log', description: 'build', timeout_ms: 1000 }, ctx).tier).toBe('green');
+    expect(classify('Monitor', { command: 'rm -rf ~/x', description: 'x', timeout_ms: 1000 }, ctx).tier).toBe('red');
+    expect(classify('Monitor', { command: 'tail -f a.log', description: 'x', timeout_ms: 1 }).tier).toBe('blocked');
+  });
+
   it('changes nothing for assistant chats', () => {
     expect(classifyCommand('npm test').tier).toBe('red');
     expect(classify('Agent', {}).tier).toBe('blocked');

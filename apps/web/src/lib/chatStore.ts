@@ -1,4 +1,5 @@
 import type {
+  BackgroundTask,
   Attachment,
   ChatServerMessage,
   ClientMessage,
@@ -56,6 +57,8 @@ export interface Tab {
   queued?: QueuedMessage[];
   /** This chat's Claude Code commands once its session runs (otherwise the catalog's). */
   commands?: SlashCommandInfo[];
+  /** Background agents and shells it started (the strip above the prompt). */
+  tasks?: BackgroundTask[];
   /** The status line above the input (like Claude Code's): when this turn began, its output tokens so far, the tool running. */
   startedAt?: number;
   outTokens?: number;
@@ -141,6 +144,7 @@ const fromSnapshot = (chat: ChatSnapshot): Tab => ({
   ...(chat.context ? { context: chat.context } : {}),
   ...(chat.queued?.length ? { queued: chat.queued } : {}),
   ...(chat.commands ? { commands: chat.commands } : {}),
+  ...(chat.tasks?.length ? { tasks: chat.tasks } : {}),
   lines: chat.lines.map((l) => ({
     id: newId(),
     at: l.at ?? Date.now(),
@@ -306,6 +310,9 @@ export function applyChatEvent(msg: ChatServerMessage): void {
       break;
     case 'chat.commands':
       updateTab(msg.tabId, (t) => ({ ...t, commands: msg.commands }));
+      break;
+    case 'chat.tasks':
+      updateTab(msg.tabId, (t) => ({ ...t, tasks: msg.tasks }));
       break;
     case 'chat.cleared':
       updateTab(msg.tabId, (t) => ({ ...t, lines: [], currentId: null, context: undefined, lastTurn: undefined }));
@@ -574,6 +581,11 @@ export const chat = {
 
   stop(tabId: string) {
     sendMessage({ type: 'chat.stop', tabId });
+  },
+
+  /** Stops one background agent or shell; the reply goes on. */
+  stopTask(tabId: string, taskId: string) {
+    sendMessage({ type: 'chat.stopTask', tabId, taskId });
   },
 
   /** Drops a queued message before it runs. */

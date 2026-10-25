@@ -143,7 +143,8 @@ export class ChatManager {
     return this.store.openChats().map((chat) => {
       const queued = this.queuedOf(chat.id);
       const commands = this.commands.get(chat.id);
-      return { ...chat, ...(queued.length ? { queued } : {}), ...(commands ? { commands } : {}) };
+      const tasks = this.sessions.get(chat.id)?.tasks() ?? [];
+      return { ...chat, ...(queued.length ? { queued } : {}), ...(commands ? { commands } : {}), ...(tasks.length ? { tasks } : {}) };
     });
   }
 
@@ -664,6 +665,11 @@ export class ChatManager {
       this.emit({ type: 'chat.notice', tabId, message: `Removed ${dropped === 1 ? 'the queued message' : `${dropped} queued messages`}.` });
     this.gate.cancel(tabId);
     await this.sessions.get(tabId)?.stop();
+  }
+
+  /** Stops one background task of a chat (the strip's ■), leaving the reply running. */
+  async stopTask(tabId: string, taskId: string): Promise<void> {
+    await this.sessions.get(tabId)?.stopTask(taskId);
   }
 
   /** A line from Harv itself (e.g. an Undo result) in a chat's log. */

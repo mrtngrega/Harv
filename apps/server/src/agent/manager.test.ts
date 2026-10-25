@@ -52,6 +52,10 @@ class FakeSession {
     this.emit({ type: 'chat.done', tabId: this.tabId, ok: false, stopped: true });
   }
   close() {}
+  tasks() {
+    return [];
+  }
+  async stopTask() {}
 }
 
 vi.mock('./session.ts', () => ({ ChatSession: FakeSession }));

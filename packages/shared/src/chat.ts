@@ -33,6 +33,23 @@ export interface QueuedMessage {
   files?: string[];
 }
 
+/** A background task a chat started (a subagent, a shell or a monitor), for the strip above the prompt. */
+export interface BackgroundTask {
+  id: string;
+  /** "local_agent", "local_bash", "monitor"… */
+  kind: string;
+  /** The agent type of a subagent ("general-purpose", a custom agent's name). */
+  agent?: string;
+  description: string;
+  status: 'running' | 'completed' | 'failed' | 'stopped';
+  startedAt: number;
+  endedAt?: number;
+  /** The last tool it used, while it runs. */
+  lastTool?: string;
+  /** Its result summary when it ended, or its one-line status while it runs. */
+  summary?: string;
+}
+
 /** "auto" lets Harv pick; anything else is a model id from the catalog. */
 export type ModelChoice = 'auto' | (string & {});
 
@@ -99,6 +116,8 @@ export interface ChatSnapshot {
   queued?: QueuedMessage[];
   /** This chat's slash commands, once its session has started (otherwise the catalog's). */
   commands?: SlashCommandInfo[];
+  /** Background tasks it started that are running or ended a short while ago. */
+  tasks?: BackgroundTask[];
 }
 
 export interface HistoryItem {
@@ -114,6 +133,8 @@ export interface HistoryItem {
 export type ChatClientMessage =
   | { type: 'chat.send'; tabId: string; text: string; model: ModelChoice; effort: EffortLevel; attachments?: Attachment[] }
   | { type: 'chat.stop'; tabId: string }
+  /** Stop one background task (a subagent or shell) without stopping the reply. */
+  | { type: 'chat.stopTask'; tabId: string; taskId: string }
   /** Drop a queued message before it runs. */
   | { type: 'chat.unqueue'; tabId: string; id: string }
   /** Run a queued message now: the current reply stops and this one goes first. */
@@ -153,5 +174,7 @@ export type ChatServerMessage =
   | { type: 'chat.queued'; tabId: string; items: QueuedMessage[] }
   /** A chat's slash commands changed (its session started, or found new skills). */
   | { type: 'chat.commands'; tabId: string; commands: SlashCommandInfo[] }
+  /** A chat's background tasks (the whole list, replacing the last one). */
+  | { type: 'chat.tasks'; tabId: string; tasks: BackgroundTask[] }
   /** The history list; `query` echoes the search it answers ("" = everything). */
   | { type: 'history'; items: HistoryItem[]; query: string };

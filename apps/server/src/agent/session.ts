@@ -9,6 +9,7 @@ import { describeTool, MEMORY_TOOLS } from './guard.ts';
 import { memoryChanges, memorySnapshot } from './memory.ts';
 import { buildOptions, SUBSCRIPTION_KEY_SOURCES } from './options.ts';
 import { AsyncQueue } from './queue.ts';
+import { TaskTracker } from './tasks.ts';
 
 type Emit = (msg: ChatServerMessage) => void;
 
@@ -63,6 +64,8 @@ export class ChatSession {
   private turnTokens = 0;
   private streamChars = 0;
   private progressAt = 0;
+  /** Subagents and shells this chat runs in the background, for the strip above the prompt. */
+  private taskTracker = new TaskTracker();
 
   constructor(
     readonly tabId: string,
@@ -116,6 +119,15 @@ export class ChatSession {
     if (!this.busy) return;
     this.stopping = true;
     await this.q.interrupt();
+  }
+
+  /** Stops one background task; the SDK reports its end as a task_notification. */
+  async stopTask(taskId: string): Promise<void> {
+    await this.q.stopTask(taskId);
+  }
+
+  tasks() {
+    return this.taskTracker.list();
   }
 
   close(): void {
@@ -172,6 +184,10 @@ export class ChatSession {
     const tabId = this.tabId;
     switch (msg.type) {
       case 'system':
+        if (this.taskTracker.apply(msg)) {
+          this.emit({ type: 'chat.tasks', tabId, tasks: this.taskTracker.list() });
+          return;
+        }
         if (msg.subtype === 'commands_changed') {
           this.hooks.onCommands?.(toCommandInfo(msg.commands));
           return;

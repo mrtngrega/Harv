@@ -41,6 +41,15 @@ export const AGENT_TOOLS = [
   'BashOutput',
   'KillShell',
   'KillBash',
+  // Background agents: listing them, messaging them, reading or stopping their output (the user's wish 2026-10-25).
+  'ListAgents',
+  'SendMessage',
+  'TaskOutput',
+  'TaskStop',
+  'TaskCreate',
+  'TaskGet',
+  'TaskUpdate',
+  'TaskList',
   // Skills and slash commands only load instructions; what they then do is checked tool by tool.
   'Skill',
   'SlashCommand',
@@ -207,6 +216,13 @@ export function classify(tool: string, input: Record<string, unknown>, ctx: Clas
       project: inProject,
       shell: tool === 'PowerShell' ? 'powershell' : 'bash',
     });
+  }
+
+  // Monitor watches a shell command's output lines (or a WebSocket): the command is checked like any other.
+  if (tool === 'Monitor' && ctx.project) {
+    const command = str(input, 'command');
+    if (!command) return verdict('green', 'Watches a WebSocket for events.', `monitor ${str(input, 'description')}`);
+    return classifyCommand(command, str(input, 'description'), { ...ctx, shell: 'bash' });
   }
 
   if (tool.startsWith('mcp__') && ctx.project) return classifyMcp(tool);

@@ -11,6 +11,7 @@ import { ActionBadge, ApprovalCard } from './ApprovalCard.tsx';
 import { SettingsView } from './SettingsView.tsx';
 import { StartChoice } from './StartChoice.tsx';
 import { StatusLine } from './StatusLine.tsx';
+import { TaskStrip } from './TaskStrip.tsx';
 import { matchCommands, SlashMenu } from './SlashMenu.tsx';
 import { SpecialTab, TOOL_ICONS, ViewMenu } from './tools/TabParts.tsx';
 import { setDraftText, updatePending, useDrafts, useDraftTexts } from '../lib/drafts.ts';
@@ -593,6 +594,7 @@ export function ChatPanel() {
           </div>
         )}
 
+        {!nonChat && <TaskStrip tab={active ?? undefined} />}
         {!nonChat && <StatusLine tab={active ?? undefined} />}
 
         {!nonChat && (

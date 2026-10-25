@@ -397,6 +397,9 @@ app.get('/ws', { websocket: true }, (socket) => {
       case 'chat.stop':
         void chats.stop(msg.tabId);
         break;
+      case 'chat.stopTask':
+        void chats.stopTask(msg.tabId, msg.taskId).catch(() => {});
+        break;
       case 'chat.unqueue':
         chats.unqueue(msg.tabId, msg.id);
         break;

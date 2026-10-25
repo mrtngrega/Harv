@@ -204,5 +204,8 @@ export function buildOptions(
       chat ? chat.gate.canUseTool(name, input, toolUseID, chat.tabId) : { behavior: 'deny', message: 'No tools here.' },
     hooks: gateHooks(chat),
     includePartialMessages: true,
+    // The dashboard can stop each background agent on its own (the strip above harv>),
+    // so Stop on a reply ends only the reply, not the agents it started.
+    perTaskStopAffordance: true,
   };
 }
