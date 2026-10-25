@@ -18,6 +18,12 @@ const ENDED: Record<string, BackgroundTask['status']> = { completed: 'completed'
  */
 export class TaskTracker {
   private tasks = new Map<string, Tracked>();
+  /** The tool call that started each task, to find its command. */
+  private toolUses = new Map<string, string>();
+
+  toolUseOf(taskId: string): string | undefined {
+    return this.toolUses.get(taskId);
+  }
 
   /** Takes one SDK message; true when the list changed. */
   apply(msg: SDKMessage, now = Date.now()): boolean {
@@ -48,6 +54,7 @@ export class TaskTracker {
         return true;
       }
       case 'task_started': {
+        if (msg.tool_use_id) this.toolUses.set(msg.task_id, msg.tool_use_id);
         if (msg.ambient || msg.skip_transcript) return false;
         this.tasks.set(msg.task_id, {
           id: msg.task_id,

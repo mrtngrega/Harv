@@ -9,6 +9,7 @@ import { describeTool, MEMORY_TOOLS } from './guard.ts';
 import { memoryChanges, memorySnapshot } from './memory.ts';
 import { buildOptions, SUBSCRIPTION_KEY_SOURCES } from './options.ts';
 import { AsyncQueue } from './queue.ts';
+import { killShellTree } from './killTree.ts';
 import { TaskTracker } from './tasks.ts';
 
 type Emit = (msg: ChatServerMessage) => void;
@@ -70,6 +71,8 @@ export class ChatSession {
   private contextIn = 0;
   /** Subagents and shells this chat runs in the background, for the strip above the prompt. */
   private taskTracker = new TaskTracker();
+  /** Background Bash commands by tool call (subagents' too), so stopping one can end what it started. */
+  private shellCommands = new Map<string, string>();
 
   constructor(
     readonly tabId: string,
@@ -125,8 +128,11 @@ export class ChatSession {
     await this.q.interrupt();
   }
 
-  /** Stops one background task; the SDK reports its end as a task_notification. */
+  /** Stops one background task, with everything it started; the SDK reports its end as a task_notification. */
   async stopTask(taskId: string): Promise<void> {
+    const toolUse = this.taskTracker.toolUseOf(taskId);
+    const command = toolUse && this.shellCommands.get(toolUse);
+    if (command) await killShellTree(command);
     await this.q.stopTask(taskId);
   }
 
@@ -146,7 +152,7 @@ export class ChatSession {
       this.q.close();
     };
     if (!running.length) return end();
-    const stops = Promise.allSettled(running.map((t) => this.q.stopTask(t.id)));
+    const stops = Promise.allSettled(running.map((t) => this.stopTask(t.id)));
     void Promise.race([stops, new Promise((r) => setTimeout(r, 5000))]).finally(end);
   }
 
@@ -271,6 +277,13 @@ export class ChatSession {
       }
 
       case 'assistant': {
+        for (const block of msg.message.content) {
+          const input = (block.type === 'tool_use' ? block.input : undefined) as
+            { command?: unknown; run_in_background?: unknown } | undefined;
+          if (block.type === 'tool_use' && block.name === 'Bash' && input?.run_in_background && typeof input.command === 'string') {
+            this.shellCommands.set(block.id, input.command);
+          }
+        }
         if (msg.parent_tool_use_id) return;
         if (msg.error === 'rate_limit') this.hooks.onRateLimit({ status: 'rejected' });
         if (msg.error && msg.error !== 'max_output_tokens') {

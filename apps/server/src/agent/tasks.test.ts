@@ -1,5 +1,6 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { describe, expect, it } from 'vitest';
+import { msysTree, wrapperFragment } from './killTree.ts';
 import { ENDED_SHOWN_MS, TaskTracker } from './tasks.ts';
 
 // The SDK's task events, with only the fields the tracker reads.
@@ -66,5 +67,37 @@ describe('background task strip', () => {
     t.apply(sys('task_notification', { task_id: 'a1', status: 'failed', summary: '', output_file: '' }), 100);
     expect(t.list(100 + ENDED_SHOWN_MS - 1)).toHaveLength(1);
     expect(t.list(100 + ENDED_SHOWN_MS + 1)).toHaveLength(0);
+  });
+});
+
+describe('stopping a background shell on Windows', () => {
+  it('remembers which tool call started a task', () => {
+    const t = new TaskTracker();
+    t.apply(sys('task_started', { ...agent, task_id: 'b1', task_type: 'local_bash', tool_use_id: 'toolu_1', is_backgrounded: true }));
+    expect(t.toolUseOf('b1')).toBe('toolu_1');
+    expect(t.toolUseOf('nope')).toBeUndefined();
+  });
+
+  it("matches Claude Code's wrapper shell by a quote-free part of the command", () => {
+    expect(wrapperFragment('sleep 300')).toBe('sleep 300');
+    expect(wrapperFragment(`cd "C:/My files/app" && npm run dev -- --port 5180`)).toBe('&& npm run dev -- --port 5180');
+    expect(wrapperFragment(`echo 'hi'`)).toBeNull();
+  });
+});
+
+describe("Git Bash's process tree (Windows' own parent links are broken by its forks)", () => {
+  // Real `ps -l` output: the wrapper bash (WINPID 28336) runs `sleep 66` in its process group 741.
+  const ps = [
+    '      PID    PPID    PGID     WINPID   TTY         UID    STIME COMMAND',
+    '      735     734     734      24084  ?         197609 20:47:43 /usr/bin/sleep',
+    '      742     741     741      28900  ?         197609 20:48:12 /usr/bin/sleep',
+    '      741       1     741      28336  ?         197609 20:48:12 /usr/bin/bash',
+    '      750     742     750      31000  ?         197609 20:48:13 /c/Program Files/nodejs/node',
+    '      744       1     744      13080  ?         197609 20:48:25 /usr/bin/bash',
+  ].join('\n');
+
+  it('finds everything under the wrapper, and nothing else', () => {
+    expect(msysTree(ps, [28336]).sort()).toEqual([28336, 28900, 31000].sort());
+    expect(msysTree(ps, [99999])).toEqual([]);
   });
 });
