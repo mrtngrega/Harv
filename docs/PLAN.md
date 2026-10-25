@@ -322,3 +322,16 @@ Goal: Harv on the PC and on the notebook (Fedora 44, KDE Plasma) acts like one a
 4. **M10d: The hub (old 2015 i5 laptop).** An always-on box at home: Ubuntu Server 24.04 or Debian (no desktop), SSD if it still has a hard drive, battery checked for swelling (removed if so, charge limit ~60% if the BIOS allows), runs with the lid closed, ~10 W. Both Harvs sync through it over Tailscale, live, and it holds changes for an offline device, so data never leaves the user's devices. Git becomes an encrypted offsite backup the hub pushes daily. Later the hub runs its own Harv: reminders, scheduled jobs while the PC sleeps, reachable from the phone over Tailscale.
 
 **Rules that still hold:** subscription only (each device logs into Claude Code with the same account, nothing billed); personal use on the user's own devices only, never shared or hosted for others; the dashboard and server stay on localhost, and anything that listens beyond it (M10c, M10d) is tailnet-only with an identity check; no personal data in this public repo.
+
+## 6n. Ideas round (2026-10-25, the user's answers)
+
+From `Harv_ideas.txt` and the action logs of both devices. Build order; each item is removed from the ideas file once shipped.
+
+1. **Fewer approvals.** The notebook's car_radio chat raised ~60 red cards in an hour for routine work: `python3 - <<EOF` scripts editing project files, scratch work in `/tmp` (magick, montage, headless Chrome), plain `curl` downloads, read-only commands (`fc-list`, `ls | awk`, `date`, `gh repo list`); a normal `git push` in a project asked; an edit of `mockup.html` was blocked as "credentials". Decided: project chats ask only for really risky actions (deleting outside the project, installs, sudo, system settings/registry, force push, sending messages); read-only commands stop asking everywhere, and downloads into Harv's workspace too. Every real command from the logs becomes a `classify.test.ts` case.
+2. **Background agents.** The gate blocks `ListAgents`/`SendMessage` ("isn't one of Harv's tools"), so Harv can't check his own agents. Allow them; show the SDK's `background_tasks_changed` / `task_*` events as an agents strip in the chat (running, done, failed, stop via `stopTask`).
+3. **Earlier sessions.** Reading Claude Code's transcripts (`~/.claude/projects/**/*.jsonl`) is blocked as credentials; allow reads there (`.credentials.json` stays blocked).
+4. **Context meter.** It updates only at `chat.done` and sums `result.usage` over every model call of the turn (inflated by tool loops). Use each assistant message's own usage, live.
+5. **Project sync.** Every project Harv starts gets its own GitHub repo; Harv **always asks** private or public. A `project` sync event (name + remote); the other device adds it to Projects and clones it into its projects folder; opening it there runs `git pull --ff-only` when the tree is clean.
+6. **`/report <text>`** appends a dated line (device, chat) to `Harv_ideas.txt`; no model call.
+7. **`/fresh`** saves memory, open work and a handoff summary, then continues the chat in a new Claude session seeded with that summary. `/clear` stays as is.
+8. **`/btw`** answers "Couldn't answer that side question": the side query fails silently (its errors are swallowed). Log the cause, then fix.
