@@ -5,3 +5,5 @@ make it so when i leave a chat open with a session and i turn off my pc or the h
 - Add a "clear" command that saves everything (memory, open work, a short handoff summary) and prepares for a new session, so he can start fresh sessions regularly to save tokens. Works alongside the existing "bye" protocol.
 - /btw does not work. Needs fixing.
 - Tweak the approvals: what Harv has access to is too strict. Loosen the permission rules so routine actions do not trigger approval prompts.
+- Background agents: no visible status, and it is unclear whether they are running. Show their status (running, done, failed) in the dashboard.
+- Harv has no access to his previous sessions. Give him access to them so he can look back at earlier chats.
