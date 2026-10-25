@@ -25,6 +25,8 @@ export type SyncEvent =
   | { t: 'delete'; chat: string; at: number }
   /** A memory file written (or deleted, with null). `base` is the hash of the version it replaced, to spot edits on both sides. */
   | { t: 'memory'; name: string; content: string | null; base: string | null; at: number }
+  /** A shared text file (the user's ideas list), never deleted. `base` is the hash of the version it replaced. */
+  | { t: 'file'; name: string; content: string; base: string | null; at: number }
   /** One shared setting (newest wins per key). */
   | { t: 'setting'; key: string; value: unknown; at: number }
   /** A row of the router's log, for Harv's own usage stats (sent again when its tokens or feedback arrive). */

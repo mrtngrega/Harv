@@ -24,3 +24,6 @@ Thumbs.db
 # Build output
 dist/
 scripts/ui-check/out/
+
+# The user's ideas list: personal, kept in step by Harv's device sync (docs/PLAN.md §6m), not git
+Harv_ideas.txt

@@ -42,6 +42,7 @@ type Device = {
   chats: ChatStore;
   routes: RouteStore;
   memory: string;
+  ideas: string;
   settings: SettingsPort;
   engine: SyncEngine;
   changes: RemoteChanges[];
@@ -51,13 +52,15 @@ type Device = {
 let n = 0;
 let remote = '';
 
-function device(name: string): Device {
+/** `files` replaces the shared files (an empty map plays a Harv from before they synced). */
+function device(name: string, files?: Record<string, string>): Device {
   const home = join(root, `${name}-${n}`);
   mkdirSync(home, { recursive: true });
   const db = join(home, 'harv.db');
   const chats = new ChatStore(db);
   const routes = new RouteStore(db);
   const memory = join(home, 'memory');
+  const ideas = join(home, 'Harv_ideas.txt');
   const settings = settingsPort({ syncEnabled: true, syncRepo: remote, deviceName: name });
   const changes: RemoteChanges[] = [];
   const syncStore = new SyncStore(db);
@@ -70,13 +73,14 @@ function device(name: string): Device {
     { chats: (c) => changes.push(c), settings: () => {}, status: () => {}, log: () => {} },
     memory,
     settings,
+    files ?? { ideas },
   );
   const sync = async () => {
     await engine.now();
     const error = engine.status().error;
     if (error) throw new Error(error);
   };
-  return { home, chats, routes, memory, settings, engine, changes, sync };
+  return { home, chats, routes, memory, ideas, settings, engine, changes, sync };
 }
 
 /** Two devices on one fresh repo; the notebook already has the PC's key. */
@@ -397,5 +401,66 @@ describe('Git sync between two devices', { timeout: 60_000 }, () => {
     await pc.sync();
     await nb.sync();
     expect(readFileSync(join(nb.memory, 'My_Notes v2.md'), 'utf8')).toBe('hand made\n');
+  });
+
+  it('syncs the ideas file, merging the lines when both devices changed it', async () => {
+    const [pc, nb] = await pair();
+    writeFileSync(pc.ideas, '- fix /btw\n');
+    await pc.sync();
+    await nb.sync();
+    expect(readFileSync(nb.ideas, 'utf8')).toBe('- fix /btw\n');
+
+    // Changed on one side only: just taken over (lines removed too).
+    writeFileSync(nb.ideas, '- agent status\n');
+    await nb.sync();
+    await pc.sync();
+    expect(readFileSync(pc.ideas, 'utf8')).toBe('- agent status\n');
+
+    // Changed on both while apart: the newer text, then the other's extra lines, on both devices.
+    writeFileSync(pc.ideas, '- agent status\n- /report command\n');
+    await new Promise((r) => setTimeout(r, 20));
+    writeFileSync(nb.ideas, '- agent status\n- clear command\n');
+    await pc.sync();
+    await nb.sync();
+    await pc.sync();
+    await nb.sync();
+    for (const d of [pc, nb]) {
+      expect(readFileSync(d.ideas, 'utf8')).toBe('- agent status\n- clear command\n- /report command\n');
+    }
+    // Settled: nothing more to send.
+    await pc.sync();
+    await nb.sync();
+    expect(pc.engine.status().pending).toBe(0);
+    expect(nb.engine.status().pending).toBe(0);
+  });
+
+  it('writes the ideas file back when it disappears, never deleting it on the other device', async () => {
+    const [pc, nb] = await pair();
+    writeFileSync(pc.ideas, '- one\n');
+    await pc.sync();
+    await nb.sync();
+    // Say git removed it from the notebook's checkout.
+    rmSync(nb.ideas);
+    await nb.sync();
+    expect(readFileSync(nb.ideas, 'utf8')).toBe('- one\n');
+    await pc.sync();
+    expect(readFileSync(pc.ideas, 'utf8')).toBe('- one\n');
+  });
+
+  it('catches up on ideas a Harv from before shared files skipped', async () => {
+    const pc = device('PC');
+    await pc.sync();
+    const old = device('notebook', {});
+    copyFileSync(join(pc.home, 'sync.key'), join(old.home, 'sync.key'));
+    await old.sync();
+    writeFileSync(pc.ideas, '- from the PC\n');
+    await pc.sync();
+    await old.sync();
+    old.engine.stop();
+    // Updated: the same home, now with the ideas file (the replay flag of the old version is unset).
+    const nb = device('notebook');
+    (nb.engine as unknown as { db: SyncStore }).db.set('filesReplayed', false);
+    await nb.sync();
+    expect(readFileSync(nb.ideas, 'utf8')).toBe('- from the PC\n');
   });
 });

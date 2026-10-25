@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DEFAULT_SETTINGS, SHARED_SETTINGS, type HarvSettings, type StoredLine, type SyncPeer, type SyncStatus } from '@harv/shared';
 import { MEMORY_DIR, toSlug } from '../agent/memory.ts';
 import { loadSettings, onSettingsChange, settingsTime, updateSettings } from '../settings.ts';
@@ -23,6 +24,10 @@ const CHUNK = /^(\d{12})-(\d{12})\.hrv$/;
 const hash = (s: string | null) => (s === null ? null : createHash('sha256').update(s).digest('hex').slice(0, 16));
 /** A memory name from the other device: letters, digits, spaces, dots, dashes, underscores; no path. */
 const SAFE_NAME = /^\w[\w .-]{0,99}$/;
+/** Text files kept in step between devices, by sync name: the user's ideas list at the repo root (each device has its own checkout). */
+export const SHARED_FILES: Record<string, string> = {
+  ideas: fileURLToPath(new URL('../../../../Harv_ideas.txt', import.meta.url)),
+};
 const pad = (n: number) => String(n).padStart(12, '0');
 const isDefault = (key: keyof HarvSettings, value: unknown) => JSON.stringify(DEFAULT_SETTINGS[key]) === JSON.stringify(value);
 
@@ -103,6 +108,7 @@ export class SyncEngine {
     private hooks: SyncHooks,
     private memoryDir = MEMORY_DIR,
     private settings: SettingsPort = realSettings,
+    private files: Record<string, string> = SHARED_FILES,
   ) {
     this.id = deviceId(home);
     this.repo = new SyncRepo(join(home, 'sync'), this.id);
@@ -234,6 +240,7 @@ export class SyncEngine {
       if (!this.db.get('snapshot', false)) this.snapshot();
       // Local memory edits are noted before the other device's are applied, which would hide them.
       this.diffMemory();
+      this.diffFiles();
       this.applyPeers(key);
       this.writeChunks(key);
       await this.repo.commit(`${this.name}: changes up to ${this.db.get('written', 0)}`);
@@ -316,6 +323,7 @@ export class SyncEngine {
     }
     // Memory files go out through the next diff (nothing is marked as sent yet).
     this.db.set('memory', {});
+    for (const name of Object.keys(this.files)) this.db.set(`file:${name}`, null);
     this.db.set('snapshot', true);
     this.record(true);
   }
@@ -346,6 +354,29 @@ export class SyncEngine {
     this.db.set('memory', now);
   }
 
+  private readFile(name: string): string | null {
+    const path = this.files[name]!;
+    return existsSync(path) ? readFileSync(path, 'utf8') : null;
+  }
+
+  /**
+   * Shared file changes since the last sync become events. The last synced text is kept, so a
+   * file that disappeared (say, git removed it from a checkout) is written back, never deleted.
+   */
+  private diffFiles() {
+    for (const [name, path] of Object.entries(this.files)) {
+      const sent = this.db.get<string | null>(`file:${name}`, null);
+      const content = this.readFile(name);
+      if (content === null) {
+        if (sent !== null) writeFileSync(path, sent, 'utf8');
+        continue;
+      }
+      if (content === sent) continue;
+      this.db.add({ t: 'file', name, content, base: hash(sent), at: statSync(path).mtimeMs });
+      this.db.set(`file:${name}`, content);
+    }
+  }
+
   private writeChunks(key: Buffer) {
     let written = this.db.get('written', 0);
     for (;;) {
@@ -374,10 +405,12 @@ export class SyncEngine {
       history: false,
     };
     let settings: HarvSettings | undefined;
+    // Shared files arrived before this version: once, read the chunks already seen again for them.
+    const replay = !this.db.get('filesReplayed', false);
     for (const peer of this.peerIds()) {
       let cursor = this.db.get(`cursor:${peer}`, 0);
       for (const c of this.chunkFiles(peer)) {
-        if (c.to <= cursor) continue;
+        if (c.to <= cursor && !replay) continue;
         let chunk: Chunk;
         try {
           chunk = open<Chunk>(key, `${peer}/${c.file}`, readFileSync(join(this.repo.dir, peer, c.file)));
@@ -388,12 +421,15 @@ export class SyncEngine {
         }
         let last = this.db.get<Omit<SyncPeer, 'id'> | null>(`peer:${peer}`, null)?.lastChange ?? 0;
         for (const { seq, e } of chunk.events) {
-          if (seq <= cursor) continue;
+          if (seq <= cursor) {
+            if (e.t === 'file') this.applyFile(e);
+            continue;
+          }
           const changed = this.apply(e, chunk.device.name, changes);
           if (changed) settings = changed;
           last = Math.max(last, e.t === 'route' ? e.row.at : e.at);
         }
-        cursor = c.to;
+        cursor = Math.max(cursor, c.to);
         this.db.set(`cursor:${peer}`, cursor);
         this.db.set(`peer:${peer}`, { name: chunk.device.name, lastChange: last || undefined });
       }
@@ -409,6 +445,7 @@ export class SyncEngine {
       this.hooks.chats(changes);
     }
     if (settings) this.hooks.settings(settings);
+    this.db.set('filesReplayed', true);
   }
 
   /** Deleted on either device: later changes to it are ignored. */
@@ -453,6 +490,9 @@ export class SyncEngine {
         break;
       case 'memory':
         this.applyMemory(e, deviceName);
+        break;
+      case 'file':
+        this.applyFile(e);
         break;
       case 'setting': {
         const key = e.key as (typeof SHARED_SETTINGS)[number];
@@ -512,5 +552,30 @@ export class SyncEngine {
     if (after === null) delete sent[name];
     else sent[name] = hash(after)!;
     this.db.set('memory', sent);
+  }
+
+  /**
+   * A shared file from the other device. If this device changed it too since the version the
+   * other one replaced, the newer one is kept and the other's extra lines are added below it,
+   * so no note is lost (both devices merge the same way, and end up with the same text).
+   */
+  private applyFile(e: Extract<SyncEvent, { t: 'file' }>) {
+    const path = this.files[e.name];
+    if (!path) return;
+    const sent = this.db.get<string | null>(`file:${e.name}`, null);
+    const current = this.readFile(e.name) ?? sent;
+    let next = e.content;
+    if (current !== null && current !== e.content && hash(current) !== e.base) {
+      const localAt = existsSync(path) ? statSync(path).mtimeMs : 0;
+      // A tie goes by the text, so both devices pick the same one.
+      const remoteWins = e.at > localAt || (e.at === localAt && e.content > current);
+      const [winner, loser] = remoteWins ? [e.content, current] : [current, e.content];
+      const have = new Set(winner.split(/\r?\n/));
+      const extra = loser.split(/\r?\n/).filter((l) => l.trim() && !have.has(l));
+      next = extra.length ? `${winner.replace(/\s*$/, '')}\n${extra.join('\n')}\n` : winner;
+    }
+    if (next !== this.readFile(e.name)) writeFileSync(path, next, 'utf8');
+    // What the other device has counts as sent; a merge differs from it, so the next diff sends the merge.
+    this.db.set(`file:${e.name}`, e.content);
   }
 }
