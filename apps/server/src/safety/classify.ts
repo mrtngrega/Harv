@@ -119,7 +119,7 @@ const verdict = (tier: Tier, reason: string, summary: string, targets: string[] 
 const str = (input: Record<string, unknown>, key: string) => (typeof input[key] === 'string' ? (input[key] as string) : '');
 
 export function isSensitivePath(p: string): boolean {
-  return (SENSITIVE_PATHS.some((re) => re.test(p)) || hasKeyFile(p)) && !isClaudeMemory(p) && !isClaudeToolResult(p);
+  return (SENSITIVE_PATHS.some((re) => re.test(p)) || hasKeyFile(p)) && !isClaudeHistory(p);
 }
 
 /** A command's shell lines mention a credential file (key files only as whole command words, like `cat server.key`). */
@@ -141,22 +141,22 @@ const scriptPaths = (text: string) =>
   [...quotedStrings(text), ...text.split(/[\s"'`(),;=]+/).filter((w) => /[\\/]/.test(w))].filter(looksLikePath);
 
 /**
- * Claude Code's project memory notes (~/.claude/projects/<folder>/memory/*.md). Project
- * chats share them with Claude Code, so they're allowed although they're under .claude.
+ * Claude Code's history (~/.claude/projects/<folder>/): earlier sessions' transcripts
+ * (`<session>.jsonl`, the user's wish 2026-10-25), tool outputs too big for the chat
+ * (Harv is told to read them there) and the project memory notes. Readable although
+ * it's under .claude; the login and settings next to it stay blocked.
  */
-export function isClaudeMemory(p: string): boolean {
-  const path = fullPath(p);
-  return isInside(path, join(homedir(), '.claude', 'projects')) && /[\\/]memory[\\/][^\\/]+\.md$|[\\/]memory[\\/]?$/i.test(path);
+export function isClaudeHistory(p: string): boolean {
+  return isInside(fullPath(p), join(homedir(), '.claude', 'projects'));
 }
 
 /**
- * Where the SDK saves a tool's output that was too big for the chat
- * (~/.claude/projects/<folder>/<session>/tool-results/…). Harv is told to read it there,
- * so blocking it left Harv stuck.
+ * Claude Code's project memory notes (~/.claude/projects/<folder>/memory/*.md). Project
+ * chats share them with Claude Code, so they may write them too.
  */
-export function isClaudeToolResult(p: string): boolean {
+export function isClaudeMemory(p: string): boolean {
   const path = fullPath(p);
-  return isInside(path, join(homedir(), '.claude', 'projects')) && /[\\/][0-9a-f-]{36}[\\/]tool-results([\\/][^\\/]+)?[\\/]?$/i.test(path);
+  return isClaudeHistory(path) && /[\\/]memory[\\/][^\\/]+\.md$|[\\/]memory[\\/]?$/i.test(path);
 }
 
 /** Where a call runs: in a project chat, the project folder (trusted, and the base for relative paths). */
@@ -171,8 +171,8 @@ export interface ClassifyContext {
   shell?: 'powershell' | 'bash';
 }
 
-/** Claude Code's project memory folders and saved tool outputs named in a command (allowed, although they're under .claude). */
-const CLAUDE_ALLOWED_IN_COMMAND = /\S*\.claude[\\/]projects[\\/][^\s"'\\/]+[\\/](memory\b|[0-9a-f-]{36}[\\/]tool-results\b)[^\s"']*/gi;
+/** Claude Code's history named in a command (allowed, although it's under .claude; see isClaudeHistory). */
+const CLAUDE_ALLOWED_IN_COMMAND = /\S*\.claude[\\/]projects(?=$|[\\/\s"'])[^\s"']*/gi;
 /** The command with those allowed .claude paths taken out (unless they climb out with `..`). */
 const withoutAllowedClaude = (command: string) => command.replace(CLAUDE_ALLOWED_IN_COMMAND, (m) => (m.includes('..') ? m : ' '));
 
@@ -256,6 +256,8 @@ function classifyFileWrite(tool: string, rawPath: string, ctx: ClassifyContext =
   const summary = `${verb} ${path}`;
   const protectedDir = loadSettings().protectedPaths.find((p) => isInside(path, p));
   if (protectedDir) return verdict('blocked', `${protectedDir} is on your read-only list.`, summary);
+  if (isClaudeHistory(path) && !isClaudeMemory(path))
+    return verdict('blocked', "Claude Code's session history is only read, never changed.", summary);
   if (isSensitivePath(path)) return verdict('blocked', 'That file may hold credentials or secrets.', summary);
   if (isSystemDir(path)) return verdict('blocked', `Harv never writes inside ${SYSTEM_FOLDER}.`, summary);
   if (isHarvData(path)) return verdict('blocked', "Harv's database, backups and memory are only changed by Harv itself.", summary);

@@ -346,9 +346,24 @@ describe('credentials stay blocked (the user’s wish)', () => {
   it("reads the SDK's saved tool outputs (blocking them left Harv stuck), nothing else under .claude", () => {
     const saved = '~/.claude/projects/C--Users-me--harv-workspace/d26d5901-3c3e-44c7-a457-fb119ec3e2a0/tool-results/bndf9f21s.txt';
     expect(tier('Read', { file_path: saved })).toBe('green');
-    expect(cmd(`sed 's/ */ /g' "${saved}" | grep -v x`)).not.toBe('blocked');
+    expect(cmd(`sed 's/ */ /g' "${saved}" | grep -v x`)).toBe('green');
     expect(cmd(`cat ${saved}/../../../../.credentials.json`)).toBe('blocked');
-    expect(tier('Read', { file_path: '~/.claude/projects/C--x/d26d5901-3c3e-44c7-a457-fb119ec3e2a0.jsonl' })).toBe('blocked');
+    expect(cmd(`cat ${saved}/../../../../settings.json`)).toBe('blocked');
+  });
+
+  it('reads earlier Claude Code sessions (the user’s wish 2026-10-25) but never changes them', () => {
+    const transcript = '~/.claude/projects/-home-lsmrtns-Code-car-radio/8fad8749-b609-4ebb-8351-ce4fd3f0a012.jsonl';
+    expect(tier('Read', { file_path: transcript })).toBe('green');
+    expect(tier('Grep', { path: '~/.claude/projects', pattern: 'radio' })).toBe('green');
+    expect(cmd('ls -la ~/.claude/projects/-home-lsmrtns-Code-car-radio/ | head -20')).toBe('green');
+    expect(cmd(`grep -c '"type":"image"' ${transcript}`)).toBe('green');
+    expect(cmd('for f in ~/.claude/projects/x/*.jsonl; do grep -c image "$f"; done')).not.toBe('blocked');
+    expect(tier('Write', { file_path: transcript })).toBe('blocked');
+    expect(tier('Edit', { file_path: transcript })).toBe('blocked');
+    expect(cmd(`rm ${transcript}`)).toBe('red');
+    expect(tier('Read', { file_path: '~/.claude/.credentials.json' })).toBe('blocked');
+    expect(tier('Read', { file_path: '~/.claude/settings.json' })).toBe('blocked');
+    expect(cmd('cat ~/.claude/projects/../settings.json')).toBe('blocked');
   });
 });
 
