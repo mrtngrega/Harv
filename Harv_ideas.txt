@@ -8,3 +8,4 @@ make it so when i leave a chat open with a session and i turn off my pc or the h
 - Background agents: no visible status, and it is unclear whether they are running. Show their status (running, done, failed) in the dashboard.
 - Harv has no access to his previous sessions. Give him access to them so he can look back at earlier chats.
 - Harv cannot access the status of his own agents. Give him a way to check whether background agents are running, done or failed.
+- Question: how does auto model switching work? With several chats running, does each chat have its own auto model switcher?
