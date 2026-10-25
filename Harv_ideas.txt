@@ -4,3 +4,4 @@ make it so when i leave a chat open with a session and i turn off my pc or the h
 - Add Harv_ideas.txt to the git sync, so this file is kept in step between devices like memory and settings are.
 - Add a "clear" command that saves everything (memory, open work, a short handoff summary) and prepares for a new session, so he can start fresh sessions regularly to save tokens. Works alongside the existing "bye" protocol.
 - /btw does not work. Needs fixing.
+- Tweak the approvals: what Harv has access to is too strict. Loosen the permission rules so routine actions do not trigger approval prompts.
