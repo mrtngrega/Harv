@@ -66,6 +66,12 @@ export class ChatSession {
   /** This turn's output tokens: finished messages (exact) plus the streaming one (characters / 4). */
   private turnTokens = 0;
   private streamChars = 0;
+  /**
+   * Thinking tokens of the message streaming now, from the SDK's estimate. Thinking arrives
+   * hidden (empty deltas), so without it the count stood still for minutes while Opus thought
+   * and Harv looked stuck (the user's report, 2026-10-25). The exact count replaces it at the end.
+   */
+  private thinkingTokens = 0;
   private progressAt = 0;
   /** What the latest API call sent: the context it had (the turn's summed usage counts the context once per call). */
   private contextIn = 0;
@@ -107,6 +113,7 @@ export class ChatSession {
     this.said = false;
     this.turnTokens = 0;
     this.streamChars = 0;
+    this.thinkingTokens = 0;
     this.setBusy(true);
     const message = raw ? content : this.withMemoryNote(content);
     this.input.push({ type: 'user', message: { role: 'user', content: message }, parent_tool_use_id: null });
@@ -167,15 +174,26 @@ export class ChatSession {
       const d = ev.delta as { text?: string; thinking?: string; partial_json?: string };
       this.streamChars += (d.text ?? d.thinking ?? d.partial_json ?? '').length;
     } else if (ev.type === 'message_delta') {
-      this.turnTokens += (ev.usage as { output_tokens?: number } | undefined)?.output_tokens ?? Math.ceil(this.streamChars / 4);
+      this.turnTokens +=
+        (ev.usage as { output_tokens?: number } | undefined)?.output_tokens ?? Math.ceil(this.streamChars / 4) + this.thinkingTokens;
       this.streamChars = 0;
+      this.thinkingTokens = 0;
     } else {
       return;
     }
-    const now = Date.now();
-    if (ev.type !== 'message_delta' && now - this.progressAt < 500) return;
-    this.progressAt = now;
-    this.emit({ type: 'chat.progress', tabId: this.tabId, outputTokens: this.turnTokens + Math.ceil(this.streamChars / 4) });
+    this.progress(ev.type === 'message_delta');
+  }
+
+  /** Sends the turn's output tokens so far to the status line (at most twice a second unless `now`). */
+  private progress(now = false) {
+    const at = Date.now();
+    if (!now && at - this.progressAt < 500) return;
+    this.progressAt = at;
+    this.emit({
+      type: 'chat.progress',
+      tabId: this.tabId,
+      outputTokens: this.turnTokens + this.thinkingTokens + Math.ceil(this.streamChars / 4),
+    });
   }
 
   /** The context meter, live: each main-thread message's own input (cached parts included), then plus its output. */
@@ -217,6 +235,11 @@ export class ChatSession {
     const tabId = this.tabId;
     switch (msg.type) {
       case 'system':
+        if (msg.subtype === 'thinking_tokens') {
+          this.thinkingTokens += Math.max(0, msg.estimated_tokens_delta);
+          this.progress();
+          return;
+        }
         if (this.taskTracker.apply(msg)) {
           this.emit({ type: 'chat.tasks', tabId, tasks: this.taskTracker.list() });
           return;
@@ -268,6 +291,7 @@ export class ChatSession {
           this.said = false;
           this.turnTokens = 0;
           this.streamChars = 0;
+          this.thinkingTokens = 0;
           this.hooks.onAutoTurn?.();
           this.setBusy(true);
         }
