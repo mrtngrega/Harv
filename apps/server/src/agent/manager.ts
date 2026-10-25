@@ -107,6 +107,8 @@ export class ChatManager {
   private flushing = false;
   /** Tabs whose running turn hit a plan limit; they continue after the reset. */
   private limited = new Set<string>();
+  /** Tabs running /fresh, with the summary their turn writes: when it ends, the next message starts a new session from it. */
+  private freshening = new Map<string, string[]>();
   /** Tabs running /clear: when it succeeds, their log empties too. */
   private clearing = new Set<string>();
   /** Resolvers waiting for a tab's turn to finish. */
@@ -220,6 +222,7 @@ export class ChatManager {
       case 'chat.assistant':
         save({ kind: 'harv', text: msg.text, ...this.tags.get(msg.tabId) });
         this.replies.get(msg.tabId)?.push(msg.text);
+        this.freshening.get(msg.tabId)?.push(msg.text);
         break;
       case 'chat.tool':
         save({ kind: 'tool', text: msg.detail ? `${msg.name} · ${msg.detail}` : msg.name, ref: msg.id });
@@ -249,6 +252,14 @@ export class ChatManager {
     }
     this.broadcast(msg);
     if (msg.type === 'chat.done') {
+      const fresh = this.freshening.get(msg.tabId);
+      if (fresh) {
+        this.freshening.delete(msg.tabId);
+        // The summary is what the turn said last (anything before it was about saving memory).
+        const summary = fresh.at(-1)?.trim();
+        if (msg.ok && summary) this.startFresh(msg.tabId, summary);
+        else if (!msg.stopped) this.notice(msg.tabId, 'Couldn’t write the handoff summary, so this chat keeps its session.');
+      }
       if (this.clearing.delete(msg.tabId) && msg.ok) {
         this.store.clearLines(msg.tabId);
         this.router.forget(msg.tabId);
@@ -406,6 +417,10 @@ export class ChatManager {
       this.broadcast({ type: 'chat.done', tabId, ok: true, stopped: false });
       return;
     }
+    if (/^\/fresh\s*$/i.test(message.trim()) && !files.length) {
+      await this.fresh(tabId);
+      return;
+    }
     const command = commandName(message);
     if (command && !files.length && this.isCommand(tabId, command)) {
       await this.runCommand(tabId, command, message.trim());
@@ -487,6 +502,54 @@ export class ChatManager {
     const decision: RouteDecision = { model: last.model, effort: last.effort, source: 'command', reason: `Claude Code command /${name}` };
     this.router.manual(tabId, decision);
     await this.run(tabId, decision, false, text, true);
+  }
+
+  /**
+   * /fresh (the user's wish 2026-10-25; /clear stays): one turn at the chat's model saves
+   * what's worth keeping and writes a handoff summary; when it ends, the next message
+   * starts a new Claude session with that summary instead of the whole conversation.
+   */
+  private async fresh(tabId: string) {
+    if (!this.store.getSession(tabId)) {
+      this.emit({ type: 'chat.notice', tabId, message: 'This chat has no session yet, so it’s already fresh.' });
+      this.broadcast({ type: 'chat.done', tabId, ok: true, stopped: false });
+      return;
+    }
+    this.freshening.set(tabId, []);
+    const last = this.lastRun.get(tabId) ?? this.lastTagged(tabId) ?? AUTO_FALLBACK;
+    const decision: RouteDecision = {
+      model: last.model,
+      effort: last.effort,
+      source: 'command',
+      reason: '/fresh: saving memory and a handoff summary',
+    };
+    this.router.manual(tabId, decision);
+    const project = this.store.projectOf(tabId);
+    await this.run(
+      tabId,
+      decision,
+      false,
+      [
+        '[/fresh: the user is moving this chat to a fresh session to keep it small. The next session sees only what you write now, not this conversation.]',
+        `1. Save anything worth keeping that isn't saved yet: facts about the user with remember${project ? ", and the project's state in its memory and CLAUDE.md, as you normally would" : ''}. Skip this if nothing is new.`,
+        '2. Then end with ONE message that is only the handoff summary for your next session, no preamble: what we are working on, decisions made, where things stand (files, commands, results), open questions, and the exact next step. Keep names, paths and numbers exact. At most about 400 words.',
+      ].join('\n'),
+      true,
+    );
+  }
+
+  /** The /fresh turn ended with its summary: the old session goes, and the next message starts from the summary. */
+  private startFresh(tabId: string, summary: string) {
+    this.carry.set(
+      tabId,
+      `[This chat moved to a fresh session (/fresh) to keep it small. Your handoff summary from the previous session:]\n${summary}\n[End of the summary. Earlier lines are still in the chat's history (read_chat) if you need them.]\n\n`,
+    );
+    this.store.setSession(tabId, null);
+    setTimeout(() => this.dropSession(tabId), 0);
+    this.router.forget(tabId);
+    this.store.setContext(tabId, 0);
+    this.broadcast({ type: 'chat.context', tabId, tokens: 0 });
+    this.addLine(tabId, { kind: 'notice', text: '— fresh session — (the next message starts a new session from the summary above)' });
   }
 
   /** Harv's short name for what a chat is about; skipped once the user has named it. */

@@ -579,3 +579,42 @@ describe('/report', () => {
     );
   });
 });
+
+describe('/fresh', () => {
+  it('saves and summarizes in one turn, then the next message starts a new session from the summary', async () => {
+    const { chats, store, sent } = setup();
+    await chats.send('f', 'plan the radio app', 'sonnet', 'high');
+    const old = FakeSession.all.get('f')!;
+    old.hooks.onSessionId('session-1');
+    old.reply('Here is a plan.');
+    old.finish();
+
+    await chats.send('f', '/fresh', 'sonnet', 'medium');
+    expect(String(old.sent.at(-1)!.content)).toContain('[/fresh');
+    expect(old.sent.at(-1)).toMatchObject({ model: 'sonnet', effort: 'high' });
+    old.reply('Saved the stack choice to memory.');
+    old.reply('We are building a radio app. Next: the data model.');
+    old.finish();
+    await settle();
+    expect(store.getSession('f')).toBeNull();
+    expect(store.snapshot('f')!.lines.at(-1)).toMatchObject({ kind: 'notice', text: expect.stringContaining('— fresh session —') });
+    expect(sent.filter((m) => m.type === 'chat.context').at(-1)).toMatchObject({ tokens: 0 });
+
+    await chats.send('f', 'go on', 'sonnet', 'medium');
+    const next = FakeSession.all.get('f')!;
+    expect(next).not.toBe(old);
+    const first = String(next.sent[0]!.content);
+    expect(first).toContain('handoff summary from the previous session');
+    expect(first).toContain('We are building a radio app. Next: the data model.');
+    expect(first).not.toContain('Saved the stack choice');
+    expect(first.endsWith('go on')).toBe(true);
+    next.finish();
+  });
+
+  it('says a chat without a session is already fresh', async () => {
+    const { chats, notices } = setup();
+    await chats.send('g', '/fresh', 'sonnet', 'medium');
+    expect(notices('g').at(-1)).toMatch(/already fresh/);
+    expect(FakeSession.all.has('g')).toBe(false);
+  });
+});

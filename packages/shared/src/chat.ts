@@ -53,6 +53,9 @@ export interface BackgroundTask {
 /** "auto" lets Harv pick; anything else is a model id from the catalog. */
 export type ModelChoice = 'auto' | (string & {});
 
+/** From this context size the chat's context label suggests /fresh (the user's pick, 2026-10-25). */
+export const FRESH_HINT_TOKENS = 200_000;
+
 /** What AUTO runs when the router can't decide (e.g. the classifier failed). */
 export const AUTO_FALLBACK = { model: 'sonnet', effort: 'medium' } as const satisfies { model: string; effort: EffortLevel };
 

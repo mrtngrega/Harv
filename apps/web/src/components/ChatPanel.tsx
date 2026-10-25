@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type DragEvent, type FormEvent } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { FRESH_HINT_TOKENS } from '@harv/shared';
 import { formatSize, uploadAttachment } from '../lib/attachments.ts';
 import { lineTime, resetTime, tokens } from '../lib/format.ts';
 import { HELP, parseCommand } from '../lib/commands.ts';
@@ -478,9 +479,22 @@ export function ChatPanel() {
         {view === 'chat' && active?.context && (
           <div
             className="hidden px-2 pb-2.5 text-[11px] whitespace-nowrap text-muted xl:block"
-            title="Tokens Harv sent with the last message in this chat"
+            title="The conversation's size: what Harv sent with its latest message, plus what it wrote"
           >
             context · {tokens(active.context)} tokens
+            {active.context >= FRESH_HINT_TOKENS && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft('/fresh');
+                  inputRef.current?.focus();
+                }}
+                title="This chat is big, so every reply costs more. /fresh saves memory and a summary, then goes on in a new session."
+                className="ml-1.5 cursor-pointer rounded px-1 text-warn hover:bg-warn/15"
+              >
+                · /fresh?
+              </button>
+            )}
           </div>
         )}
         {active && <ViewMenu tabId={active.id} />}

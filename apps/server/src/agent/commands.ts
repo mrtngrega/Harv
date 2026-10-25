@@ -50,6 +50,14 @@ export const BTW: SlashCommandInfo = {
   argumentHint: '<question>',
 };
 
+/** Harv's own: a new session for this chat that starts from a handoff summary (one turn writes it). */
+export const FRESH: SlashCommandInfo = {
+  name: 'fresh',
+  description:
+    'Save memory and a handoff summary, then go on in a new session (smaller context, cheaper replies; /clear starts from nothing)',
+  argumentHint: '',
+};
+
 /** Harv's own: a note about Harv for the user's ideas file (no model call). */
 export const REPORT: SlashCommandInfo = {
   name: 'report',
@@ -59,8 +67,8 @@ export const REPORT: SlashCommandInfo = {
 
 /** The commands Harv offers, sorted by name (Claude Code's own first when names clash). */
 export function toCommandInfo(commands: SlashCommand[], terminalOnly: string[] = []): SlashCommandInfo[] {
-  const seen = new Set<string>(['btw', 'report']);
-  const out: SlashCommandInfo[] = [BTW, REPORT];
+  const seen = new Set<string>(['btw', 'fresh', 'report']);
+  const out: SlashCommandInfo[] = [BTW, FRESH, REPORT];
   for (const c of [...commands].sort((a, b) => Number(!!b.builtin) - Number(!!a.builtin))) {
     // Claude Code still lists some commands it has dropped, described as "(removed) …".
     if (HIDDEN.has(c.name) || terminalOnly.includes(c.name) || seen.has(c.name) || /^\(removed\)/i.test(c.description)) continue;
