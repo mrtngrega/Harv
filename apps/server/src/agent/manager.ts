@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { promisify } from 'node:util';
 import {
   type Attachment,
@@ -19,7 +20,7 @@ import type { Router } from '../router/router.ts';
 import { parseOverride } from '../router/rules.ts';
 import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
-import type { RemoteChanges } from '../sync/engine.ts';
+import { SHARED_FILES, type RemoteChanges } from '../sync/engine.ts';
 import { cloneProject, createGitHubRepo, planLink, pullNotice, pullProject, remoteOf, sameRemote } from '../sync/projects.ts';
 import type { UsageMeter } from '../usage/meter.ts';
 import { buildContent, deleteAttachments } from './attachments.ts';
@@ -27,9 +28,16 @@ import { sideQuestion } from './btw.ts';
 import { commandName, hiddenReason } from './commands.ts';
 import { formatTranscript, type HandOff, type ProjectTools } from './chatTools.ts';
 import { osPath, pathKey } from '../platform.ts';
-import { projectsDir } from '../settings.ts';
+import { loadSettings, projectsDir } from '../settings.ts';
 import type { ProjectServerMessage } from '@harv/shared';
 import { ChatSession } from './session.ts';
+
+/** One /report note for the ideas file: `- [25 Oct 13:05 · PC · chat name] text`, on one line. */
+export function ideaLine(text: string, at: Date, device: string, chat: string): string {
+  const day = at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const time = at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return `- [${day} ${time} · ${device} · ${chat.replace(/\s+/g, ' ').trim()}] ${text.replace(/\s+/g, ' ').trim()}`;
+}
 
 /** The first CLAUDE.md of a project Harv starts; the project chat fills it in as decisions are made. */
 export function starterClaudeMd(name: string, description: string): string {
@@ -359,6 +367,12 @@ export class ChatManager {
       if (isNew) this.publishHistory();
       return this.btw(tabId, (btw[1] ?? '').trim());
     }
+    // /report: a note for the user's ideas file, written right here (no model call, never queued).
+    const report = /^\/report(?:\s+([\s\S]*))?$/i.exec(message.trim());
+    if (report && !files.length) {
+      if (isNew) this.publishHistory();
+      return this.report(tabId, (report[1] ?? '').trim());
+    }
     if (this.busy(tabId) || this.followUps.get(tabId)?.length) {
       // Like Claude Code: what's typed while Harv works waits its turn, and runs when this one ends.
       const list = this.followUps.get(tabId) ?? [];
@@ -401,6 +415,23 @@ export class ChatManager {
     // Manual mode and a one-message model override (/haiku …) skip the classifier, so a new chat gets its short name from one cheap call.
     if (isNew && (choice !== 'auto' || parseOverride(message).model)) {
       void this.router.name(parseOverride(message).text, files).then((title) => title && this.autoTitle(tabId, title));
+    }
+  }
+
+  /** Where /report writes: the ideas file the sync keeps in step between devices (replaced in tests). */
+  ideasFile = SHARED_FILES.ideas!;
+
+  /** /report: appends a dated note to the ideas file, which device sync carries to the other devices. */
+  private report(tabId: string, text: string) {
+    this.addLine(tabId, { kind: 'you', text: text ? `/report ${text}` : '/report' });
+    if (!text) return this.notice(tabId, 'Write the note after it: /report the explorer forgets my folder after a restart');
+    try {
+      const before = existsSync(this.ideasFile) ? readFileSync(this.ideasFile, 'utf8') : '';
+      const line = ideaLine(text, new Date(), loadSettings().deviceName || hostname(), this.store.title(tabId) ?? 'chat');
+      appendFileSync(this.ideasFile, `${before && !before.endsWith('\n') ? '\n' : ''}${line}\n`, 'utf8');
+      this.notice(tabId, 'Noted in the ideas file.');
+    } catch (err) {
+      this.notice(tabId, `Couldn’t write the ideas file: ${(err as Error).message}`);
     }
   }
 

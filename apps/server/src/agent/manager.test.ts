@@ -65,7 +65,7 @@ class FakeSession {
 
 vi.mock('./session.ts', () => ({ ChatSession: FakeSession }));
 
-const { ChatManager } = await import('./manager.ts');
+const { ChatManager, ideaLine } = await import('./manager.ts');
 const { SafetyGate } = await import('../safety/gate.ts');
 const { ActionStore } = await import('../store/actions.ts');
 const { ChatStore } = await import('../store/chats.ts');
@@ -551,5 +551,31 @@ describe("the other device's projects", { timeout: 60_000 }, () => {
       rmSync(join(home, 'settings.json'), { force: true });
       rmSync(projectsRoot, { recursive: true, force: true, maxRetries: 5 });
     }
+  });
+});
+
+describe('/report', () => {
+  it('writes a dated one-line note to the ideas file, without a model call, even mid-reply', async () => {
+    const { chats, store, sent } = setup();
+    const ideas = join(home, 'ideas.txt');
+    writeFileSync(ideas, '- an older note');
+    chats.ideasFile = ideas;
+    await chats.send('r', 'look at the stats panel', 'sonnet', 'medium');
+    store.setTitle('r', 'Stats', true);
+    await chats.send('r', '/report the GPU fan\n reads 0 rpm', 'sonnet', 'medium');
+    const text = readFileSync(ideas, 'utf8').split('\n');
+    expect(text[0]).toBe('- an older note');
+    expect(text[1]).toMatch(/^- \[\d{1,2} \w{3} \d{2}:\d{2} · .+ · Stats\] the GPU fan reads 0 rpm$/);
+    expect(text[2]).toBe('');
+    expect(FakeSession.all.get('r')!.sent).toHaveLength(1);
+    expect(sent.some((m) => m.type === 'chat.notice' && m.tabId === 'r' && m.message === 'Noted in the ideas file.')).toBe(true);
+    expect(chats.openChats().find((c) => c.id === 'r')?.queued).toBeUndefined();
+    FakeSession.all.get('r')!.finish();
+  });
+
+  it('formats the note like the plan says', () => {
+    expect(ideaLine(' explorer   forgets\nthe folder ', new Date(2026, 9, 25, 13, 5), 'PC', 'Files  chat')).toBe(
+      '- [25 Oct 13:05 · PC · Files chat] explorer forgets the folder',
+    );
   });
 });

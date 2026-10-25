@@ -530,8 +530,8 @@ export const chat = {
     const tabId = chat.ensureTab();
     const { model, effort } = store.get();
     const files = attachments.map((a) => a.name);
-    // /btw answers on the side, even mid-reply: the server adds both lines, and no turn starts.
-    if (/^\/btw(\s|$)/i.test(text.trim()) && !attachments.length) {
+    // /btw answers on the side, even mid-reply, and /report writes a note: the server adds the lines, and no turn starts.
+    if (/^\/(btw|report)(\s|$)/i.test(text.trim()) && !attachments.length) {
       if (!sendMessage({ type: 'chat.send', tabId, text, model, effort }))
         updateTab(tabId, (t) => ({ ...t, lines: [...t.lines, line('error', 'Not connected to the Harv server.')] }));
       else updateTab(tabId, (t) => ({ ...t, stored: true }));

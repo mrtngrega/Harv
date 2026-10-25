@@ -50,10 +50,17 @@ export const BTW: SlashCommandInfo = {
   argumentHint: '<question>',
 };
 
+/** Harv's own: a note about Harv for the user's ideas file (no model call). */
+export const REPORT: SlashCommandInfo = {
+  name: 'report',
+  description: 'Note something about Harv (a bug, a wish) in your ideas file, without asking Harv',
+  argumentHint: '<what happened or what you want>',
+};
+
 /** The commands Harv offers, sorted by name (Claude Code's own first when names clash). */
 export function toCommandInfo(commands: SlashCommand[], terminalOnly: string[] = []): SlashCommandInfo[] {
-  const seen = new Set<string>(['btw']);
-  const out: SlashCommandInfo[] = [BTW];
+  const seen = new Set<string>(['btw', 'report']);
+  const out: SlashCommandInfo[] = [BTW, REPORT];
   for (const c of [...commands].sort((a, b) => Number(!!b.builtin) - Number(!!a.builtin))) {
     // Claude Code still lists some commands it has dropped, described as "(removed) …".
     if (HIDDEN.has(c.name) || terminalOnly.includes(c.name) || seen.has(c.name) || /^\(removed\)/i.test(c.description)) continue;
