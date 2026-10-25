@@ -7,3 +7,4 @@ make it so when i leave a chat open with a session and i turn off my pc or the h
 - Tweak the approvals: what Harv has access to is too strict. Loosen the permission rules so routine actions do not trigger approval prompts.
 - Background agents: no visible status, and it is unclear whether they are running. Show their status (running, done, failed) in the dashboard.
 - Harv has no access to his previous sessions. Give him access to them so he can look back at earlier chats.
+- Harv cannot access the status of his own agents. Give him a way to check whether background agents are running, done or failed.
