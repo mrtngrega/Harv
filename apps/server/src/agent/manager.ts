@@ -470,7 +470,10 @@ export class ChatManager {
       this.store.getSession(tabId) ?? undefined,
     );
     if (!this.store.exists(tabId)) return;
-    if (!answer) return this.notice(tabId, 'Couldn’t answer that side question. Try again, or ask it as a normal message.');
+    if (typeof answer !== 'string' || !answer) {
+      const why = typeof answer === 'string' ? 'no answer came back' : answer.error;
+      return this.notice(tabId, `Couldn’t answer that side question (${why}). Try again, or ask it as a normal message.`);
+    }
     this.addLine(tabId, {
       kind: 'harv',
       text: answer,

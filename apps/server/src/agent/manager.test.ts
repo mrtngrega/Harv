@@ -457,6 +457,13 @@ describe('/btw side questions', () => {
     await chats.send('e', '/btw', 'sonnet', 'medium');
     expect(notices('e').at(-1)).toMatch(/side question/);
   });
+
+  it('says why when it could not answer (it used to say only "Couldn’t answer")', async () => {
+    const { chats, notices } = setup();
+    chats.ask = async () => ({ error: 'error_max_turns' });
+    await chats.send('x', '/btw what is this?', 'sonnet', 'medium');
+    expect(notices('x').at(-1)).toBe('Couldn’t answer that side question (error_max_turns). Try again, or ask it as a normal message.');
+  });
 });
 
 describe('slash commands', () => {
