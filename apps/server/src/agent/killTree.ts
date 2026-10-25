@@ -53,15 +53,24 @@ export function msysTree(psOutput: string, wrapperWinPids: number[]): number[] {
 export async function killShellTree(command: string): Promise<number> {
   const fragment = IS_WINDOWS ? wrapperFragment(command) : null;
   if (!fragment) return 0;
+  // Only wrappers under this Harv server (Harv → Claude Code → bash): never another Claude Code's,
+  // like the user's own in a terminal, which builds its wrappers the same way.
   const script = [
     '$f = $env:HARV_KILL_FRAGMENT',
-    "Get-CimInstance Win32_Process -Filter \"Name = 'bash.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('shell-snapshots') -and $_.CommandLine.Contains($f) } | ForEach-Object { $_.ProcessId }",
-  ].join('; ');
+    '$harv = [int]$env:HARV_KILL_ROOT',
+    '$all = @{}',
+    'Get-CimInstance Win32_Process | ForEach-Object { $all[[int]$_.ProcessId] = $_ }',
+    'foreach ($p in $all.Values) {',
+    "  if ($p.Name -ne 'bash.exe' -or -not $p.CommandLine -or -not $p.CommandLine.Contains('shell-snapshots') -or -not $p.CommandLine.Contains($f)) { continue }",
+    '  $up = [int]$p.ParentProcessId',
+    '  for ($i = 0; $i -lt 6 -and $all.ContainsKey($up); $i++) { if ($up -eq $harv) { $p.ProcessId; break }; $up = [int]$all[$up].ParentProcessId }',
+    '}',
+  ].join('\n');
   try {
     const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
       windowsHide: true,
       timeout: 15_000,
-      env: { ...process.env, HARV_KILL_FRAGMENT: fragment },
+      env: { ...process.env, HARV_KILL_FRAGMENT: fragment, HARV_KILL_ROOT: String(process.pid) },
     });
     const wrappers = stdout
       .split(/\s+/)
