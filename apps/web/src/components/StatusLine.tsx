@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import { FRESH_HINT_TOKENS } from '@harv/shared';
 import { chat, useChat, type Tab } from '../lib/chatStore.ts';
+import { setDraftText } from '../lib/drafts.ts';
 import { resetTime, tokens } from '../lib/format.ts';
 import { useSafety } from '../lib/safetyStore.ts';
 import { useConnection, useSettings, useUsage } from '../lib/useHarvSocket.ts';
@@ -81,6 +83,20 @@ export function StatusLine({ tab }: { tab: Tab | undefined }) {
         {label}
       </span>
       {extra && <span className="truncate text-faint">{extra}</span>}
+      {/* Narrow windows hide the context label in the tab bar, and with it this hint. */}
+      {!busy && tab?.context !== undefined && tab.context >= FRESH_HINT_TOKENS && (
+        <button
+          type="button"
+          onClick={() => {
+            setDraftText(tab.id, '/fresh');
+            document.getElementById('harv-cmd')?.focus();
+          }}
+          title="This chat is big, so every reply costs more. /fresh saves memory and a summary, then goes on in a new session."
+          className="flex-none cursor-pointer rounded px-1 text-[11px] text-warn hover:bg-warn/15 xl:hidden"
+        >
+          /fresh?
+        </button>
+      )}
       {elsewhere && (
         <button
           type="button"

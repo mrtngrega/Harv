@@ -60,7 +60,7 @@ export const FRESH_HINT_TOKENS = 200_000;
 export const AUTO_FALLBACK = { model: 'sonnet', effort: 'medium' } as const satisfies { model: string; effort: EffortLevel };
 
 /** How a turn's model·effort was chosen. */
-export type RouteSource = 'manual' | 'override' | 'rule' | 'classifier' | 'followup' | 'harder' | 'fallback' | 'command';
+export type RouteSource = 'manual' | 'override' | 'rule' | 'classifier' | 'followup' | 'harder' | 'fallback' | 'command' | 'background';
 
 /** The model·effort a turn runs at, and why. */
 export interface RouteDecision {

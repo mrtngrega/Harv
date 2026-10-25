@@ -23,6 +23,8 @@ export interface SessionHooks {
   onRateLimit: (info: SDKRateLimitInfo) => void;
   /** The session's slash commands (on start, and when it finds new skills). */
   onCommands?: (commands: SlashCommandInfo[]) => void;
+  /** Claude started a turn by itself (a background task it started finished): no message from the user began it. */
+  onAutoTurn?: () => void;
 }
 
 /** What a local command like /context or /usage printed (it comes back as a user message). */
@@ -132,10 +134,20 @@ export class ChatSession {
     return this.taskTracker.list();
   }
 
+  /**
+   * Ends the session. Background shells and agents it started are stopped first: closing
+   * Claude Code alone left them running (on Windows its child processes outlive it).
+   */
   close(): void {
     this.closed = true;
-    this.input.end();
-    this.q.close();
+    const running = this.taskTracker.list().filter((t) => t.status === 'running');
+    const end = () => {
+      this.input.end();
+      this.q.close();
+    };
+    if (!running.length) return end();
+    const stops = Promise.allSettled(running.map((t) => this.q.stopTask(t.id)));
+    void Promise.race([stops, new Promise((r) => setTimeout(r, 5000))]).finally(end);
   }
 
   private say(text: string) {
@@ -245,6 +257,13 @@ export class ChatSession {
           this.emit({ type: 'chat.delta', tabId, text: ev.delta.text });
         } else if (ev.type === 'message_start' && this.toolRunning) {
           this.setBusy(true, false);
+        } else if (ev.type === 'message_start' && !this.busy && !this.closed) {
+          // A turn nobody sent: Claude picked something up by itself (a background task finished).
+          this.said = false;
+          this.turnTokens = 0;
+          this.streamChars = 0;
+          this.hooks.onAutoTurn?.();
+          this.setBusy(true);
         }
         this.countTokens(ev);
         this.trackContext(ev);

@@ -54,7 +54,8 @@ export function WatchdogToast() {
 
   if (alerts.length === 0 && notices.length === 0) return null;
   return (
-    <div className="fixed top-20 right-4 z-50 flex w-[min(400px,calc(100vw-32px))] flex-col gap-2">
+    // Below the tab bar, so the chat's context label (and its /fresh? hint) stays visible.
+    <div className="fixed top-36 right-4 z-50 flex w-[min(400px,calc(100vw-32px))] flex-col gap-2">
       {alerts.map((alert) => (
         <AlertCard key={alert.id} alert={alert} onDismiss={() => dismiss(alert.id)} />
       ))}

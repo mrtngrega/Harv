@@ -625,3 +625,41 @@ describe('/fresh', () => {
     expect(FakeSession.all.has('g')).toBe(false);
   });
 });
+
+describe('found in the test pass (2026-10-25)', () => {
+  it('shows a turn Claude starts by itself as a turn, logged on its own (F1)', async () => {
+    const { chats, routes, sent } = setup();
+    await chats.send('auto', 'start the build in the background', 'sonnet', 'medium');
+    const session = FakeSession.all.get('auto')!;
+    session.finish();
+    const before = routes.summary();
+    // A background task finished: Claude Code starts a turn with no message from the user.
+    session.hooks.onAutoTurn!();
+    const started = sent.filter((m) => m.type === 'chat.started' && m.tabId === 'auto').at(-1);
+    expect(started).toMatchObject({ model: 'sonnet', effort: 'medium', reason: expect.stringContaining('background task') });
+    session.finish();
+    // Its own row: the first turn's tokens stay, this one's are added (they used to overwrite them).
+    const after = routes.summary();
+    expect(after.turnsToday).toBe(before.turnsToday + 1);
+    expect(after.inputTokensToday).toBe(before.inputTokensToday + 10);
+  });
+
+  it('sends a message that arrives right after a project switch to the new session, not the old one (F4)', async () => {
+    const { chats, store } = setup();
+    await chats.send('sw', 'we talked about a radio app', 'sonnet', 'medium');
+    const old = FakeSession.all.get('sw')!;
+    const folder = mkdtempSync(join(tmpdir(), 'harv-proj-'));
+    expect(chats.addProject(folder)).toBeUndefined();
+    // Mid-turn, the chat moves into the project (Harv's open_project); its session goes when the turn ends.
+    chats.setProject('sw', store.projects().find((p) => p.path === folder)!.id);
+    old.finish();
+    // The answer comes in before the old session's drop got its turn.
+    await chats.send('sw', 'private', 'sonnet', 'medium');
+    const now = FakeSession.all.get('sw')!;
+    expect(now).not.toBe(old);
+    expect(String(now.sent[0]!.content)).toContain('private');
+    expect(old.sent).toHaveLength(1);
+    now.finish();
+    rmSync(folder, { recursive: true, force: true });
+  });
+});

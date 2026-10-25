@@ -38,4 +38,4 @@ The keyword is **"bye"**: when the user says bye (or clearly signs off another w
 
 ## New projects
 
-When the user starts a new project, create its folder right away in their projects folder (the path is in memory), named as they say (or a short lowercase-hyphen name), with `git init` and a starter `CLAUDE.md` describing the project, stack and commands. Then work there.
+When the user starts a new project, start it with the `start_project` tool (never by hand): it makes the folder in their projects folder, named as they say (or a short lowercase-hyphen name), with `git init`, a starter `CLAUDE.md` and its GitHub repo, so the user's other devices get it. Ask first whether the repo should be private or public, every time. Then work there and fill in `CLAUDE.md` (project, stack, commands).

@@ -96,6 +96,8 @@ export class ChatManager {
   private carry = new Map<string, string>();
   /** Chats whose project changed mid-turn: their session ends when the turn does. */
   private switchAfterTurn = new Set<string>();
+  /** Old sessions about to go (their turn just ended): a message arriving first makes it happen at once, so it never lands in the old one. */
+  private dropping = new Set<string>();
   /** Tag and routing reason of the turn currently running per tab ("sonnet·medium"). */
   private tags = new Map<string, { tag: string; reason: string }>();
   /** The model·effort each tab's last turn ran at, for "Try harder". */
@@ -328,6 +330,7 @@ export class ChatManager {
   }
 
   private session(tabId: string, model: string, effort: EffortLevel): ChatSession {
+    if (this.dropping.delete(tabId)) this.dropSession(tabId);
     let session = this.sessions.get(tabId);
     if (session) return session;
     session = new ChatSession(
@@ -338,6 +341,25 @@ export class ChatManager {
       {
         onStateChange: () => this.onStatus(this.status),
         onSessionId: (id) => this.store.setSession(tabId, id),
+        onAutoTurn: () => {
+          // Shown and logged as a turn of its own, at the model and effort the session runs.
+          const last = this.lastRun.get(tabId) ?? this.lastTagged(tabId) ?? AUTO_FALLBACK;
+          const decision: RouteDecision = {
+            model: last.model,
+            effort: last.effort,
+            source: 'background',
+            reason: 'Harv picked this up by itself: a background task it started has finished.',
+          };
+          this.router.manual(tabId, decision);
+          this.emit({
+            type: 'chat.started',
+            tabId,
+            model: this.modelName(last.model),
+            effort: last.effort,
+            auto: false,
+            reason: decision.reason,
+          });
+        },
         onCommands: (commands) => {
           this.commands.set(tabId, commands);
           this.broadcast({ type: 'chat.commands', tabId, commands });
@@ -875,7 +897,11 @@ export class ChatManager {
 
   /** The turn that changed a chat's project has ended: its old session goes. */
   turnEnded(tabId: string): void {
-    if (this.switchAfterTurn.delete(tabId)) setTimeout(() => this.dropSession(tabId), 0);
+    if (!this.switchAfterTurn.delete(tabId)) return;
+    this.dropping.add(tabId);
+    setTimeout(() => {
+      if (this.dropping.delete(tabId)) this.dropSession(tabId);
+    }, 0);
   }
 
   /**
