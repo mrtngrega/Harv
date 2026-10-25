@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -332,15 +333,33 @@ describe('project mode', () => {
     writeFileSync(join(home, 'settings.json'), JSON.stringify({ projectsDir: projectsRoot }));
     try {
       const { chats, store } = setup();
-      const tools = (chats as unknown as { projectTools: { start: (t: string, n: string, d: string) => Promise<string> } }).projectTools;
-      const reply = await tools.start('s', 'weather-app', 'A small weather dashboard.');
+      // Never the real gh: a test must not make GitHub repos.
+      const made: [string, string, string][] = [];
+      chats.createRepo = async (path, name, visibility) => {
+        made.push([path, name, visibility]);
+        return `https://github.com/me/${name}.git`;
+      };
+      type Start = (t: string, n: string, d: string, v: 'private' | 'public') => Promise<string>;
+      const tools = (chats as unknown as { projectTools: { start: Start } }).projectTools;
+      const reply = await tools.start('s', 'weather-app', 'A small weather dashboard.', 'private');
       const folder = join(projectsRoot, 'weather-app');
       expect(reply).toContain(folder);
+      expect(reply).toContain('private GitHub repo is https://github.com/me/weather-app.git');
+      expect(made).toEqual([[folder, 'weather-app', 'private']]);
       expect(readFileSync(join(folder, 'CLAUDE.md'), 'utf8')).toContain('A small weather dashboard.');
       expect(existsSync(join(folder, '.git'))).toBe(true);
       expect(store.projectOf('s')?.name).toBe('weather-app');
+      expect(store.projectOf('s')?.remote).toBe('https://github.com/me/weather-app.git');
       // A second time, the folder exists: Harv has to ask.
-      expect(await tools.start('t', 'weather-app', 'again')).toContain('already exists');
+      expect(await tools.start('t', 'weather-app', 'again', 'public')).toContain('already exists');
+      // gh failing (not logged in) leaves the project on this device, and says how to fix it.
+      chats.createRepo = async () => {
+        throw new Error('gh: not logged in\nrun gh auth login');
+      };
+      const failed = await tools.start('u', 'notes', 'Notes.', 'public');
+      expect(failed).toContain('Making its GitHub repo failed (gh: not logged in)');
+      expect(failed).toContain('gh repo create notes --public --source . --push');
+      expect(store.projectOf('u')?.remote).toBeUndefined();
       mkdirSync(join(projectsRoot, 'empty'), { recursive: true });
     } finally {
       rmSync(join(home, 'settings.json'), { force: true });
@@ -493,5 +512,44 @@ describe('context meter', () => {
     session.finish(); // its usage sums all calls of the turn
     expect(store.snapshot('ctx')!.context).toBe(42_500);
     expect(sent.filter((m) => m.type === 'chat.context').map((m) => (m as { tokens: number }).tokens)).toEqual([31_000, 42_500]);
+  });
+});
+
+describe("the other device's projects", { timeout: 60_000 }, () => {
+  it('clones a new one into the projects folder, and unlists it when it goes there', async () => {
+    const projectsRoot = mkdtempSync(join(tmpdir(), 'harv-projects-'));
+    const bare = join(projectsRoot, 'github', 'car_radio.git');
+    mkdirSync(bare, { recursive: true });
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bare });
+    writeFileSync(join(home, 'settings.json'), JSON.stringify({ projectsDir: projectsRoot }));
+    try {
+      const { chats, store, sent } = setup();
+      const none = {
+        lines: new Map(),
+        forks: new Set<string>(),
+        renamed: new Map(),
+        moved: new Set<string>(),
+        cleared: new Set<string>(),
+        deleted: new Set<string>(),
+        history: false,
+      };
+      chats.remote({ ...none, projects: [{ name: 'car_radio', remote: bare, removed: false }] });
+      await vi.waitFor(() => expect(store.projects().map((p) => p.name)).toEqual(['car_radio']), { timeout: 30_000 });
+      const project = store.projects()[0]!;
+      expect(project.path).toBe(join(projectsRoot, 'car_radio'));
+      expect(project.remote).toBe(bare);
+      expect(existsSync(join(project.path, '.git'))).toBe(true);
+      const notices = () =>
+        (sent as { type: string; message?: string }[]).flatMap((m) => (m.type === 'project.notice' ? [m.message!] : []));
+      expect(notices().at(-1)).toContain('cloned into');
+
+      chats.remote({ ...none, projects: [{ name: 'car_radio', remote: bare, removed: true }] });
+      await vi.waitFor(() => expect(store.projects()).toEqual([]));
+      expect(existsSync(project.path)).toBe(true);
+      expect(notices().at(-1)).toContain('its folder');
+    } finally {
+      rmSync(join(home, 'settings.json'), { force: true });
+      rmSync(projectsRoot, { recursive: true, force: true, maxRetries: 5 });
+    }
   });
 });

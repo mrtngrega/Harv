@@ -70,8 +70,8 @@ export type Delegate = (req: HandOff, signal?: AbortSignal) => Promise<string>;
 /** Project mode: what Harv's project tools do (ChatManager implements them). */
 export interface ProjectTools {
   list(): Project[];
-  /** Creates the folder in the user's projects folder, git init, a starter CLAUDE.md, and moves this chat into it. */
-  start(tabId: string, name: string, description: string): Promise<string>;
+  /** Creates the folder in the user's projects folder, git init, a starter CLAUDE.md, its GitHub repo, and moves this chat into it. */
+  start(tabId: string, name: string, description: string, visibility: 'private' | 'public'): Promise<string>;
   /** Moves this chat into a known project (by name) or a folder (by path). */
   open(tabId: string, nameOrPath: string): Promise<string>;
 }
@@ -143,12 +143,15 @@ export function harvServer(store: ChatStore, tabId: string, delegate?: Delegate,
             }),
             tool(
               'start_project',
-              'Start a new project when the user says so ("we\'re starting a new project…"): makes its folder in the user\'s projects folder, runs git init, writes a starter CLAUDE.md, and turns this chat into a project chat there (from the next message you work as Claude Code in that folder). Fails if the folder exists: then ask the user, or use open_project.',
+              "Start a new project when the user says so (\"we're starting a new project…\"): makes its folder in the user's projects folder, runs git init, writes a starter CLAUDE.md, creates its GitHub repo (so the user's other devices get it too) and turns this chat into a project chat there (from the next message you work as Claude Code in that folder). Before calling it, ALWAYS ask the user whether the GitHub repo should be private or public, and wait for the answer: never guess or pick a default. Fails if the folder exists: then ask the user, or use open_project.",
               {
                 name: z.string().min(1).describe('Folder name: what the user called it, or a short lowercase-hyphen name like weather-app'),
                 description: z.string().describe('What the project is, in a sentence or two (goes into CLAUDE.md)'),
+                visibility: z
+                  .enum(['private', 'public'])
+                  .describe("The GitHub repo's visibility, exactly as the user answered when you asked (never assumed)"),
               },
-              async ({ name, description }) => text(await projects.start(tabId, name, description)),
+              async ({ name, description, visibility }) => text(await projects.start(tabId, name, description, visibility)),
             ),
             tool(
               'open_project',

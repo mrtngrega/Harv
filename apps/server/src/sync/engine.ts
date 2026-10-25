@@ -41,6 +41,8 @@ export interface RemoteChanges {
   moved: Set<string>;
   cleared: Set<string>;
   deleted: Set<string>;
+  /** Projects the other device added or removed, in order (linked, cloned or unlisted here by the manager). */
+  projects: { name: string; remote: string; removed: boolean }[];
   /** Anything that changes the history list. */
   history: boolean;
 }
@@ -66,6 +68,8 @@ export interface SyncHooks {
   settings(settings: HarvSettings): void;
   status(status: SyncStatus): void;
   log(message: string, data?: Record<string, unknown>): void;
+  /** A sync went through: the projects can be pulled now. */
+  synced?(): void;
 }
 
 /** This device's id, made once (~/.harv/device.json). */
@@ -250,6 +254,7 @@ export class SyncEngine {
       this.db.prune(written);
       this.db.set('lastSync', Date.now());
       this.lastError = undefined;
+      this.hooks.synced?.();
     } catch (err) {
       this.lastError = (err as Error).message;
       this.hooks.log('Sync failed', { error: this.lastError });
@@ -402,6 +407,7 @@ export class SyncEngine {
       moved: new Set(),
       cleared: new Set(),
       deleted: new Set(),
+      projects: [],
       history: false,
     };
     let settings: HarvSettings | undefined;
@@ -440,6 +446,7 @@ export class SyncEngine {
       changes.moved.size ||
       changes.cleared.size ||
       changes.deleted.size ||
+      changes.projects.length ||
       changes.history
     ) {
       this.hooks.chats(changes);
@@ -505,6 +512,9 @@ export class SyncEngine {
       }
       case 'route':
         this.routes.applyRoute(e.row);
+        break;
+      case 'project':
+        changes.projects.push({ name: e.name, remote: e.remote, removed: e.removed === true });
         break;
     }
     return undefined;

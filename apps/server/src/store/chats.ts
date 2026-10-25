@@ -95,6 +95,9 @@ export function snippetAround(text: string, query: string): string {
 }
 
 /** Chat history in SQLite (Node's built-in driver): one row per chat, one per finished line. */
+type ProjectRow = { id: string; name: string; path: string; remote: string | null };
+const toProject = (r: ProjectRow): Project => ({ id: r.id, name: r.name, path: r.path, ...(r.remote ? { remote: r.remote } : {}) });
+
 export class ChatStore {
   private db: DatabaseSync;
 
@@ -118,6 +121,9 @@ export class ChatStore {
     if (!chatColumns.some((c) => c.name === 'meta_at')) this.db.exec('ALTER TABLE chats ADD COLUMN meta_at INTEGER NOT NULL DEFAULT 0');
     if (!chatColumns.some((c) => c.name === 'stale')) this.db.exec('ALTER TABLE chats ADD COLUMN stale INTEGER NOT NULL DEFAULT 0');
     if (!chatColumns.some((c) => c.name === 'project_name')) this.db.exec('ALTER TABLE chats ADD COLUMN project_name TEXT');
+    // Project sync (docs/PLAN.md §6n): a project's GitHub repo.
+    const projectColumns = this.db.prepare('PRAGMA table_info(projects)').all() as { name: string }[];
+    if (!projectColumns.some((c) => c.name === 'remote')) this.db.exec('ALTER TABLE projects ADD COLUMN remote TEXT');
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS lines_by_uid ON lines(uid)');
     const missing = this.db.prepare('SELECT id FROM lines WHERE uid IS NULL').all() as { id: number }[];
     if (missing.length) {
@@ -167,18 +173,30 @@ export class ChatStore {
   // ── Projects (project mode) ──
 
   projects(): Project[] {
-    return this.db.prepare('SELECT id, name, path FROM projects ORDER BY name COLLATE NOCASE').all() as unknown as Project[];
+    const rows = this.db
+      .prepare('SELECT id, name, path, remote FROM projects ORDER BY name COLLATE NOCASE')
+      .all() as unknown as ProjectRow[];
+    return rows.map(toProject);
   }
 
   project(id: string | null | undefined): Project | undefined {
     if (!id) return undefined;
-    return this.db.prepare('SELECT id, name, path FROM projects WHERE id = ?').get(id) as Project | undefined;
+    const row = this.db.prepare('SELECT id, name, path, remote FROM projects WHERE id = ?').get(id) as ProjectRow | undefined;
+    return row && toProject(row);
+  }
+
+  /** A project's GitHub repo; telling the other devices about it (unless it came from them). */
+  setProjectRemote(id: string, remote: string, fromSync = false): void {
+    const project = this.project(id);
+    if (!project || project.remote === remote) return;
+    this.db.prepare('UPDATE projects SET remote = ? WHERE id = ?').run(remote, id);
+    if (!fromSync) this.onEvent?.({ t: 'project', name: project.name, remote, at: Date.now() });
   }
 
   /** The project for a folder, adding it if it's new. */
   addProject(name: string, path: string): Project {
-    const existing = this.db.prepare('SELECT id, name, path FROM projects WHERE path = ?').get(path) as Project | undefined;
-    if (existing) return existing;
+    const existing = this.db.prepare('SELECT id, name, path, remote FROM projects WHERE path = ?').get(path) as ProjectRow | undefined;
+    if (existing) return toProject(existing);
     const project = { id: randomUUID(), name, path };
     this.db.prepare('INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)').run(project.id, name, path, Date.now());
     // Chats from the other device that work on a project of this name join it.
@@ -188,8 +206,11 @@ export class ChatStore {
     return project;
   }
 
-  /** Forgets a project; its chats go back to plain assistant chats (the folder isn't touched). */
-  removeProject(id: string): void {
+  /** Forgets a project; its chats go back to plain assistant chats (the folder isn't touched). The other devices unlist it too. */
+  removeProject(id: string, fromSync = false): void {
+    const project = this.project(id);
+    if (project?.remote && !fromSync)
+      this.onEvent?.({ t: 'project', name: project.name, remote: project.remote, removed: true, at: Date.now() });
     // They remember the name, so adding the project again brings them back.
     this.db
       .prepare('UPDATE chats SET project_id = NULL, project_name = (SELECT name FROM projects WHERE id = ?) WHERE project_id = ?')
@@ -370,6 +391,7 @@ export class ChatStore {
   /** Every chat with messages as events: the opening snapshot a device sends when sync starts. */
   exportEvents(): SyncEvent[] {
     const out: SyncEvent[] = [];
+    for (const p of this.projects()) if (p.remote) out.push({ t: 'project', name: p.name, remote: p.remote, at: Date.now() });
     const ids = this.db
       .prepare('SELECT id FROM chats c WHERE EXISTS (SELECT 1 FROM lines l WHERE l.chat_id = c.id) ORDER BY created_at')
       .all() as { id: string }[];

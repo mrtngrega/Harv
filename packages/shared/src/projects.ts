@@ -2,8 +2,10 @@
 export interface Project {
   id: string;
   name: string;
-  /** Full Windows path of the project folder. */
+  /** Full path of the project folder. */
   path: string;
+  /** Its GitHub repo (origin), which the user's other devices clone and pull. */
+  remote?: string;
 }
 
 export type ProjectClientMessage =
@@ -18,4 +20,6 @@ export type ProjectServerMessage =
   | { type: 'projects'; projects: Project[] }
   /** A chat's project changed (from the dashboard or Harv's start_project / open_project tools). */
   | { type: 'chat.project'; tabId: string; projectId: string | null }
-  | { type: 'project.error'; message: string };
+  | { type: 'project.error'; message: string }
+  /** Something project sync did or left alone (cloned from the other device, not pulled because of local work…), as a toast. */
+  | { type: 'project.notice'; message: string };

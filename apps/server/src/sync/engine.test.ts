@@ -464,3 +464,49 @@ describe('Git sync between two devices', { timeout: 60_000 }, () => {
     expect(readFileSync(nb.ideas, 'utf8')).toBe('- from the PC\n');
   });
 });
+
+describe('projects follow the user (docs/PLAN.md §6n, item 5)', { timeout: 60_000 }, () => {
+  it('tells the other device about a project with a GitHub repo, and about removing it', async () => {
+    const [pc, nb] = await pair();
+    const local = pc.chats.addProject('car_radio', join(pc.home, 'car_radio'));
+    // No repo yet: nothing to send.
+    await pc.sync();
+    await nb.sync();
+    expect(nb.changes.flatMap((c) => c.projects)).toEqual([]);
+
+    pc.chats.setProjectRemote(local.id, 'https://github.com/mrtngrega/car_radio.git');
+    await pc.sync();
+    await nb.sync();
+    expect(nb.changes.flatMap((c) => c.projects)).toEqual([
+      { name: 'car_radio', remote: 'https://github.com/mrtngrega/car_radio.git', removed: false },
+    ]);
+
+    pc.chats.removeProject(local.id);
+    await pc.sync();
+    await nb.sync();
+    expect(nb.changes.flatMap((c) => c.projects).at(-1)).toEqual({
+      name: 'car_radio',
+      remote: 'https://github.com/mrtngrega/car_radio.git',
+      removed: true,
+    });
+  });
+
+  it('sends projects in the opening snapshot, and never echoes one it was told about', async () => {
+    const pc = device('PC');
+    const p = pc.chats.addProject('Harv', join(pc.home, 'Harv'));
+    pc.chats.setProjectRemote(p.id, 'https://github.com/mrtngrega/Harv.git');
+    await pc.sync();
+    const nb = device('notebook');
+    copyFileSync(join(pc.home, 'sync.key'), join(nb.home, 'sync.key'));
+    await nb.sync();
+    expect(nb.changes.flatMap((c) => c.projects)).toEqual([
+      { name: 'Harv', remote: 'https://github.com/mrtngrega/Harv.git', removed: false },
+    ]);
+    // The manager links it there without a new event.
+    const there = nb.chats.addProject('Harv', join(nb.home, 'Harv'));
+    nb.chats.setProjectRemote(there.id, 'https://github.com/mrtngrega/Harv.git', true);
+    await nb.sync();
+    await pc.sync();
+    expect(pc.changes.flatMap((c) => c.projects)).toEqual([]);
+  });
+});

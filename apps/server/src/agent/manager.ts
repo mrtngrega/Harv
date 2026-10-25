@@ -20,6 +20,7 @@ import { parseOverride } from '../router/rules.ts';
 import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
 import type { RemoteChanges } from '../sync/engine.ts';
+import { cloneProject, createGitHubRepo, planLink, pullNotice, pullProject, remoteOf, sameRemote } from '../sync/projects.ts';
 import type { UsageMeter } from '../usage/meter.ts';
 import { buildContent, deleteAttachments } from './attachments.ts';
 import { sideQuestion } from './btw.ts';
@@ -760,6 +761,7 @@ export class ChatManager {
       for (const line of lines) this.broadcast({ type: 'chat.line', tabId: id, line });
     }
     if (changes.history) this.publishHistory();
+    if (changes.projects.length) void this.applyRemoteProjects(changes.projects);
     this.onStatus(this.status);
   }
 
@@ -803,6 +805,7 @@ export class ChatManager {
     this.store.setSession(tabId, null);
     if (this.busy(tabId)) this.switchAfterTurn.add(tabId);
     else this.dropSession(tabId);
+    if (project) void this.pullOnOpen(project.id);
     this.broadcast({ type: 'chat.project', tabId, projectId: project?.id ?? null });
     this.publishHistory();
     return undefined;
@@ -812,22 +815,112 @@ export class ChatManager {
   addProject(path: string, name?: string): string | undefined {
     const folder = osPath.normalize(path.trim());
     if (!osPath.isAbsolute(folder) || !existsSync(folder) || !statSync(folder).isDirectory()) return `No folder at ${path}.`;
-    this.store.addProject(name?.trim() || osPath.basename(folder), folder);
+    const project = this.store.addProject(name?.trim() || osPath.basename(folder), folder);
     this.publishProjects();
+    void this.noteRemote(project.id, folder);
     return undefined;
   }
 
-  removeProject(id: string): void {
+  removeProject(id: string, fromSync = false): void {
     for (const chat of this.store.openChats()) if (chat.projectId === id) this.setProject(chat.id, null);
-    this.store.removeProject(id);
+    this.store.removeProject(id, fromSync);
     this.publishProjects();
     this.publishHistory();
+  }
+
+  // ── Project sync (docs/PLAN.md §6n, item 5): projects follow the user to their other devices ──
+
+  /** Makes a new project's GitHub repo and returns its remote; replaced in tests. */
+  createRepo = createGitHubRepo;
+  private pulling = false;
+
+  private projectNotice(message: string) {
+    this.broadcast({ type: 'project.notice', message });
+  }
+
+  /** A project's folder has a GitHub repo: remember it, and the other devices hear about it. */
+  private async noteRemote(id: string, path: string) {
+    const remote = await remoteOf(path);
+    if (remote) this.store.setProjectRemote(id, remote);
+    this.publishProjects();
+  }
+
+  /** On start: projects added before project sync, or whose repo was made by hand, get their remotes noted. */
+  async noteRemotes(): Promise<void> {
+    for (const p of this.store.projects()) if (!p.remote) await this.noteRemote(p.id, p.path);
+  }
+
+  /** Projects the other device added or removed: link, clone or unlist them here, one at a time. */
+  private async applyRemoteProjects(list: RemoteChanges['projects']) {
+    for (const p of list) {
+      try {
+        if (p.removed) {
+          const local = this.store.projects().find((x) => x.remote && sameRemote(x.remote, p.remote));
+          if (!local) continue;
+          this.removeProject(local.id, true);
+          this.projectNotice(
+            `"${local.name}" was removed on the other device, so it's off the list here too (its folder ${local.path} stays).`,
+          );
+          continue;
+        }
+        const plan = await planLink(p.name, p.remote, this.store.projects(), projectsDir());
+        if (plan.do === 'nothing') continue;
+        if (plan.do === 'conflict') {
+          this.projectNotice(plan.notice);
+          continue;
+        }
+        if (plan.do === 'link') {
+          this.store.setProjectRemote(plan.project.id, p.remote, true);
+          continue;
+        }
+        if (plan.do === 'clone') await cloneProject(p.remote, plan.path);
+        const project = this.store.addProject(p.name, plan.path);
+        this.store.setProjectRemote(project.id, p.remote, true);
+        this.projectNotice(
+          plan.do === 'clone'
+            ? `New project from the other device: "${p.name}", cloned into ${plan.path}.`
+            : `New project from the other device: "${p.name}" (it was already in ${plan.path}).`,
+        );
+      } catch (err) {
+        this.projectNotice(`Couldn't bring the project "${p.name}" over from the other device: ${(err as Error).message}`);
+      } finally {
+        this.publishProjects();
+        this.publishHistory();
+      }
+    }
+  }
+
+  /**
+   * After each sync: pulls the other device's pushes into every project with a repo, only
+   * when nothing here could be lost (pullProject checks) and none of its chats is working.
+   */
+  async pullProjects(): Promise<void> {
+    if (this.pulling) return;
+    this.pulling = true;
+    try {
+      for (const p of this.store.projects()) {
+        if (!p.remote || !existsSync(p.path)) continue;
+        if (this.store.openChats().some((c) => c.projectId === p.id && this.busy(c.id))) continue;
+        if ((await pullProject(p.path)) === 'pulled') this.projectNotice(`Pulled the other device's new work into "${p.name}".`);
+      }
+    } finally {
+      this.pulling = false;
+    }
+  }
+
+  /** Opening a project: bring it up to date first, or say why not. */
+  private async pullOnOpen(projectId: string) {
+    const p = this.store.project(projectId);
+    if (!p?.remote || !existsSync(p.path)) return;
+    const result = await pullProject(p.path);
+    const notice = result === 'pulled' ? `Pulled the other device's new work into "${p.name}".` : pullNotice(p.name, result);
+    if (notice) this.projectNotice(notice);
   }
 
   /** Harv's start_project / open_project / list_projects tools. */
   private projectTools: ProjectTools = {
     list: () => this.store.projects(),
-    start: async (tabId, rawName, description) => {
+    start: async (tabId, rawName, description, visibility) => {
       // Characters Windows doesn't allow in folder names (and control characters) go.
       const name = [...rawName.trim()]
         .filter((c) => c.charCodeAt(0) >= 32 && !'<>:"/\\|?*'.includes(c))
@@ -848,9 +941,20 @@ export class ChatManager {
         git = 'no git repository (git init failed; try it in the project chat)';
       }
       const project = this.store.addProject(name, path);
+      let repo = '';
+      if (git === 'a git repository') {
+        try {
+          const remote = await this.createRepo(path, name, visibility);
+          this.store.setProjectRemote(project.id, remote);
+          repo = ` Its ${visibility} GitHub repo is ${remote}, with the first commit pushed, so the user's other devices get the project too.`;
+        } catch (err) {
+          const why = (err as Error).message.split('\n')[0];
+          repo = ` Making its GitHub repo failed (${why}), so it stays on this device for now: tell the user, and once that's fixed (e.g. \`gh auth login\`), run \`gh repo create ${name} --${visibility} --source . --push\` in the project.`;
+        }
+      }
       this.publishProjects();
       this.setProject(tabId, project.id);
-      return `Created ${path} with ${git} and a starter CLAUDE.md, and this is now a project chat for "${name}". From the user's next message you work in that folder as Claude Code. Tell the user the folder you made and suggest the first step (the stack and a short plan).`;
+      return `Created ${path} with ${git} and a starter CLAUDE.md, and this is now a project chat for "${name}".${repo} From the user's next message you work in that folder as Claude Code. Tell the user the folder you made and suggest the first step (the stack and a short plan).`;
     },
     open: async (tabId, nameOrPath) => {
       const wanted = nameOrPath.trim();

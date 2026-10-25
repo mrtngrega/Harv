@@ -15,14 +15,30 @@ export function askHarvAbout(alert: WatchdogAlert) {
   chat.send(`My PC watchdog just warned me: "${alert.title}". ${alert.detail} What is this, and should I do something about it?`);
 }
 
-/** The PC watchdog's warnings, top right (plan-usage warnings sit in the middle), newest on top. */
+/** A note from project sync (a project cloned from the other device, a pull left for the user). */
+interface Notice {
+  id: number;
+  text: string;
+}
+let noticeId = 0;
+
+/**
+ * The PC watchdog's warnings, top right (plan-usage warnings sit in the middle), newest on
+ * top, with project sync's notes under them.
+ */
 export function WatchdogToast() {
   const [alerts, setAlerts] = useState<WatchdogAlert[]>([]);
+  const [notices, setNotices] = useState<Notice[]>([]);
   const dismiss = (id: string) => setAlerts((list) => list.filter((a) => a.id !== id));
+  const dismissNotice = (id: number) => setNotices((list) => list.filter((n) => n.id !== id));
 
   useEffect(
     () =>
       onServerMessage((msg) => {
+        if (msg.type === 'project.notice') {
+          setNotices((list) => [{ id: ++noticeId, text: msg.message }, ...list.filter((n) => n.text !== msg.message)].slice(0, MAX_SHOWN));
+          return;
+        }
         if (msg.type !== 'watchdog.alert') return;
         setAlerts((list) => {
           const next = [msg.alert, ...list.filter((a) => a.id !== msg.alert.id)];
@@ -36,12 +52,42 @@ export function WatchdogToast() {
     [],
   );
 
-  if (alerts.length === 0) return null;
+  if (alerts.length === 0 && notices.length === 0) return null;
   return (
     <div className="fixed top-20 right-4 z-50 flex w-[min(400px,calc(100vw-32px))] flex-col gap-2">
       {alerts.map((alert) => (
         <AlertCard key={alert.id} alert={alert} onDismiss={() => dismiss(alert.id)} />
       ))}
+      {notices.map((n) => (
+        <NoticeCard key={n.id} text={n.text} onDismiss={() => dismissNotice(n.id)} />
+      ))}
+    </div>
+  );
+}
+
+function NoticeCard({ text, onDismiss }: { text: string; onDismiss: () => void }) {
+  useEffect(() => {
+    const timer = window.setTimeout(onDismiss, WARN_SHOW_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one timer per notice
+  }, []);
+  return (
+    <div
+      role="status"
+      className="animate-fade-in flex min-w-0 items-start gap-2.5 rounded-xl border border-line bg-[rgb(16_24_34/0.94)] px-4 py-3 text-xs shadow-[0_12px_32px_rgb(0_0_0/0.4)] backdrop-blur-[22px]"
+    >
+      <span aria-hidden="true" className="text-accent">
+        ⇅
+      </span>
+      <span className="min-w-0 flex-1 text-muted [overflow-wrap:anywhere]">{text}</span>
+      <button
+        type="button"
+        aria-label="Dismiss"
+        onClick={onDismiss}
+        className="-my-1 size-6 flex-none cursor-pointer rounded text-muted hover:bg-white/10 hover:text-ink"
+      >
+        ×
+      </button>
     </div>
   );
 }

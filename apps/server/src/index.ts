@@ -152,6 +152,7 @@ const sync = new SyncEngine(HARV_HOME, store, routes, syncStore, {
   settings: (settings) => broadcast({ type: 'settings', settings }),
   status: (status) => broadcast({ type: 'sync.status', status }),
   log: (message, data) => app.log.warn(data ?? {}, message),
+  synced: () => void chats.pullProjects(),
 });
 // "Reopen tabs" off: Harv starts with no tabs (the chats stay in history).
 if (!loadSettings().restoreTabs) {
@@ -528,4 +529,5 @@ refreshCatalog();
 meter.start();
 
 // Sync with the user's other devices (Settings › Sync): pull and push now and every 2 minutes.
-sync.start();
+// Projects with a GitHub repo go along (docs/PLAN.md §6n): note the remotes of ones added before, then sync.
+void chats.noteRemotes().finally(() => sync.start());
