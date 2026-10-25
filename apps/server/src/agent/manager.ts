@@ -218,6 +218,9 @@ export class ChatManager {
       case 'chat.notice':
         save({ kind: 'notice', text: msg.message });
         break;
+      case 'chat.context':
+        this.store.setContext(msg.tabId, msg.tokens);
+        break;
       case 'chat.error':
         save({ kind: 'error', text: msg.message });
         this.replies.get(msg.tabId)?.push(`(error: ${msg.message})`);
@@ -225,7 +228,6 @@ export class ChatManager {
       case 'chat.done':
         this.gate.turnEnded(msg.tabId);
         this.router.finished(msg.tabId, msg.ok, msg.stopped, msg.usage);
-        if (msg.usage?.inputTokens) this.store.setContext(msg.tabId, msg.usage.inputTokens);
         this.meter.turnFinished();
         this.turnEnded(msg.tabId);
         if (msg.stopped) save({ kind: 'notice', text: 'Stopped.' });

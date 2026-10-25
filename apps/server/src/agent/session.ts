@@ -64,6 +64,8 @@ export class ChatSession {
   private turnTokens = 0;
   private streamChars = 0;
   private progressAt = 0;
+  /** What the latest API call sent: the context it had (the turn's summed usage counts the context once per call). */
+  private contextIn = 0;
   /** Subagents and shells this chat runs in the background, for the strip above the prompt. */
   private taskTracker = new TaskTracker();
 
@@ -158,6 +160,19 @@ export class ChatSession {
     this.emit({ type: 'chat.progress', tabId: this.tabId, outputTokens: this.turnTokens + Math.ceil(this.streamChars / 4) });
   }
 
+  /** The context meter, live: each main-thread message's own input (cached parts included), then plus its output. */
+  private trackContext(ev: { type: string; message?: unknown; usage?: unknown }) {
+    type Usage = { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; output_tokens?: number };
+    if (ev.type === 'message_start') {
+      const u = ((ev.message as { usage?: Usage } | undefined)?.usage ?? {}) as Usage;
+      this.contextIn = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+      if (this.contextIn > 0) this.emit({ type: 'chat.context', tabId: this.tabId, tokens: this.contextIn });
+    } else if (ev.type === 'message_delta' && this.contextIn > 0) {
+      const out = (ev.usage as Usage | undefined)?.output_tokens ?? 0;
+      this.emit({ type: 'chat.context', tabId: this.tabId, tokens: this.contextIn + out });
+    }
+  }
+
   private setBusy(busy: boolean, toolRunning = false) {
     this.busy = busy;
     this.toolRunning = toolRunning;
@@ -232,6 +247,7 @@ export class ChatSession {
           this.setBusy(true, false);
         }
         this.countTokens(ev);
+        this.trackContext(ev);
         return;
       }
 

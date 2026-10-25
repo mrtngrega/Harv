@@ -47,7 +47,7 @@ export interface Tab {
   currentId: string | null;
   tag?: string;
   reason?: string;
-  /** Tokens the last turn sent: the conversation's context size. */
+  /** The conversation's context size (live, from each message's own usage). */
   context?: number;
   /** The server has this chat (it came from there, or a message was sent): otherwise it's a blank tab only the dashboard knows. */
   stored?: boolean;
@@ -268,7 +268,6 @@ export function applyChatEvent(msg: ChatServerMessage): void {
         const extra: Line[] = [];
         if (msg.stopped) extra.push(line('notice', 'Stopped.'));
         if (msg.error) extra.push(line('error', msg.error));
-        const context = msg.usage?.inputTokens || done.context;
         const lastTurn = {
           ms: msg.usage?.durationMs ?? (done.startedAt ? Date.now() - done.startedAt : 0),
           tokens: msg.usage?.outputTokens ?? done.outTokens ?? 0,
@@ -279,10 +278,12 @@ export function applyChatEvent(msg: ChatServerMessage): void {
           startedAt: undefined,
           activity: undefined,
           lastTurn,
-          ...(context ? { context } : {}),
           lines: [...done.lines, ...extra],
         };
       });
+      break;
+    case 'chat.context':
+      updateTab(msg.tabId, (t) => ({ ...t, context: msg.tokens }));
       break;
     case 'chat.notice':
       updateTab(msg.tabId, (t) => ({ ...t, lines: [...t.lines, line('notice', msg.message)] }));

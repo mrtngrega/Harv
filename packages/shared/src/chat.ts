@@ -108,7 +108,7 @@ export interface ChatSnapshot {
   id: string;
   title: string;
   lines: StoredLine[];
-  /** Tokens the last turn sent (the conversation's context size). */
+  /** The conversation's context size: the latest message's input plus output. */
   context?: number;
   /** The project this chat works on (project mode), if any. */
   projectId?: string;
@@ -155,6 +155,8 @@ export type ChatServerMessage =
   | { type: 'chat.delta'; tabId: string; text: string }
   /** Tokens Claude has written this turn so far (estimated while a message streams, exact after it), for the status line. */
   | { type: 'chat.progress'; tabId: string; outputTokens: number }
+  /** The conversation's context size right now: what the latest message sent plus what it wrote (live, every API call of a turn). */
+  | { type: 'chat.context'; tabId: string; tokens: number }
   /** Final text of one assistant message (replaces the streamed text). */
   | { type: 'chat.assistant'; tabId: string; text: string }
   | { type: 'chat.tool'; tabId: string; id: string; name: string; detail: string }

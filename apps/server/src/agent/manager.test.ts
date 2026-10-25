@@ -37,6 +37,10 @@ class FakeSession {
     this.sent.push({ content, model, effort, raw });
   }
 
+  context(tokens: number) {
+    this.emit({ type: 'chat.context', tabId: this.tabId, tokens });
+  }
+
   reply(text: string) {
     this.emit({ type: 'chat.assistant', tabId: this.tabId, text });
   }
@@ -476,5 +480,18 @@ describe('slash commands', () => {
     expect(FakeSession.all.get('r')).toBeUndefined();
     await chats.send('r2', '/c/Users/me/notes.txt what is in it', 'sonnet', 'medium');
     expect(FakeSession.all.get('r2')!.sent[0]!.raw).toBe(false);
+  });
+});
+
+describe('context meter', () => {
+  it("keeps each message's own context, not the turn's sum over every API call", async () => {
+    const { chats, store, sent } = setup();
+    await chats.send('ctx', 'look around the repo', 'sonnet', 'medium');
+    const session = FakeSession.all.get('ctx')!;
+    session.context(31_000);
+    session.context(42_500);
+    session.finish(); // its usage sums all calls of the turn
+    expect(store.snapshot('ctx')!.context).toBe(42_500);
+    expect(sent.filter((m) => m.type === 'chat.context').map((m) => (m as { tokens: number }).tokens)).toEqual([31_000, 42_500]);
   });
 });
