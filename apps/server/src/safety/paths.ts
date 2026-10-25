@@ -1,4 +1,4 @@
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve, win32 } from 'node:path';
 import { HARV_HOME } from '../paths.ts';
 import { IS_WINDOWS, osPath, pathKey } from '../platform.ts';
@@ -15,6 +15,8 @@ export function fullPath(p: string, cwd = WORKSPACE): string {
   let path = p.trim().replace(/^["']|["']$/g, '');
   if (path === '~' || path.startsWith('~/') || path.startsWith('~\\')) path = join(homedir(), path.slice(1));
   if (!IS_WINDOWS) return osPath.normalize(resolve(cwd, path));
+  // Git Bash's /tmp is the Windows temp folder.
+  if (/^\/tmp(\/|$)/.test(path)) path = join(tempDirs()[0]!, path.slice(4));
   const bash = /^\/([a-zA-Z])(\/|$)(.*)$/.exec(path);
   if (bash) path = `${bash[1]!.toUpperCase()}:\\${bash[3] ?? ''}`;
   path = path.replace(/\//g, '\\');
@@ -43,6 +45,10 @@ export const isSystemDir = (p: string) => SYSTEM_DIRS.some((d) => isInside(p, d)
 export const isProgramDir = (p: string) => PROGRAM_DIRS.some((d) => isInside(p, d));
 /** Harv's database, backups and memory: only Harv's own code changes them, never a tool call. */
 export const isHarvData = (p: string) => isInside(p, HARV_HOME) && !isInside(p, WORKSPACE);
+
+/** The temp folders, scratch space for project chats (`HARV_TEMP` replaces them in tests). */
+export const tempDirs = () => (process.env.HARV_TEMP ? [process.env.HARV_TEMP] : [tmpdir(), ...(IS_WINDOWS ? [] : ['/tmp', '/var/tmp'])]);
+export const isTempDir = (p: string) => tempDirs().some((d) => isInside(p, d));
 
 /** Settings (protectedPaths and the rest) live in ../settings.ts; re-exported for the gate. */
 export { loadSettings } from '../settings.ts';

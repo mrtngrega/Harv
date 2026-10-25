@@ -1,9 +1,9 @@
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Tier } from '@harv/shared';
 import { IS_WINDOWS } from '../platform.ts';
-import { fullPath, isHarvData, isInside, isProgramDir, isSystemDir, loadSettings, WORKSPACE } from './paths.ts';
+import { fullPath, isHarvData, isInside, isProgramDir, isSystemDir, isTempDir, loadSettings, WORKSPACE } from './paths.ts';
 
 /** How the OS folders are named in reasons. */
 const SYSTEM_FOLDER = IS_WINDOWS ? 'the Windows folder' : "the system's own folders";
@@ -73,7 +73,6 @@ const SENSITIVE_PATHS: RegExp[] = [
   sensitive(String.raw`^START\.(ssh|aws|azure|kube|gnupg|gcloud)([\\/]|END)`),
   sensitive(String.raw`^START\.env(?!\.(example|sample|template)\b)(\.[\w.-]+)?END`),
   sensitive(String.raw`^START(id_rsa|id_ed25519|id_ecdsa|id_dsa)`),
-  sensitive(String.raw`\.(pem|key|pfx|p12|kdbx|ppk|ovpn|jks|keystore)END`),
   sensitive(String.raw`^START(\.npmrc|\.netrc|_netrc|\.pypirc)END`),
   sensitive(String.raw`[\\/]\.docker[\\/]config\.json`),
   sensitive(String.raw`[\\/]gh[\\/]hosts\.yml`),
@@ -99,13 +98,38 @@ const SENSITIVE_PATHS: RegExp[] = [
   /[\\/]\.password-store([\\/]|$)/i,
 ];
 
+/**
+ * Key and certificate files, by extension. Only tested on whole file names: in code
+ * (`e.key`, `cert.pem` in a sentence) the same letters are no file at all.
+ */
+const KEY_FILE = /\.(pem|key|pfx|p12|kdbx|ppk|ovpn|jks|keystore)$/i;
+const hasKeyFile = (p: string) => p.split(/[\\/]/).some((part) => KEY_FILE.test(part));
+
 const verdict = (tier: Tier, reason: string, summary: string, targets: string[] = []): Verdict => ({ tier, reason, summary, targets });
 
 const str = (input: Record<string, unknown>, key: string) => (typeof input[key] === 'string' ? (input[key] as string) : '');
 
 export function isSensitivePath(p: string): boolean {
-  return SENSITIVE_PATHS.some((re) => re.test(p)) && !isClaudeMemory(p) && !isClaudeToolResult(p);
+  return (SENSITIVE_PATHS.some((re) => re.test(p)) || hasKeyFile(p)) && !isClaudeMemory(p) && !isClaudeToolResult(p);
 }
+
+/** A command's shell lines mention a credential file (key files only as whole command words, like `cat server.key`). */
+function mentionsSecret(shell: string): boolean {
+  const text = withoutAllowedClaude(shell);
+  if (SENSITIVE_PATHS.some((re) => re.test(text.replace(/["']/g, ' ')))) return true;
+  return words(text).some((w) => {
+    const file = unquote(w).split('=').at(-1)!;
+    return !/[\s(){}<>,;]/.test(file) && hasKeyFile(file);
+  });
+}
+
+/** Quoted strings in a script: where the paths and shell commands of Python or JavaScript code are. */
+const quotedStrings = (text: string) => [...text.matchAll(/'([^'\n]*)'|"([^"\n]*)"/g)].map((m) => m[1] ?? m[2] ?? '');
+/** Words and strings of a script that look like paths (a folder, `~`, a dot file, a file name). */
+const looksLikePath = (s: string) =>
+  s.length > 0 && !/\s{2}|[\n<>|]/.test(s) && (/[\\/]/.test(s) || /^[~.]/.test(s) || /^[\w.-]+\.\w+$/.test(s));
+const scriptPaths = (text: string) =>
+  [...quotedStrings(text), ...text.split(/[\s"'`(),;=]+/).filter((w) => /[\\/]/.test(w))].filter(looksLikePath);
 
 /**
  * Claude Code's project memory notes (~/.claude/projects/<folder>/memory/*.md). Project
@@ -256,7 +280,8 @@ const GREEN_COMMANDS = new Set(
     'tasklist systeminfo ipconfig ping nslookup tracert netstat nvidia-smi ver get-date ' +
     'select-object select where-object ? sort-object format-table ft format-list fl measure-object measure select-string sls test-path resolve-path ' +
     'split-path join-path out-string out-host write-output write-host convertto-json convertfrom-json compare-object group-object gci gc gps gsv gl gi ' +
-    'free uptime ps lsblk lscpu lspci lsusb sensors id ss nproc realpath basename dirname lsof'
+    'free uptime ps lsblk lscpu lspci lsusb sensors id ss nproc realpath basename dirname lsof ' +
+    'fc-list nl md5sum sha1sum sha256sum sha512sum cksum column tr rev jq printf test [ true false identify'
   ).split(' '),
 );
 const GREEN_GIT = new Set(['status', 'log', 'diff', 'show', 'ls-files', 'rev-parse', 'blame', 'remote', 'branch', 'tag', 'describe']);
@@ -280,8 +305,67 @@ const LINUX_INSTALL =
 const LINUX_SYSTEM =
   /\b(systemctl\s+(?!(status|list-\S+|is-\S+|show|cat)\b)\S+|crontab|mount|umount|useradd|userdel|usermod|passwd|hostnamectl\s+set-\S+|timedatectl\s+set-\S+|nmcli\s+(con|connection|dev|device|radio|networking)\s+(?!(show|status)\b)\S+|sysctl\s+-w|grubby|modprobe|rmmod)\b/i;
 
+/**
+ * Sending data out: curl/wget uploads and POST-like requests, PowerShell web requests
+ * with a changing method, mail. curl's flags are case-sensitive (`-f` only fails
+ * quietly, `-F` posts a form), so they're read word by word.
+ */
+export function sendsData(command: string): boolean {
+  if (/send-mailmessage|\b(invoke-webrequest|invoke-restmethod|iwr|irm)\b.*-method\s+['"]?(post|put|patch|delete)\b/i.test(command))
+    return true;
+  return splitCommand(command).some((segment) => {
+    const ws = words(segment).map(unquote);
+    const at = ws.findIndex((w) => /(^|[^\w-])(curl|wget)(\.exe)?$/i.test(w));
+    if (at === -1) return false;
+    const args = ws.slice(at + 1);
+    if (/wget(\.exe)?$/i.test(ws[at]!)) return args.some((a) => /^--(post-data|post-file|method|body-data|body-file)\b/.test(a));
+    return args.some(
+      (a, j) =>
+        (/^-[a-zA-Z]*[dFTK]/.test(a) && !a.startsWith('--')) ||
+        /^--(data|form|upload-file|json|config)\b/.test(a) ||
+        /^-X(post|put|patch|delete)$/i.test(a) ||
+        ((a === '-X' || a === '--request') && /^(post|put|patch|delete)$/i.test(args[j + 1] ?? '')),
+    );
+  });
+}
+
+/**
+ * Where a plain curl/wget download saves to, as written (`.` for a file named by the
+ * server in the current folder; none when it prints to the screen), or null when it isn't one.
+ */
+export function downloadTargets(segment: string): string[] | null {
+  const ws = words(segment).map(unquote);
+  const program = (ws[0] ?? '').toLowerCase().replace(/\.exe$/, '');
+  if ((program !== 'curl' && program !== 'wget') || sendsData(segment) || /[$`]/.test(segment)) return null;
+  const out: string[] = [];
+  let intoCwd = program === 'wget';
+  for (let i = 1; i < ws.length; i++) {
+    const w = ws[i]!;
+    if (program === 'curl') {
+      if (w === '--output' || w === '--output-dir') out.push(ws[++i] ?? '');
+      else if (/^--(output|output-dir)=/.test(w)) out.push(w.slice(w.indexOf('=') + 1));
+      else if (w === '--remote-name' || w === '--remote-name-all') intoCwd = true;
+      else if (/^-[a-zA-Z]+$/.test(w)) {
+        if (w.includes('O')) intoCwd = true;
+        if (w.endsWith('o')) out.push(ws[++i] ?? '');
+      } else if (/^-o./.test(w)) out.push(w.slice(2));
+    } else if (w === '-O' || w === '-P' || w === '-o' || w === '-a') {
+      out.push(ws[++i] ?? '');
+      if (w === '-O') intoCwd = false;
+    } else if (/^--(output-document|directory-prefix|output-file|append-output)=/.test(w)) {
+      out.push(w.slice(w.indexOf('=') + 1));
+    }
+  }
+  if (intoCwd) out.push('.');
+  return out.filter((t) => t !== '-' && t !== '/dev/null');
+}
+
+/** A pattern, or a check that needs more than one (like reading curl's flags). */
+type Rule = RegExp | ((command: string) => boolean);
+const matches = (rule: Rule, text: string) => (typeof rule === 'function' ? rule(text) : rule.test(text));
+
 /** Red-action categories, for a clear reason on the approval card. */
-const RED_REASONS: [RegExp, string][] = [
+const RED_REASONS: [Rule, string][] = [
   [/\b(rm|rmdir|rd|del|erase|remove-item|ri)\b/i, 'Deletes files or folders.'],
   [
     /\b(winget|choco|scoop|msiexec)\b|\b(npm|pnpm|yarn|pip3?)\s+(i|install|add|uninstall|remove)\b|\b(install|uninstall)-\w+/i,
@@ -294,10 +378,7 @@ const RED_REASONS: [RegExp, string][] = [
   [LINUX_SYSTEM, 'Changes system settings.'],
   [/\b(sudo|pkexec)\b/i, 'Runs as administrator.'],
   [/\bgit\s+push\b/i, 'Pushes to a git remote.'],
-  [
-    /send-mailmessage|\bcurl\b.*\s-(d|f|x\s*post|-data)|invoke-(webrequest|restmethod)\b.*-method\s+(post|put|delete)/i,
-    'Sends data over the network.',
-  ],
+  [sendsData, 'Sends data over the network.'],
   [/\b(mv|move|ren|rename|move-item|rename-item|cp|copy|xcopy|robocopy|copy-item)\b/i, 'Moves, renames or copies files.'],
   [/\.(ps1|bat|cmd|vbs|js|py|sh)\b|\b(python3?|py|node|powershell|pwsh|cmd|bash)\b/i, 'Runs a script or another shell.'],
   [/\b(set-content|add-content|out-file|new-item|tee)\b|>/i, 'Writes files.'],
@@ -330,6 +411,89 @@ export function splitCommand(command: string): string[] {
   return out.map((s) => s.trim()).filter(Boolean);
 }
 
+export interface Heredoc {
+  /** The command that reads it (`python3`, `cat`): code for an interpreter, data for cat/tee. */
+  runner: string;
+  text: string;
+}
+
+/**
+ * A bash command's heredocs (`python3 - <<'EOF' … EOF`) taken apart from its shell lines.
+ * The body is a script or data, not commands for the shell, so reading its words as
+ * commands made every script red. Found the way bash does: only outside quotes.
+ */
+export function splitHeredocs(command: string): { shell: string; bodies: Heredoc[] } {
+  let shell = '';
+  const bodies: Heredoc[] = [];
+  const pending: { tag: string; dash: boolean; runner: string }[] = [];
+  let quote = '';
+  let lineStart = 0;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]!;
+    if (quote) {
+      if (ch === '\\' && quote === '"') {
+        shell += ch + (command[++i] ?? '');
+        continue;
+      }
+      if (ch === quote) quote = '';
+      shell += ch;
+      continue;
+    }
+    if (ch === '\\') {
+      shell += ch + (command[++i] ?? '');
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      shell += ch;
+      continue;
+    }
+    const op = ch === '<' && command[i - 1] !== '<' ? /^<<(-?)[ \t]*(['"]?)([A-Za-z_][\w-]*)\2/.exec(command.slice(i)) : null;
+    if (op) {
+      const [whole, dash, , tag] = op;
+      const before = splitCommand(shell.slice(lineStart)).at(-1) ?? '';
+      pending.push({ tag: tag!, dash: dash === '-', runner: (words(before)[0] ?? '').toLowerCase() });
+      shell += ' ';
+      i += whole.length - 1;
+      continue;
+    }
+    if (ch === '\n' && pending.length > 0) {
+      shell += '\n';
+      let pos = i + 1;
+      for (const { tag, dash, runner } of pending.splice(0)) {
+        const body: string[] = [];
+        while (pos <= command.length) {
+          const end = command.indexOf('\n', pos);
+          const line = command.slice(pos, end === -1 ? command.length : end).replace(/\r$/, '');
+          pos = end === -1 ? command.length + 1 : end + 1;
+          if ((dash ? line.replace(/^\t+/, '') : line) === tag) break;
+          body.push(line);
+        }
+        bodies.push({ runner, text: body.join('\n') });
+      }
+      i = pos - 1; // the loop's i++ lands on the line after the last terminator
+      lineStart = shell.length;
+      continue;
+    }
+    if (ch === '\n') lineStart = shell.length + 1;
+    shell += ch;
+  }
+  return { shell, bodies };
+}
+
+/** Commands whose heredoc is data they print or save, not code they run. */
+const DATA_RUNNERS = new Set(['cat', 'tee']);
+const SHELL_RUNNERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
+/** Code of a heredoc as text the shell rules can look at: all of a shell script, the strings of other code. */
+const codeOf = (bodies: Heredoc[]) =>
+  bodies
+    .filter((b) => !DATA_RUNNERS.has(b.runner))
+    .map((b) => (SHELL_RUNNERS.has(b.runner) ? b.text : quotedStrings(b.text).join(' ')))
+    .join('\n');
+/** Deleting from inside a script (Python, Node, PowerShell). */
+const DELETE_API =
+  /\b(os\.(remove|unlink|rmdir|removedirs)|shutil\.rmtree|rmtree|unlinkSync|rmSync|rmdirSync|fs\.(rm|unlink|rmdir)|remove-item)\b|\.unlink\(/i;
+
 // ── Read-only programs and PowerShell pipelines ────────────────────────────
 
 /** Programs that only show information when their first argument is one of these. */
@@ -352,6 +516,10 @@ const READ_ONLY_PROGRAMS: Record<string, RegExp> = {
   scoop: /^(list|search|info|status)$/i,
   code: /^(--version|--list-extensions)$/i,
   tailscale: /^(status|ip|version)$/i,
+  java: /^(-version|--version)$/,
+  javac: /^(-version|--version)$/,
+  adb: /^(devices|version|get-state|get-serialno)$/,
+  magick: /^(identify|-version|--version)$/,
   dnf: /^(list|info|search|repolist|repoquery|history|check-update|--version)$/i,
   rpm: /^(-q[a-z]*|--query|--version)$/,
   flatpak: /^(list|info|search|remotes|history|--version)$/i,
@@ -560,6 +728,48 @@ function classifyNewFolders(folders: string[], summary: string, project?: string
   return verdict('yellow', 'Creates new folders.', summary, folders);
 }
 
+/**
+ * sed that only prints: no in-place edit (`-i`), no script file, and no command that
+ * writes or runs something (`w`, `W`, `r`, `R`, `e`, or the `w`/`e` flags of `s`).
+ */
+export function isPrintOnlySed(args: string[]): boolean {
+  const scripts: string[] = [];
+  let positional = false;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a === '-e' || a === '--expression') scripts.push(args[++i] ?? '');
+    else if (/^--expression=/.test(a)) scripts.push(a.slice(13));
+    else if (/^-[a-zA-Z]*[if]|^--(in-place|file)/.test(a)) return false;
+    else if (/^-/.test(a)) continue;
+    else if (scripts.length === 0 && !positional) {
+      scripts.push(a);
+      positional = true;
+    }
+  }
+  if (scripts.length === 0) return false;
+  return scripts.every((script) => {
+    let flagsOk = true;
+    const rest = script
+      // s/a/b/flags and y/abc/xyz/ (any delimiter): keep only the flags.
+      .replace(/([sy])([^\w\s\\])((?:\\.|(?!\2).)*)\2((?:\\.|(?!\2).)*)\2([a-zA-Z0-9]*)/g, (_m, _c, _d, _a, _b, flags: string) => {
+        if (/[we]/.test(flags)) flagsOk = false;
+        return ';';
+      })
+      // /regex/ addresses
+      .replace(/\/(?:\\.|[^/])*\//g, '');
+    return flagsOk && /^[\s\d,$;!{}pdnqgPDNhHxG=~+-]*$/.test(rest);
+  });
+}
+
+/** gh commands that only look: listing and viewing, auth status, GET-only `gh api`. */
+function isReadOnlyGh(args: string[]): boolean {
+  const [group = '', action = ''] = args;
+  if (group === '--version' || (group === 'auth' && action === 'status')) return true;
+  if (group === 'search') return true;
+  if (group === 'api') return !args.some((a) => /^(-X|--method|-f|-F|--field|--raw-field|--input)(=|$)/.test(a));
+  return /^(repo|pr|issue|release|run|workflow|gist|label|cache|ruleset)$/.test(group) && /^(list|view|status|diff|checks)$/.test(action);
+}
+
 function isGreenSegment(segment: string): boolean {
   const ws = words(segment).map(unquote);
   const first = (ws[0] ?? '').toLowerCase();
@@ -577,8 +787,18 @@ function isGreenSegment(segment: string): boolean {
       /^(-\S+\s+)*(a|addr|address|r|route|l|link|n|neigh)\b/.test(ws.slice(1).join(' ')) &&
       !/\b(add|del|delete|set|flush|change|replace|append)\b/.test(segment)
     );
-  // Printing lines (`sed -n '5,20p' file`); anything else sed can do may write.
-  if (first === 'sed') return /^sed\s+-n\s+(["']?)[\d,$;p]+\1(\s|$)/.test(segment) && !/\s(-i|--in-place)/.test(segment);
+  // Printing lines (`sed -n '5,20p' file`, `sed 's/a/b/g' file`), never editing in place or writing files.
+  if (first === 'sed') return isPrintOnlySed(ws.slice(1));
+  // awk programs that only print: no shell calls, pipes, redirections or program files.
+  if (first === 'awk' || first === 'gawk')
+    return !/\s(-i|--inplace|-f|--file)\b|\bsystem\s*\(|getline|[|>]/.test(
+      ` ${ws
+        .slice(1)
+        .filter((w) => !/^-F/.test(w))
+        .join(' ')}`,
+    );
+  if (first === 'date') return !/\s(-s|--set)\b/.test(segment);
+  if (first === 'gh') return isReadOnlyGh(ws.slice(1));
   if (/^get-[a-z]+$/.test(first)) return !/get-(credential|storedcredential)/.test(first);
   return GREEN_COMMANDS.has(first);
 }
@@ -650,35 +870,49 @@ function classifyCommandAsIs(command: string, description: string, ctx: Classify
   for (const [re, what] of BLOCKED_COMMANDS) {
     if (re.test(command)) return verdict('blocked', `Blocked: this ${what}. Only you can unblock that, in Harv's settings.`, summary);
   }
-  if (SENSITIVE_PATHS.some((re) => re.test(withoutAllowedClaude(command).replace(/["']/g, ' ')))) {
+  // Heredoc bodies are scripts or data: the shell rules below read only the shell lines around them.
+  const { shell, bodies } = ctx.shell === 'powershell' ? { shell: command, bodies: [] } : splitHeredocs(command);
+  if (mentionsSecret(shell) || bodies.some((b) => scriptPaths(b.text).some(isSensitivePath))) {
     return verdict('blocked', 'Blocked: it touches files that may hold credentials or secrets.', summary);
   }
 
-  const segments = splitCommand(command);
-  const substitutes = /\$\(|`|\binvoke-expression\b|\biex\b|-encodedcommand|\s-enc\s/i.test(command);
+  const segments = splitCommand(shell);
+  const substitutes = /\$\(|`|\binvoke-expression\b|\biex\b|-encodedcommand|\s-enc\s/i.test(shell);
   const tokens = segments.flatMap((s) => words(s).map((w) => unquote(w).toLowerCase()));
-  const changing = tokens.some((t) => CHANGING_WORDS.has(t)) || CHANGING_CMDLET.test(command);
+  const changing = tokens.some((t) => CHANGING_WORDS.has(t)) || CHANGING_CMDLET.test(shell);
 
-  // git's read-only subcommands and `sed -n` are fine although "git" and "sed" are on the changing list.
+  // git's read-only subcommands, print-only sed and awk are fine although they're on the changing list.
   const readOnly = (segment: string) => {
     const ws = words(segment).map((w) => unquote(w).toLowerCase());
     if (isReadOnlyProgram(ws[0] ?? '', ws.slice(1))) return true;
     if (!isGreenSegment(segment)) return false;
-    return ['git', 'sed', 'journalctl', 'ip'].includes(ws[0] ?? '') || !ws.some((t) => CHANGING_WORDS.has(t));
+    return ['git', 'sed', 'awk', 'gawk', 'journalctl', 'ip'].includes(ws[0] ?? '') || !ws.some((t) => CHANGING_WORDS.has(t));
+  };
+  // A plain download into the workspace, the temp folder or the project. After a `cd`, a file named by the server could land anywhere.
+  const changesDir = segments.some((s) => /^(cd|chdir|set-location|sl|pushd)$/i.test(words(s)[0] ?? ''));
+  const download = (segment: string) => {
+    const targets = downloadTargets(segment);
+    if (!targets || (changesDir && targets.some((t) => !/^([a-z]:)?[\\/]|^~[\\/]/i.test(t)))) return false;
+    return targets
+      .map((t) => fullPath(t, cwd))
+      .every((t) => isInside(t, WORKSPACE) || isTempDir(t) || (ctx.project !== undefined && isInside(t, ctx.project)));
   };
 
-  if (!substitutes && !writesFile(command) && segments.length > 0) {
+  if (!substitutes && !writesFile(shell) && segments.length > 0 && bodies.length === 0) {
     if (segments.length === 1 && isOpenApp(segments[0]!)) return verdict('green', 'Opens an app, page or document.', summary);
-    if (segments.every(readOnly) && !CHANGING_CMDLET.test(command)) return verdict('green', 'Only reads information.', summary);
+    if (segments.every(readOnly) && !CHANGING_CMDLET.test(shell)) return verdict('green', 'Only reads information.', summary);
+    if (segments.every((s) => readOnly(s) || download(s)) && !CHANGING_CMDLET.test(shell)) {
+      return verdict('green', 'Only reads, or downloads into the workspace, the temp folder or the project.', summary);
+    }
   }
   if (ctx.shell === 'powershell' && !writesFile(command) && isReadOnlyPowerShell(command)) {
     return verdict('green', 'Only reads information.', summary);
   }
 
-  const folders = newFolders(command, cwd);
+  const folders = bodies.length === 0 ? newFolders(shell, cwd) : null;
   if (folders) return classifyNewFolders(folders, summary, ctx.project);
 
-  const paths = pathsInCommand(command, cwd);
+  const paths = pathsInCommand(shell, cwd);
   const settings = loadSettings();
   const mentions = (test: (p: string) => boolean, pattern: RegExp) => paths.some(test) || pattern.test(command);
   const protectedDir = settings.protectedPaths.find((dir) => mentions((p) => isInside(p, dir), new RegExp(escapeRegExp(dir), 'i')));
@@ -687,12 +921,12 @@ function classifyCommandAsIs(command: string, description: string, ctx: Classify
     return verdict('blocked', 'Blocked: Harv never changes the Windows folder.', summary);
   }
   // Linux guards its own folders (they belong to root), so only sudo could change them.
-  const changesAsRoot = tokens.some((t) => CHANGING_WORDS.has(t) && t !== 'sudo' && t !== 'pkexec') || writesFile(command);
+  const changesAsRoot = tokens.some((t) => CHANGING_WORDS.has(t) && t !== 'sudo' && t !== 'pkexec') || writesFile(shell);
   if (!IS_WINDOWS && /\b(sudo|pkexec)\b/.test(command) && changesAsRoot && mentions(isSystemDir, LINUX_SYSTEM_PATH)) {
     return verdict('blocked', `Blocked: Harv never changes ${SYSTEM_FOLDER}.`, summary);
   }
   // Reading Harv's logs or settings is fine; anything that could change them is blocked.
-  if ((changing || writesFile(command)) && mentions(isHarvData, /\.harv[\\/](?!workspace)/i)) {
+  if ((changing || writesFile(shell) || bodies.length > 0) && mentions(isHarvData, /\.harv[\\/](?!workspace)/i)) {
     return verdict('blocked', "Blocked: Harv's database, backups and memory are only changed by Harv itself.", summary);
   }
   if (ctx.project) {
@@ -700,7 +934,7 @@ function classifyCommandAsIs(command: string, description: string, ctx: Classify
     if (trusted) return trusted;
   }
 
-  const reason = RED_REASONS.find(([re]) => re.test(command))?.[1] ?? 'Runs a command that could change your PC.';
+  const reason = RED_REASONS.find(([rule]) => matches(rule, shell))?.[1] ?? 'Runs a command that could change your PC.';
   return verdict(
     'red',
     reason,
@@ -712,7 +946,7 @@ function classifyCommandAsIs(command: string, description: string, ctx: Classify
 // ── Project chats: the project folder is trusted (the user's choice, docs/PLAN.md §6f) ──
 
 /** Still asked first inside a project. */
-const PROJECT_RED: [RegExp, string][] = [
+const PROJECT_RED: [Rule, string][] = [
   // A normal push runs (the user wants work pushed without asking); rewriting or deleting remote history asks.
   [/\bgit\s+push\b[^|;&\n]*(\s(-f|-d)\b|--force|--delete|--mirror|\s\+\S|\s:\S)/i, 'Rewrites or deletes history on the git remote.'],
   [/\bgit\s+(reset\s+--hard|clean\b|checkout\s+(--\s|\.(\s|$))|restore\s+(?!--staged))/i, 'Throws away uncommitted work.'],
@@ -730,9 +964,15 @@ const PROJECT_RED: [RegExp, string][] = [
   [/\b(netsh|sc|bcdedit|powercfg|schtasks|setx|set-service|set-executionpolicy|shutdown|reboot|poweroff)\b/i, 'Changes system settings.'],
   [LINUX_SYSTEM, 'Changes system settings.'],
   [/\b(runas|sudo|pkexec)\b|-verb\s+runas/i, 'Runs as administrator.'],
+  [sendsData, 'Sends data over the network.'],
+  // `curl … | sh` runs whatever the server sends; `curl … | python3 -c '…'` only parses it with code from the command.
   [
-    /send-mailmessage|\bcurl\b.*\s-(d|f|x\s*post|-data)|invoke-(webrequest|restmethod)\b.*-method\s+(post|put|delete)/i,
-    'Sends data over the network.',
+    /\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b[^\n]*\|\s*(sudo\s+)?((sh|bash|zsh|iex|invoke-expression|pwsh|powershell)\b(?!\s+-c\b)|(python3?|node|ruby|perl)(\s+-)?\s*($|[|;&\n]))/i,
+    'Runs a script straight from the internet.',
+  ],
+  [
+    /\badb\b[^|;&\n]*\s(install|uninstall|push|reboot|root|remount|disable-verity|sideload|shell\s+(rm|pm\s+(uninstall|clear|disable\S*|install)|settings\s+put|setprop|reboot|am\s+force-stop|wipe|svc))\b/i,
+    'Changes the connected Android device.',
   ],
 ];
 
@@ -740,27 +980,53 @@ const PROJECT_RED: [RegExp, string][] = [
 const OPAQUE =
   /\$\(|`|\binvoke-expression\b|\biex\b|-encodedcommand|\s-enc\s|\$env:|%\w+%|(^|[\s"'=])~[\\/]|\b(powershell|pwsh)(\.exe)?\s|\bcmd(\.exe)?\s+\/[ck]\b|\b(bash|sh)\s+-c\b|\|\s*(sh|bash|powershell|pwsh)\b/i;
 
-/** Every word of a command that looks like a path, resolved against the project folder (existing or not). */
+/**
+ * Every word of a command that looks like a path, resolved where it runs (existing or
+ * not): a `cd` moves the base for what follows and counts as a place the command works in.
+ */
 function pathLikeWords(command: string, cwd: string): string[] {
   const out: string[] = [];
+  let base = cwd;
   for (const segment of splitCommand(command)) {
-    for (const raw of words(segment).slice(1)) {
-      const word = unquote(raw).replace(/^-{1,2}[\w-]+[=:]/, '');
-      if (!word || /:\/\//.test(word) || /\s/.test(word) || word.startsWith('-')) continue;
-      if (!/[\\/]/.test(word) && !word.startsWith('..') && !/^[a-z]:/i.test(word)) continue;
-      out.push(fullPath(word.replace(/^>+/, ''), cwd));
+    const ws = words(segment).map(unquote);
+    if (/^(cd|chdir|set-location|sl|pushd)$/i.test(ws[0] ?? '')) {
+      const target = ws.slice(1).find((w) => !w.startsWith('-'));
+      if (target && target !== '-') {
+        base = fullPath(target, base);
+        out.push(base);
+      }
+      continue;
+    }
+    for (const raw of ws.slice(1)) {
+      const word = raw.replace(/^-{1,2}[\w-]+[=:]/, '').replace(/^\d?>+&?/, '');
+      if (!word || /:\/\//.test(word) || /\s/.test(word) || word.startsWith('-') || /^(\/dev\/null|\$null|nul)$/i.test(word)) continue;
+      if (!/[\\/]/.test(word) && !word.startsWith('..') && !/^[a-z]:/i.test(word) && word !== '~') continue;
+      out.push(fullPath(word, base));
     }
   }
   return out;
 }
 
+const DELETES = /\b(rm|rmdir|rd|del|erase|remove-item|ri|unlink|shred)\b|\s-delete\b/i;
+/** Backed up before a project command that works outside the folder: small files only (a big folder named as a source isn't worth copying). */
+const MAX_PROJECT_BACKUP = 10 * 1024 * 1024;
+const smallFile = (p: string) => {
+  const st = statSync(p, { throwIfNoEntry: false });
+  return st?.isFile() === true && st.size <= MAX_PROJECT_BACKUP;
+};
+
 /**
- * A command in a project chat: normal dev work inside the folder runs (deletes are
- * backed up first); the risky kinds still ask. Null means "not clearly inside the
- * project", and the normal rules decide (usually red).
+ * A command in a project chat. Only the risky kinds ask (the user's choice, 2026-10-25):
+ * dev work runs, inside the folder or outside it (outside, it's logged and the small
+ * files it names are backed up first); deletes inside the project are backed up. Null
+ * means it deletes outside the project or somewhere Harv can't tell, and the normal rules
+ * decide (red). The temp folder is scratch space.
  */
 export function classifyInProject(command: string, summary: string, project: string, existing: string[] = []): Verdict | null {
-  const risky = PROJECT_RED.find(([re]) => re.test(command));
+  const { shell, bodies } = splitHeredocs(command);
+  const code = bodies.filter((b) => !DATA_RUNNERS.has(b.runner));
+  const scriptText = codeOf(bodies);
+  const risky = PROJECT_RED.find(([rule]) => matches(rule, shell) || (scriptText !== '' && matches(rule, scriptText)));
   if (risky)
     return verdict(
       'red',
@@ -768,13 +1034,35 @@ export function classifyInProject(command: string, summary: string, project: str
       summary,
       existing.filter((p) => isInside(p, project)),
     );
-  if (OPAQUE.test(command)) return null;
-  const targets = [...pathLikeWords(command, project), ...existing];
-  if (targets.some((p) => !isInside(p, project))) return null;
-  if (/\b(rm|rmdir|rd|del|erase|remove-item|ri)\b/i.test(command)) {
-    return verdict('yellow', 'Deletes files inside the project (backed up first, Undo brings them back).', summary, existing);
+  const free = (p: string) => isInside(p, project) || isTempDir(p) || isInside(p, WORKSPACE) || isClaudeMemory(p);
+  const scriptTargets = code.flatMap((b) =>
+    SHELL_RUNNERS.has(b.runner) ? pathLikeWords(b.text, project) : scriptPaths(b.text).map((p) => fullPath(p, project)),
+  );
+  const targets = [...pathLikeWords(shell, project), ...scriptTargets, ...existing];
+  const outside = targets.filter((p) => !free(p));
+  const opaque = OPAQUE.test(shell);
+
+  const deletes = DELETES.test(shell) || code.some((b) => DELETE_API.test(b.text) || (SHELL_RUNNERS.has(b.runner) && DELETES.test(b.text)));
+  if (deletes) {
+    // What a variable or a substitution deletes can't be checked, so it asks.
+    if (outside.length > 0 || opaque || /\$(?!null\b)\{?\w/i.test(shell)) return null;
+    return verdict(
+      'yellow',
+      'Deletes files in the project or the temp folder (backed up first, Undo brings them back).',
+      summary,
+      existing,
+    );
   }
-  return verdict('green', 'A normal command inside the project folder.', summary);
+  // Installed programs' folders ask as before.
+  if (outside.some(isProgramDir)) return null;
+  if (outside.length === 0 && !opaque) return verdict('green', 'A normal command inside the project folder.', summary);
+  const backups = [...new Set(outside)].filter((p) => !isSystemDir(p) && smallFile(p)).slice(0, 20);
+  return verdict(
+    'yellow',
+    'Project work that also touches files outside the folder (logged; small files it names are backed up).',
+    summary,
+    backups,
+  );
 }
 
 function escapeRegExp(s: string): string {
