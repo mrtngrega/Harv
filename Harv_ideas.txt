@@ -1,1 +1,3 @@
 make it so when i leave a chat open with a session and i turn off my pc or the harv dashboard itself > make it so it remembrs the session and leaves the tab open like when i close chrome and then open it again and it remembers all the tabs i had open so make it like that
+
+- harv is still asking for permission in his project folder that he is working in (project chats should run commands/edits inside their own project folder without approval prompts).
