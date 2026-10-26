@@ -136,7 +136,8 @@ function mentionsSecret(shell: string): boolean {
 const quotedStrings = (text: string) => [...text.matchAll(/'([^'\n]*)'|"([^"\n]*)"/g)].map((m) => m[1] ?? m[2] ?? '');
 /** Words and strings of a script that look like paths (a folder, `~`, a dot file, a file name). */
 const looksLikePath = (s: string) =>
-  s.length > 0 && !/\s{2}|[\n<>|]/.test(s) && (/[\\/]/.test(s) || /^[~.]/.test(s) || /^[\w.-]+\.\w+$/.test(s));
+  // A name is needed: a lone "/" or the "/255" of a division isn't a path.
+  /[a-z]/i.test(s) && !/\s{2}|[\n<>|]/.test(s) && (/[\\/]/.test(s) || /^[~.]/.test(s) || /^[\w.-]+\.\w+$/.test(s));
 const scriptPaths = (text: string) =>
   [...quotedStrings(text), ...text.split(/[\s"'`(),;=]+/).filter((w) => /[\\/]/.test(w))].filter(looksLikePath);
 
@@ -502,11 +503,18 @@ export function splitHeredocs(command: string): { shell: string; bodies: Heredoc
 /** Commands whose heredoc is data they print or save, not code they run. */
 const DATA_RUNNERS = new Set(['cat', 'tee']);
 const SHELL_RUNNERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
-/** Code of a heredoc as text the shell rules can look at: all of a shell script, the strings of other code. */
+/** Code that starts other programs (or edits the registry): only then can its strings be shell commands. */
+const PROCESS_API =
+  /\b(subprocess|os\.(system|popen|exec\w*|spawn\w*)|popen|child_process|start-process|invoke-expression|iex|winreg)\b|\b(exec|execSync|execFile|execFileSync|spawn|spawnSync)\s*\(|shell\s*=\s*True/i;
+/**
+ * Code of a heredoc as text the shell rules can look at: all of a shell script, the strings
+ * of other code that starts programs. A script that doesn't (Python editing a file, with
+ * `sc` or `rm` somewhere in its strings) can't run anything.
+ */
 const codeOf = (bodies: Heredoc[]) =>
   bodies
     .filter((b) => !DATA_RUNNERS.has(b.runner))
-    .map((b) => (SHELL_RUNNERS.has(b.runner) ? b.text : quotedStrings(b.text).join(' ')))
+    .map((b) => (SHELL_RUNNERS.has(b.runner) ? b.text : PROCESS_API.test(b.text) ? quotedStrings(b.text).join(' ') : ''))
     .join('\n');
 /** Deleting from inside a script (Python, Node, PowerShell). */
 const DELETE_API =
@@ -963,6 +971,33 @@ function classifyCommandAsIs(command: string, description: string, ctx: Classify
 
 // ── Project chats: the project folder is trusted (the user's choice, docs/PLAN.md §6f) ──
 
+/**
+ * `pip install` for the whole PC: a bare `pip` / `python -m pip`, or one in a system folder.
+ * A venv's own pip (`.venv/bin/pip`, `/tmp/carvenv/bin/python -m pip`) only fills that venv.
+ */
+export function installsPythonPackages(text: string): boolean {
+  return splitCommand(text).some((segment) => {
+    const ws = words(segment).map(unquote);
+    const at = ws.findIndex((w) => !/^\w+=/.test(w) && !/^(sudo|env|time|nice)$/i.test(w));
+    const program = ws[at] ?? '';
+    const name = program
+      .split(/[\\/]/)
+      .at(-1)!
+      .toLowerCase()
+      .replace(/\.exe$/, '');
+    const args = ws.slice(at + 1);
+    const pipArgs = /^pip3?(\.\d+)?$/.test(name)
+      ? args
+      : /^(python3?(\.\d+)?|py)$/.test(name) && args[0] === '-m' && /^pip3?$/.test(args[1] ?? '')
+        ? args.slice(2)
+        : null;
+    if (!pipArgs?.some((a) => /^(install|uninstall)$/i.test(a))) return false;
+    if (/^sudo$/i.test(ws[0] ?? '') || !/[\\/]/.test(program)) return true;
+    const where = fullPath(program);
+    return isSystemDir(where) || isProgramDir(where);
+  });
+}
+
 /** Still asked first inside a project. */
 const PROJECT_RED: [Rule, string][] = [
   // A normal push runs (the user wants work pushed without asking); rewriting or deleting remote history asks.
@@ -972,10 +1007,8 @@ const PROJECT_RED: [Rule, string][] = [
     /\b(npm|pnpm|yarn|bun)\s+(i|install|add|uninstall|remove|rm)\b[^|;&\n]*(\s-g\b|--global\b)/i,
     'Installs or removes software for the whole PC.',
   ],
-  [
-    /\b(winget|choco|scoop|msiexec)\b|\bpip3?\s+(install|uninstall)\b|\b(install|uninstall)-(module|package|script)\b/i,
-    'Installs or removes software for the whole PC.',
-  ],
+  [/\b(winget|choco|scoop|msiexec)\b|\b(install|uninstall)-(module|package|script)\b/i, 'Installs or removes software for the whole PC.'],
+  [installsPythonPackages, 'Installs or removes Python packages for the whole PC.'],
   [LINUX_INSTALL, 'Installs or removes software for the whole PC.'],
   [/\b(taskkill|kill|pkill|killall|stop-process|spps)\b/i, 'Stops running programs.'],
   [/\b(reg|regedit)\b|-itemproperty\b|\bhk(lm|cu|cr|u|cc):?\\/i, 'Changes the Windows registry.'],
@@ -994,9 +1027,9 @@ const PROJECT_RED: [Rule, string][] = [
   ],
 ];
 
-/** Things whose effect Harv can't see from the command line: substitutions, variables in paths, nested shells. */
+/** Things whose effect Harv can't see from the command line: substitutions, variables in paths, nested shells. (`~/` is fine: `fullPath` resolves it.) */
 const OPAQUE =
-  /\$\(|`|\binvoke-expression\b|\biex\b|-encodedcommand|\s-enc\s|\$env:|%\w+%|(^|[\s"'=])~[\\/]|\b(powershell|pwsh)(\.exe)?\s|\bcmd(\.exe)?\s+\/[ck]\b|\b(bash|sh)\s+-c\b|\|\s*(sh|bash|powershell|pwsh)\b/i;
+  /\$\(|`|\binvoke-expression\b|\biex\b|-encodedcommand|\s-enc\s|\$env:|%\w+%|\b(powershell|pwsh)(\.exe)?\s|\bcmd(\.exe)?\s+\/[ck]\b|\b(bash|sh)\s+-c\b|\|\s*(sh|bash|powershell|pwsh)\b/i;
 
 /**
  * Every word of a command that looks like a path, resolved where it runs (existing or
@@ -1063,7 +1096,9 @@ export function classifyInProject(command: string, summary: string, project: str
   const deletes = DELETES.test(shell) || code.some((b) => DELETE_API.test(b.text) || (SHELL_RUNNERS.has(b.runner) && DELETES.test(b.text)));
   if (deletes) {
     // What a variable or a substitution deletes can't be checked, so it asks.
-    if (outside.length > 0 || opaque || /\$(?!null\b)\{?\w/i.test(shell)) return null;
+    // Only the deleting part counts: `for f in a b; do sed … $f.json` next to a `git rm` is fine.
+    const deleting = splitCommand(shell).filter((segment) => DELETES.test(segment));
+    if (outside.length > 0 || opaque || deleting.some((segment) => /\$(?!null\b)\{?\w/i.test(segment))) return null;
     return verdict(
       'yellow',
       'Deletes files in the project or the temp folder (backed up first, Undo brings them back).',

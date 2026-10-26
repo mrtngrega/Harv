@@ -641,6 +641,41 @@ describe('project chats ask only for the risky kinds (the user’s choice 2026-1
     }
   });
 
+  it('runs the cards from the car_radio chat of 2026-10-26', () => {
+    const venv = tmp('carvenv');
+    const pip = onWindows ? `${venv}\\Scripts\\pip.exe` : `${venv}/bin/pip`;
+    const py = onWindows ? `${venv}\\Scripts\\python.exe` : `${venv}/bin/python`;
+    for (const c of [
+      // A venv's pip only fills the venv.
+      `python3 -m venv ${venv} && ${pip} install -q "rembg[cpu]" pillow numpy 2>&1 | tail -5; ${py} -c "import rembg; print('ok')"`,
+      `${pip} uninstall -q -y opencv-python-headless && ${pip} install -q opencv-contrib-python-headless 2>&1 | tail -2`,
+      `${py} -m pip install -q vtracer cairosvg`,
+      // Cleaning up the temp folder, writing the project's memory note through ~.
+      `sed -i 's/^- a/- b/' ~/.claude/projects/-home-me-Code-car-radio/memory/MEMORY.md && git add CLAUDE.md && git commit -q -m "Plan" && git push -q 2>&1 | tail -2; git status --short; rm -rf ${tmp('golfpics')}`,
+      // Python whose strings hold code with `sc` and `rm` in it: it edits a file, it runs nothing.
+      `cd ${tmp('carwork')} && python3 - <<'EOF'\ns=open('scripts/render.py').read()\ns=s.replace("""glass = poly_mask(img.shape, cfg['glass_poly'], sc)""", """glass = mask(sc) & a""")\nopen('scripts/render.py','w').write(s)\nEOF`,
+      // A delete in the project, a lone "/" and "/255" in the script.
+      `rm car3d.js && python3 - <<'EOF'\ns=open('design/mockup.html').read().replace('</div>', '')\nalpha=m.astype(float)/255\nprint(s.split('/')[0])\nEOF`,
+      // `git rm` in the project next to a loop variable that only names files to sed.
+      `cd ${project}/design && git rm -q render.py wheel.py && for f in front side; do sed -e 's|a|b|g' ${tmp('carwork')}/il_$f.json > $f.json; done && git commit -qm x`,
+    ]) {
+      expect(run(c).tier, c).not.toBe('red');
+    }
+  });
+
+  it('still asks for pip installs for the whole PC', () => {
+    for (const c of [
+      'pip install requests',
+      'pip3 install --user requests',
+      'python3 -m pip install requests',
+      'sudo pip install requests',
+      onWindows ? '"C:\\Program Files\\Python314\\python.exe" -m pip install requests' : '/usr/bin/pip install requests',
+      `python3 - <<'EOF'\nimport subprocess\nsubprocess.run('winget install x', shell=True)\nEOF`,
+    ]) {
+      expect(run(c).tier, c).toBe('red');
+    }
+  });
+
   it('runs work outside the folder as yellow, backing up the small files it names', () => {
     const v = run(`sed -i 's/a/b/' ${userFile}`);
     expect(v.tier).toBe('yellow');
