@@ -323,6 +323,18 @@ export class ChatStore {
     return { ...chat, lines: rows.map(fromRow) };
   }
 
+  /**
+   * The files and folders the user's messages in a chat pointed at (references are stored by
+   * their full path in `files`, uploads by their name): the safety gate trusts them for that chat.
+   */
+  attachedPaths(chatId: string): string[] {
+    const rows = this.db.prepare("SELECT files FROM lines WHERE chat_id = ? AND kind = 'you' AND files IS NOT NULL").all(chatId) as {
+      files: string;
+    }[];
+    const paths = rows.flatMap((r) => JSON.parse(r.files) as string[]).filter((f) => /^[a-z]:[\\/]|^\//i.test(f));
+    return [...new Set(paths)];
+  }
+
   openChats(): ChatSnapshot[] {
     const ids = this.db.prepare('SELECT id FROM chats WHERE open = 1 ORDER BY created_at').all() as { id: string }[];
     return ids.map((r) => this.snapshot(r.id)!).filter(Boolean);

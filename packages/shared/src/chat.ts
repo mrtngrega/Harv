@@ -104,6 +104,24 @@ export interface Attachment {
   name: string;
   size: number;
   mime: string;
+  /**
+   * A file or folder on the user's own PC, referenced where it is (the app's picker, a drop,
+   * `@path`, the file explorer): nothing is uploaded, Harv works on it in place, and the
+   * safety gate trusts it for that chat (the user's wish, 2026-10-26). Absent for uploads.
+   */
+  path?: string;
+  folder?: boolean;
+}
+
+/** An attachment that points at a file or folder on the PC instead of an uploaded copy. */
+export const isReference = (a: Attachment): a is Attachment & { path: string } => typeof a.path === 'string' && a.path !== '';
+
+/** One suggestion for `@` in the command line (GET /api/paths). */
+export interface PathSuggestion {
+  path: string;
+  name: string;
+  folder: boolean;
+  size: number;
 }
 
 /** Largest file the dashboard accepts. */

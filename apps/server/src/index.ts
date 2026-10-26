@@ -22,7 +22,7 @@ import { RouteStore } from './store/routes.ts';
 import { UsageMeter } from './usage/meter.ts';
 import { loadSettings, updateSettings, workDir } from './settings.ts';
 import { applySharedUi, loadUi, resetUi, saveUi, sharedUi } from './ui.ts';
-import { cleanPath, listFolder, openWithDefault, places, previewType } from './tools/files.ts';
+import { cleanPath, listFolder, openWithDefault, places, previewType, suggestPaths } from './tools/files.ts';
 import {
   copyItems,
   deleteForever,
@@ -97,6 +97,8 @@ const gate = new SafetyGate(actions, {
   // Project chats: the project folder is trusted (docs/PLAN.md §6f).
   projectOf: (tabId) => store.projectOf(tabId)?.path,
   projects: () => store.projects().map((p) => p.path),
+  // Files and folders the user attached in a chat: trusted there (the user's wish, 2026-10-26).
+  attachedOf: (tabId) => store.attachedPaths(tabId),
   allow: (rules) => broadcast({ type: 'settings', settings: updateSettings({ allowRules: [...loadSettings().allowRules, ...rules] }) }),
 });
 const routes = new RouteStore(join(HARV_HOME, 'harv.db'));
@@ -242,6 +244,8 @@ app.delete('/api/background', async () => {
 
 // The file explorer tab: listings, previews, opening with the default app, and attaching to a chat.
 app.get('/api/files/places', async () => places());
+// `@` in the command line: files and folders to point Harv at.
+app.get('/api/paths', async (req) => suggestPaths(String((req.query as { q?: unknown }).q ?? '')));
 app.get<{ Querystring: { path?: string } }>('/api/files/list', async (req, reply) => {
   const path = cleanPath(req.query.path);
   if (!path) return reply.code(400).send({ error: `Expected an absolute path like ${IS_WINDOWS ? 'C:\\Users' : '/home'}` });

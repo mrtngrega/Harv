@@ -33,6 +33,8 @@ export const desktop = {
   setSettings: (patch: { hotkey?: string; autostart?: boolean }) => invoke<AppSettings>('set_app_settings', patch),
   checkUpdates: () => invoke<UpdateInfo>('check_updates'),
   applyUpdate: () => invoke<UpdateInfo>('apply_update'),
+  /** The system's own picker (one picker can't take files and folders at once). */
+  pickPaths: (folders: boolean) => invoke<{ path: string; folder: boolean }[]>('pick_paths', { folders }),
 };
 
 /** "KeyH" → "H", "Digit1" → "1"; other codes (F5, Space, ArrowUp) stay as they are. */

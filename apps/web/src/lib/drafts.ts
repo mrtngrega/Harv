@@ -30,9 +30,23 @@ export function updatePending(tabId: string, fn: (list: Pending[]) => Pending[])
   drafts.set((all) => ({ ...all, [tabId]: fn(all[tabId] ?? []) }));
 }
 
-/** Adds a file that's already on the server (attached from the file explorer). */
+/** Adds a file that's already on the server. */
 export function addAttachment(tabId: string, file: Attachment): void {
   updatePending(tabId, (list) => [...list, { key: crypto.randomUUID(), name: file.name, size: file.size, file }]);
+}
+
+/** The last part of a path (`C:\Users\me\Reports` → `Reports`), either OS. */
+export const lastPart = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+
+/**
+ * Points the chat's next message at a file or folder on the PC (the app's picker, `@`, the file
+ * explorer): nothing is uploaded, Harv works on it where it is. The same path twice is kept once.
+ */
+export function addReference(tabId: string, ref: { path: string; folder?: boolean; size?: number }): void {
+  const file: Attachment = { id: '', name: lastPart(ref.path), size: ref.size ?? 0, mime: '', path: ref.path, folder: ref.folder };
+  updatePending(tabId, (list) =>
+    list.some((p) => p.file?.path === ref.path) ? list : [...list, { key: crypto.randomUUID(), name: file.name, size: file.size, file }],
+  );
 }
 
 export function setDraftText(tabId: string, text: string): void {

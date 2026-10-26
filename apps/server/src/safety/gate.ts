@@ -3,7 +3,7 @@ import type { HookJSONOutput, PermissionResult } from '@anthropic-ai/claude-agen
 import type { ApprovalRequest, SafetyServerMessage } from '@harv/shared';
 import type { ActionStore } from '../store/actions.ts';
 import { createBackup, readBackup, restoreBackup, type Backup } from './backup.ts';
-import { classify, FILE_WRITE_TOOLS, rulesFor, SHELL_TOOLS, type Verdict } from './classify.ts';
+import { classify, FILE_WRITE_TOOLS, rulesFor, SHELL_TOOLS, type ClassifyContext, type Verdict } from './classify.ts';
 import { loadSettings } from './paths.ts';
 
 // Every tool call passes through here (Agent SDK hooks, so it can't be skipped):
@@ -22,6 +22,8 @@ export interface GateHooks {
   projectOf?: (tabId: string) => string | undefined;
   /** Every registered project folder: trusted from any chat, not only project chats. */
   projects?: () => string[];
+  /** Files and folders on the PC the user attached to a chat: trusted in that chat. */
+  attachedOf?: (tabId: string) => string[];
   /** "Don't ask again": save these rules (Settings › Safety). */
   allow?: (rules: string[]) => void;
 }
@@ -110,9 +112,14 @@ export class SafetyGate {
     return backup;
   }
 
+  /** What a chat's calls are classified with: its project, every project, and what the user attached to it. */
+  private contextOf(tabId: string): ClassifyContext {
+    return { project: this.hooks.projectOf?.(tabId), projects: this.hooks.projects?.(), attached: this.hooks.attachedOf?.(tabId) };
+  }
+
   /** The PreToolUse hook. Red calls wait here until the user answers the approval card. */
   async preToolUse(tabId: string, tool: string, input: Record<string, unknown>, id: string, signal: AbortSignal): Promise<HookJSONOutput> {
-    const ctx = { project: this.hooks.projectOf?.(tabId), projects: this.hooks.projects?.() };
+    const ctx = this.contextOf(tabId);
     const verdict = classify(tool, input, ctx);
     const at = Date.now();
     // Red always asks; yellow asks too when the user turned on "confirm changes" in Settings.
@@ -240,10 +247,7 @@ export class SafetyGate {
 
   /** Backstop for Claude Code's own permission prompts: never let a red call through without an approval. */
   async canUseTool(tool: string, input: Record<string, unknown>, id: string, tabId?: string): Promise<PermissionResult> {
-    const verdict = classify(tool, input, {
-      project: tabId ? this.hooks.projectOf?.(tabId) : undefined,
-      projects: this.hooks.projects?.(),
-    });
+    const verdict = classify(tool, input, tabId ? this.contextOf(tabId) : { projects: this.hooks.projects?.() });
     if (verdict.tier === 'blocked') return { behavior: 'deny', message: verdict.reason };
     if (verdict.tier === 'red' && !this.approved.has(id)) return { behavior: 'deny', message: 'This needs the user’s approval first.' };
     return { behavior: 'allow', updatedInput: input };

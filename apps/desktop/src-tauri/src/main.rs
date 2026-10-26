@@ -6,6 +6,7 @@
 
 mod harv;
 mod notify;
+mod paths;
 mod prefs;
 mod tray;
 mod update;
@@ -100,6 +101,12 @@ fn set_app_settings(
     prefs::set(&app, hotkey, autostart)
 }
 
+/// ATTACH in the app: the system's own picker, for files or for folders (one picker can't do both).
+#[tauri::command]
+async fn pick_paths(app: AppHandle, folders: bool) -> Vec<paths::Picked> {
+    paths::pick(&app, folders)
+}
+
 #[tauri::command]
 async fn check_updates(app: AppHandle) -> update::UpdateInfo {
     update::check(&app)
@@ -127,6 +134,7 @@ fn main() {
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
@@ -148,7 +156,8 @@ fn main() {
             app_settings,
             set_app_settings,
             check_updates,
-            apply_update
+            apply_update,
+            pick_paths
         ])
         .setup(move |app| {
             let handle = app.handle();

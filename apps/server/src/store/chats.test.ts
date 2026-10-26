@@ -101,6 +101,20 @@ describe('ChatStore', () => {
   });
 });
 
+describe('attached paths', () => {
+  it('lists the files and folders a chat’s messages pointed at (full paths), not uploads by name', () => {
+    const s = new ChatStore(':memory:');
+    const reports = String.raw`C:\Users\me\Reports`;
+    s.ensureChat('t1', 'x');
+    s.addLine('t1', { kind: 'you', text: 'look', files: [reports, 'photo.png'] });
+    s.addLine('t1', { kind: 'you', text: 'and this', files: ['/home/me/notes.md', reports] });
+    s.addLine('t1', { kind: 'harv', text: 'ok' });
+    s.ensureChat('t2', 'y');
+    expect(s.attachedPaths('t1')).toEqual([reports, '/home/me/notes.md']);
+    expect(s.attachedPaths('t2')).toEqual([]);
+  });
+});
+
 describe('snippetAround', () => {
   it('centres on the match and marks cut-offs', () => {
     const text = `${'a'.repeat(100)} needle ${'b'.repeat(100)}`;

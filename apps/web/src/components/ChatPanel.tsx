@@ -12,7 +12,7 @@ import {
 } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { FRESH_HINT_TOKENS } from '@harv/shared';
+import { FRESH_HINT_TOKENS, type PathSuggestion } from '@harv/shared';
 import { formatSize, uploadAttachment } from '../lib/attachments.ts';
 import { lineTime, resetTime, tokens } from '../lib/format.ts';
 import { HELP, parseCommand } from '../lib/commands.ts';
@@ -25,20 +25,41 @@ import { StartChoice } from './StartChoice.tsx';
 import { StatusLine } from './StatusLine.tsx';
 import { TaskStrip } from './TaskStrip.tsx';
 import { matchCommands, SlashMenu } from './SlashMenu.tsx';
+import { atToken, insideFolder, PathMenu, usePathSuggestions, withoutToken } from './PathMenu.tsx';
 import { SpecialTab, TOOL_ICONS, ViewMenu } from './tools/TabParts.tsx';
-import { setDraftText, updatePending, useDrafts, useDraftTexts } from '../lib/drafts.ts';
+import { addReference, lastPart, setDraftText, updatePending, useDrafts, useDraftTexts } from '../lib/drafts.ts';
+import { desktop, inApp } from '../lib/desktop.ts';
 
 // The terminal (xterm) and the explorer load when first opened, keeping the dashboard's first load small.
 const TerminalView = lazy(() => import('./tools/TerminalView.tsx').then((m) => ({ default: m.TerminalView })));
 const Explorer = lazy(() => import('./tools/explorer/Explorer.tsx').then((m) => ({ default: m.Explorer })));
 
-function FileChip({ name, detail, onRemove }: { name: string; detail?: string; onRemove?: () => void }) {
+/** An attached file: an upload (▤), or a file or folder on the PC pointed at by its path (@, nothing copied). */
+function FileChip({
+  name,
+  path,
+  folder,
+  detail,
+  onRemove,
+}: {
+  name: string;
+  path?: string;
+  folder?: boolean;
+  detail?: string;
+  onRemove?: () => void;
+}) {
   return (
-    <span className="inline-flex max-w-[260px] items-center gap-1.5 rounded-md border border-[rgb(220_232_245/0.2)] bg-white/5 py-0.5 pr-1 pl-2 text-[11px]">
+    <span
+      title={path ? `${path} (by path: Harv works on it where it is)` : undefined}
+      className="inline-flex max-w-[260px] items-center gap-1.5 rounded-md border border-[rgb(220_232_245/0.2)] bg-white/5 py-0.5 pr-1 pl-2 text-[11px]"
+    >
       <span aria-hidden="true" className="text-accent">
-        ▤
+        {path ? '@' : '▤'}
       </span>
-      <span className="truncate text-ink">{name}</span>
+      <span className="truncate text-ink">
+        {name}
+        {folder ? '/' : ''}
+      </span>
       {detail && <span className="flex-none text-faint">{detail}</span>}
       {onRemove && (
         <button
@@ -83,9 +104,10 @@ function ChatLineView({ line, onHarder }: { line: Line; onHarder?: () => void })
           <span className="text-accent">you ›</span> {line.text}
           {line.files && (
             <div className="mt-1 flex flex-wrap gap-1.5">
-              {line.files.map((name, i) => (
-                <FileChip key={i} name={name} />
-              ))}
+              {/* Files and folders on the PC are stored by their full path, uploads by their name. */}
+              {line.files.map((name, i) =>
+                /^[a-z]:[\\/]|^\//i.test(name) ? <FileChip key={i} name={lastPart(name)} path={name} /> : <FileChip key={i} name={name} />,
+              )}
             </div>
           )}
         </div>
@@ -248,6 +270,31 @@ export function ChatPanel() {
   const [menuClosedAt, setMenuClosedAt] = useState<string | null>(null);
   const menuItems = nonChat || menuClosedAt === draft ? [] : matchCommands(draft, active?.commands ?? catalog?.commands ?? []);
   const menuAt = Math.min(menuIndex, Math.max(menuItems.length - 1, 0));
+  // Typing "@" suggests files and folders on the PC (like Claude Code's): picking one attaches it by path.
+  const [pathIndex, setPathIndex] = useState(0);
+  const [pathClosedAt, setPathClosedAt] = useState<string | null>(null);
+  const token = nonChat || menuItems.length > 0 || pathClosedAt === draft ? null : atToken(draft);
+  const pathItems = usePathSuggestions(token ? token.query : null);
+  const pathAt = Math.min(pathIndex, Math.max(pathItems.length - 1, 0));
+  /** Enter (or a click) attaches it; Tab on a folder walks into it instead. */
+  const pickPath = (s: PathSuggestion, walk = false) => {
+    if (!token) return;
+    setPathIndex(0);
+    if (walk && s.folder) return setDraft(`${draft.slice(0, token.start)}@${insideFolder(s.path)}`);
+    addReference(active?.id ?? chat.ensureTab(), s);
+    setDraft(withoutToken(draft, token.start));
+    inputRef.current?.focus();
+  };
+  // ATTACH in the app: the system's own picker for files or folders (by path), or an uploaded copy.
+  const [attachMenu, setAttachMenu] = useState(false);
+  const pickFromPc = async (folders: boolean) => {
+    setAttachMenu(false);
+    const picked = await desktop.pickPaths(folders).catch(() => []);
+    const tabId = chat.ensureTab();
+    for (const p of picked) addReference(tabId, p);
+    inputRef.current?.focus();
+  };
+  const openAttach = () => (inApp ? setAttachMenu((open) => !open) : fileInputRef.current?.click());
   const pickCommand = (name: string) => {
     setDraft(`/${name} `);
     setMenuIndex(0);
@@ -282,7 +329,17 @@ export function ChatPanel() {
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setDragging(false);
-    if (e.dataTransfer.files.length) attach(e.dataTransfer.files);
+    // A dropped folder has no path the page can see (browsers and the app's web view hide it), so it can't come this way.
+    const items = [...e.dataTransfer.items].filter((i) => i.kind === 'file');
+    const folders = items.filter((i) => i.webkitGetAsEntry?.()?.isDirectory);
+    const dropped = items.filter((i) => !folders.includes(i)).flatMap((i) => i.getAsFile() ?? []);
+    if (folders.length)
+      chat.localNotice(
+        inApp
+          ? 'Folders can’t be dropped (only copies of files can). Use + ATTACH › Folder…, type @ and the path, or Send to chat in the file explorer.'
+          : 'Folders can’t be dropped. Type @ and the path, or use Send to chat in the file explorer.',
+      );
+    if (dropped.length) attach(dropped);
   };
 
   // The active tab scrolls into view in the tab bar (by hand: scrollIntoView would also scroll the page).
@@ -332,7 +389,7 @@ export function ChatPanel() {
     const command = ready.length === 0 ? parseCommand(text) : null;
     if (command) {
       setDraft('');
-      if (command.kind === 'attach') fileInputRef.current?.click();
+      if (command.kind === 'attach') openAttach();
       else if (command.kind === 'new') chat.newTab();
       else if (command.kind === 'help') chat.localNotice(HELP);
       else if (command.kind === 'error') chat.localNotice(command.message, 'error');
@@ -649,7 +706,21 @@ export function ChatPanel() {
               <FileChip
                 key={p.key}
                 name={p.name}
-                detail={p.error ? `! ${p.error}` : p.file ? formatSize(p.size) : 'uploading…'}
+                path={p.file?.path}
+                folder={p.file?.folder}
+                detail={
+                  p.error
+                    ? `! ${p.error}`
+                    : p.file?.path
+                      ? p.file.folder
+                        ? undefined
+                        : p.size
+                          ? formatSize(p.size)
+                          : undefined
+                      : p.file
+                        ? formatSize(p.size)
+                        : 'uploading…'
+                }
                 onRemove={() => activeId && updatePending(activeId, (list) => list.filter((x) => x.key !== p.key))}
               />
             ))}
@@ -680,6 +751,7 @@ export function ChatPanel() {
         {!nonChat && (
           <form onSubmit={send} className="relative flex items-end gap-2.5 pt-1 pr-3 pb-2.5 pl-5">
             {menuItems.length > 0 && <SlashMenu items={menuItems} index={menuAt} onPick={(c) => pickCommand(c.name)} />}
+            {pathItems.length > 0 && <PathMenu items={pathItems} index={pathAt} onPick={(p) => pickPath(p)} />}
             <label htmlFor="harv-cmd" className="pb-3 leading-5 font-semibold text-accent">
               harv&gt;
             </label>
@@ -708,6 +780,24 @@ export function ChatPanel() {
                   if (e.key === 'Tab' || (e.key === 'Enter' && menuItems[menuAt]!.name.toLowerCase() !== typed)) {
                     e.preventDefault();
                     pickCommand(menuItems[menuAt]!.name);
+                    return;
+                  }
+                }
+                if (pathItems.length > 0 && !e.nativeEvent.isComposing) {
+                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setPathIndex((pathAt + (e.key === 'ArrowDown' ? 1 : pathItems.length - 1)) % pathItems.length);
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setPathClosedAt(draft);
+                    return;
+                  }
+                  if (e.key === 'Tab' || e.key === 'Enter') {
+                    e.preventDefault();
+                    pickPath(pathItems[pathAt]!, e.key === 'Tab');
                     return;
                   }
                 }
@@ -752,15 +842,63 @@ export function ChatPanel() {
                 e.target.value = '';
               }}
             />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              aria-label="Attach files"
-              title="Attach files (or drop them on the chat, or paste a screenshot)"
-              className="min-h-11 cursor-pointer rounded-[10px] border border-[rgb(220_232_245/0.2)] bg-white/5 px-3.5 text-xs hover:bg-white/10"
-            >
-              +<span className="hidden sm:inline"> ATTACH</span>
-            </button>
+            <div className="relative">
+              {attachMenu && (
+                <div
+                  role="menu"
+                  aria-label="Attach"
+                  className="absolute right-0 bottom-full z-30 mb-1 flex w-56 flex-col rounded-xl border border-[rgb(220_232_245/0.18)] bg-[rgb(16_24_34/0.96)] py-1 text-xs shadow-[0_12px_32px_rgb(0_0_0/0.4)]"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => void pickFromPc(false)}
+                    className="cursor-pointer px-3 py-1.5 text-left hover:bg-white/10"
+                  >
+                    Files… <span className="text-faint">by path</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => void pickFromPc(true)}
+                    className="cursor-pointer px-3 py-1.5 text-left hover:bg-white/10"
+                  >
+                    Folder… <span className="text-faint">by path</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setAttachMenu(false);
+                      fileInputRef.current?.click();
+                    }}
+                    className="cursor-pointer px-3 py-1.5 text-left hover:bg-white/10"
+                  >
+                    Upload a copy…
+                  </button>
+                  <p className="m-0 px-3 pt-1 pb-0.5 text-[11px] text-faint">
+                    By path, Harv works on it where it is. Tip: type @ in the line.
+                  </p>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={openAttach}
+                onBlur={(e) => {
+                  if (!e.currentTarget.parentElement?.contains(e.relatedTarget as Node | null)) setAttachMenu(false);
+                }}
+                aria-label="Attach"
+                aria-expanded={inApp ? attachMenu : undefined}
+                title={
+                  inApp
+                    ? 'Attach files or folders by path, or upload a copy (or type @ in the line)'
+                    : 'Attach files (or drop them on the chat, or paste a screenshot); type @ to point Harv at a file or folder by path'
+                }
+                className="min-h-11 cursor-pointer rounded-[10px] border border-[rgb(220_232_245/0.2)] bg-white/5 px-3.5 text-xs hover:bg-white/10"
+              >
+                +<span className="hidden sm:inline"> ATTACH</span>
+              </button>
+            </div>
             {active?.busy ? (
               <button
                 type="button"

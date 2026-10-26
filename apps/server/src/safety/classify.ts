@@ -170,12 +170,28 @@ export interface ClassifyContext {
   projects?: string[];
   /** Which shell runs a command: PowerShell commands get the read-only analysis below. */
   shell?: 'powershell' | 'bash';
+  /** Files and folders on the PC the user attached to this chat (the user gave them, so they're trusted). */
+  attached?: string[];
+  /** The attached file or folder a command works in (set by `classify`). */
+  attachedRoot?: string;
 }
 
 /** Claude Code's history named in a command (allowed, although it's under .claude; see isClaudeHistory). */
 const CLAUDE_ALLOWED_IN_COMMAND = /\S*\.claude[\\/]projects(?=$|[\\/\s"'])[^\s"']*/gi;
 /** The command with those allowed .claude paths taken out (unless they climb out with `..`). */
 const withoutAllowedClaude = (command: string) => command.replace(CLAUDE_ALLOWED_IN_COMMAND, (m) => (m.includes('..') ? m : ' '));
+
+/**
+ * The attached file or folder a command works in: it `cd`s into one, or names a path inside
+ * one (the most specific attachment wins). Other paths it names are judged as usual below.
+ */
+export function attachedOfCommand(command: string, attached: string[]): string | undefined {
+  if (attached.length === 0) return undefined;
+  const viaCd = projectOfCommand(command, attached);
+  if (viaCd) return viaCd;
+  const named = pathLikeWords(splitHeredocs(command).shell, WORKSPACE);
+  return [...attached].sort((a, b) => b.length - a.length).find((root) => named.some((p) => isInside(p, root)));
+}
 
 /** The registered project a command works in: it starts with `cd`/`Set-Location`/`pushd` (or `git -C`) into one. */
 export function projectOfCommand(command: string, projects: string[]): string | undefined {
@@ -215,6 +231,7 @@ export function classify(tool: string, input: Record<string, unknown>, ctx: Clas
     return classifyCommand(command, str(input, 'description'), {
       ...ctx,
       project: inProject,
+      attachedRoot: inProject ? undefined : attachedOfCommand(command, ctx.attached ?? []),
       shell: tool === 'PowerShell' ? 'powershell' : 'bash',
     });
   }
@@ -959,6 +976,10 @@ function classifyCommandAsIs(command: string, description: string, ctx: Classify
     const trusted = classifyInProject(command, summary, ctx.project, paths);
     if (trusted) return trusted;
   }
+  if (ctx.attachedRoot) {
+    const given = classifyInAttached(command, summary, ctx.attachedRoot, paths);
+    if (given) return given;
+  }
 
   const reason = RED_REASONS.find(([rule]) => matches(rule, shell))?.[1] ?? 'Runs a command that could change your PC.';
   return verdict(
@@ -1115,6 +1136,28 @@ export function classifyInProject(command: string, summary: string, project: str
     'Project work that also touches files outside the folder (logged; small files it names are backed up).',
     summary,
     backups,
+  );
+}
+
+/**
+ * A command working in a file or folder the user attached to the chat: trusted like a project
+ * folder (the user's wish, 2026-10-26: "I give it to him willingly"), except there's no git to
+ * undo with, so what runs there is yellow (logged, the files it names backed up first, Undo)
+ * instead of green. The risky kinds still ask; deleting outside it is judged as usual (null).
+ */
+export function classifyInAttached(command: string, summary: string, root: string, existing: string[] = []): Verdict | null {
+  const v = classifyInProject(command, summary, root, existing);
+  if (!v || v.tier === 'red') return v;
+  const inside = existing.filter((p) => isInside(p, root) && smallFile(p)).slice(0, 20);
+  if (v.tier === 'green')
+    return verdict('yellow', 'Works in what you attached (logged; the files it names are backed up).', summary, inside);
+  if (DELETES.test(command))
+    return verdict('yellow', 'Deletes inside what you attached (backed up first, Undo brings it back).', summary, v.targets);
+  return verdict(
+    'yellow',
+    'Works in what you attached and touches files outside it (logged; small files it names are backed up).',
+    summary,
+    v.targets,
   );
 }
 

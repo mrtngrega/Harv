@@ -16,6 +16,7 @@
     "allow-app-settings",
     "allow-set-app-settings",
     "allow-check-updates",
-    "allow-apply-update"
+    "allow-apply-update",
+    "allow-pick-paths"
   ]
 }

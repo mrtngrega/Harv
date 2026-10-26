@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react';
 import type { DriveInfo, FileEntry, FilePlaces, FolderListing } from '@harv/shared';
 import { chat, getChatState } from '../../../lib/chatStore.ts';
-import { addAttachment } from '../../../lib/drafts.ts';
+import { addReference } from '../../../lib/drafts.ts';
 import { dateGroup } from '../../../lib/format.ts';
 import { explorerPaths, saveLayoutSoon } from '../../../lib/layout.ts';
 import { useProjects, useSettings } from '../../../lib/useHarvSocket.ts';
@@ -256,18 +256,13 @@ export function Explorer({ id }: { id: string }) {
     void navigator.clipboard.writeText(paths.map((p) => `"${p}"`).join('\r\n'));
     say('Path copied.');
   };
-  /** Attaches the files to this chat's message and switches back to the chat to write it. */
-  const sendToChat = async (paths = [...selected]) => {
-    let attached = 0;
+  /** Points this chat's next message at the files and folders (by path, nothing copied) and switches back to the chat to write it. */
+  const sendToChat = (paths = [...selected]) => {
     for (const path of paths) {
-      try {
-        addAttachment(id, await files.attach(path, id));
-        attached++;
-      } catch (err) {
-        say(`${baseName(path)}: ${(err as Error).message}`);
-      }
+      const entry = entries.find((x) => x.path === path);
+      addReference(id, { path, folder: entry?.dir, size: entry?.size });
     }
-    if (attached) chat.setView(id, 'chat');
+    if (paths.length) chat.setView(id, 'chat');
   };
   const openTerminal = (dir: string) => chat.terminalAt(id, dir);
   const openTab = (dir: string) => explorerPaths.set(chat.newTab('files'), dir);
@@ -505,8 +500,7 @@ export function Explorer({ id }: { id: string }) {
       {
         label: 'Send to chat',
         hint: 'attach',
-        disabled: paths.some((p) => entries.find((x) => x.path === p)?.dir),
-        run: () => void sendToChat(paths),
+        run: () => sendToChat(paths),
       },
       'sep',
       { label: 'Properties', run: () => setPropsFor(entry.path) },
@@ -671,9 +665,9 @@ export function Explorer({ id }: { id: string }) {
         <button
           type="button"
           className={cmd}
-          disabled={!selected.size || selectedEntries.some((x) => x.dir)}
-          onClick={() => void sendToChat()}
-          title="Attach to this chat's next message"
+          disabled={!selected.size}
+          onClick={() => sendToChat()}
+          title="Point this chat's next message at them (by path: nothing is copied)"
         >
           <Icon name="share" /> <span>Send to chat</span>
         </button>

@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { cleanPath, listFolder, previewType } from './files.ts';
+import { cleanPath, listFolder, previewType, suggestPaths } from './files.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'harv-files-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -40,5 +40,34 @@ describe('file explorer', () => {
     expect(previewType('x.html')).toEqual({ kind: 'text', mime: 'text/plain; charset=utf-8' });
     expect(previewType('x.PNG').kind).toBe('image');
     expect(previewType('x.pdf').kind).toBe('pdf');
+  });
+});
+
+describe('@ path suggestions', () => {
+  const root = mkdtempSync(join(tmpdir(), 'harv-at-'));
+  mkdirSync(join(root, 'Reports'));
+  mkdirSync(join(root, 'recipes'));
+  writeFileSync(join(root, 'readme.txt'), 'hi');
+  writeFileSync(join(root, 'old-report.txt'), 'x');
+  writeFileSync(join(root, '.hidden'), 'x');
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  it('lists the typed folder: names that start with the last part first (folders first), then names that contain it', () => {
+    const names = suggestPaths(join(root, 're')).map((s) => s.name);
+    expect(names.slice(0, 2).sort()).toEqual(['Reports', 'recipes'].sort());
+    expect(names).toContain('readme.txt');
+    expect(names.indexOf('old-report.txt')).toBeGreaterThan(names.indexOf('readme.txt'));
+  });
+
+  it('lists a whole folder after a separator, without hidden names unless asked', () => {
+    const all = suggestPaths(root + sep);
+    expect(all.map((s) => s.name)).not.toContain('.hidden');
+    expect(all.find((s) => s.name === 'Reports')).toMatchObject({ folder: true, path: join(root, 'Reports') });
+    expect(suggestPaths(join(root, '.h')).map((s) => s.name)).toEqual(['.hidden']);
+  });
+
+  it('suggests the usual places for an empty @, and nothing for a folder that isn’t there', () => {
+    expect(suggestPaths('').length).toBeGreaterThan(0);
+    expect(suggestPaths(join(root, 'nope', 'x'))).toEqual([]);
   });
 });

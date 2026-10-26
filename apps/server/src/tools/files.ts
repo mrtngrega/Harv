@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { IS_WINDOWS, osPath } from '../platform.ts';
-import type { FileEntry, FilePlaces, FolderListing } from '@harv/shared';
+import type { FileEntry, FilePlaces, FolderListing, PathSuggestion } from '@harv/shared';
 
 // The file explorer tab. These are the user's own clicks in their own dashboard
 // (the server refuses other origins), so they don't pass Harv's safety gate.
@@ -69,6 +69,48 @@ export function listFolder(path: string): FolderListing {
   entries.sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
   const parent = osPath.dirname(path);
   return { path, parent: parent === path ? null : parent, entries };
+}
+
+/**
+ * Suggestions for `@` in the command line (like Claude Code's): what's typed is a path, absolute
+ * (`C:\Us`, `/home/…`, `~/Doc`) or a name in the home folder (`Doc`); the folder it's in is listed,
+ * names that start with the last part first, then names that contain it. Empty: Home, its folders, drives.
+ */
+export function suggestPaths(query: string, limit = 30): PathSuggestion[] {
+  const home = homedir();
+  const q = query.trim().replace(/^["']/, '');
+  if (!q) {
+    const { places: named, drives } = places();
+    return [...named.map((p) => p.path), ...drives].map((path) => ({ path, name: path, folder: true, size: 0 }));
+  }
+  let typed = q.startsWith('~') ? home + q.slice(1) : q;
+  if (IS_WINDOWS && /^[a-z]:$/i.test(typed)) typed += '\\';
+  const clean = cleanPath(typed);
+  const endsWithSep = /[\\/]$/.test(typed);
+  const dir = !clean ? home : endsWithSep ? clean : osPath.dirname(clean);
+  const part = (!clean ? typed : endsWithSep ? '' : osPath.basename(clean)).toLowerCase();
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const visible = names.filter((n) => !SYSTEM_NAMES.has(n.toLowerCase()) && (!n.startsWith('.') || part.startsWith('.')));
+  const lower = (n: string) => n.toLowerCase();
+  const picked = [
+    ...visible.filter((n) => lower(n).startsWith(part)),
+    ...visible.filter((n) => part !== '' && !lower(n).startsWith(part) && lower(n).includes(part)),
+  ];
+  const out: PathSuggestion[] = [];
+  for (const name of picked) {
+    const path = osPath.join(dir, name);
+    const st = statSync(path, { throwIfNoEntry: false });
+    if (!st) continue;
+    out.push({ path, name, folder: st.isDirectory(), size: st.isDirectory() ? 0 : st.size });
+    if (out.length >= limit) break;
+  }
+  // Folders first (they're what you walk into), keeping the order above within each kind.
+  return [...out.filter((s) => s.folder), ...out.filter((s) => !s.folder)];
 }
 
 /** Opens a file with its default app, or a folder in Windows Explorer (the desktop's file manager on Linux). */

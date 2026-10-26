@@ -48,6 +48,30 @@ describe('backups', () => {
 });
 
 describe('SafetyGate', () => {
+  it('deletes inside a folder the user attached to that chat without a card, backed up first', async () => {
+    const store = new ActionStore(':memory:');
+    const sent: SafetyServerMessage[] = [];
+    const given = mkdtempSync(join(userDir, 'given-'));
+    const file = join(given, 'old.txt');
+    writeFileSync(file, 'keep a copy');
+    const gate = new SafetyGate(store, {
+      broadcast: (m) => sent.push(m),
+      notice: () => {},
+      onChange: () => {},
+      attachedOf: (tabId) => (tabId === 'tab' ? [given] : []),
+    });
+    const out = await gate.preToolUse('tab', 'PowerShell', { command: `Remove-Item "${file}"` }, 'att1', signal());
+    expect(decision(out)?.permissionDecision).toBe('allow');
+    expect(store.get('att1')?.tier).toBe('yellow');
+    expect(store.get('att1')?.backups).toContain(file);
+    expect(sent.some((m) => m.type === 'approval.request')).toBe(false);
+    // Another chat didn't get the folder: there it asks.
+    const pending = gate.preToolUse('other', 'PowerShell', { command: `Remove-Item "${file}"` }, 'att2', signal());
+    await vi.waitFor(() => expect(sent.some((m) => m.type === 'approval.request')).toBe(true));
+    gate.cancel('other');
+    await pending;
+  });
+
   it('lets green calls through and logs them quietly', async () => {
     const { gate, store, sent } = setup();
     const out = await gate.preToolUse('tab', 'Read', { file_path: 'C:\\x.txt' }, 't1', signal());

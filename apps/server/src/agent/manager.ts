@@ -23,7 +23,7 @@ import type { ChatStore } from '../store/chats.ts';
 import { SHARED_FILES, type RemoteChanges } from '../sync/engine.ts';
 import { cloneProject, createGitHubRepo, planLink, pullNotice, pullProject, remoteOf, sameRemote } from '../sync/projects.ts';
 import type { UsageMeter } from '../usage/meter.ts';
-import { buildContent, deleteAttachments } from './attachments.ts';
+import { buildContent, cleanAttachments, deleteAttachments } from './attachments.ts';
 import { sideQuestion } from './btw.ts';
 import { commandName, hiddenReason } from './commands.ts';
 import { formatTranscript, type HandOff, type ProjectTools } from './chatTools.ts';
@@ -79,6 +79,9 @@ const HANDOFF_WAIT_MS = 15 * 60 * 1000;
 const HANDOFF_REPLY_CHARS = 12_000;
 
 /** A message typed while its chat was busy; it runs when the turn ends (like Claude Code's queue). */
+/** How an attachment is named on the user's line: an upload by its name, a file or folder on the PC by its full path (the gate trusts those). */
+const lineName = (f: Attachment) => f.path ?? f.name;
+
 type FollowUp = QueuedMessage & { message: string; choice: ModelChoice; effort: EffortLevel; attachments: Attachment[] };
 
 /** A message waiting for a plan limit to reset. */
@@ -396,7 +399,9 @@ export class ChatManager {
     return session;
   }
 
-  async send(tabId: string, message: string, choice: ModelChoice, effort: EffortLevel, files: Attachment[] = []): Promise<void> {
+  async send(tabId: string, message: string, choice: ModelChoice, effort: EffortLevel, sent: Attachment[] = []): Promise<void> {
+    // Files and folders on the PC are checked here (the dashboard only names them).
+    const files = cleanAttachments(sent);
     const isNew = !this.store.exists(tabId);
     // Leave `/opus`-style override words out of the title.
     this.store.ensureChat(tabId, titleFrom(parseOverride(message).text.trim() || message || (files[0]?.name ?? 'Attachment')));
@@ -416,7 +421,7 @@ export class ChatManager {
     if (this.busy(tabId) || this.followUps.get(tabId)?.length) {
       // Like Claude Code: what's typed while Harv works waits its turn, and runs when this one ends.
       const list = this.followUps.get(tabId) ?? [];
-      const names = files.map((f) => f.name);
+      const names = files.map(lineName);
       list.push({
         id: randomUUID(),
         text: message,
@@ -431,7 +436,7 @@ export class ChatManager {
       if (!this.busy(tabId)) void this.nextFollowUp(tabId);
       return;
     }
-    this.store.addLine(tabId, { kind: 'you', text: message, ...(files.length ? { files: files.map((f) => f.name) } : {}) });
+    this.store.addLine(tabId, { kind: 'you', text: message, ...(files.length ? { files: files.map(lineName) } : {}) });
     if (isNew) this.publishHistory();
     await this.begin(tabId, message, choice, effort, files, isNew);
   }
