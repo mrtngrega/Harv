@@ -16,7 +16,7 @@ import type {
 } from '@harv/shared';
 import { terminalId } from '@harv/shared';
 import { createStore } from './createStore.ts';
-import { dropDrafts } from './drafts.ts';
+import { addAttachment, dropDrafts, setDraftText } from './drafts.ts';
 import { onServerMessage, sendMessage } from './socket.ts';
 
 export type { LineKind };
@@ -25,7 +25,7 @@ export interface Line {
   id: string;
   kind: LineKind;
   text: string;
-  /** "sonnet·medium" on Harv's replies. */
+  /** "sonnet·medium" on Harv's replies; how long it thought ("12s") on thinking lines. */
   tag?: string;
   /** Why that model·effort was picked (shown on hover). */
   reason?: string;
@@ -82,9 +82,6 @@ export interface ChatState {
   tools: Record<string, ToolKind[]>;
   model: ModelChoice;
   effort: EffortLevel;
-  /** What AUTO ran last, e.g. "Sonnet 5.5 · medium". */
-  routed: string | null;
-  routedReason?: string;
 }
 
 const newId = () => crypto.randomUUID();
@@ -121,7 +118,6 @@ const store = createStore<ChatState>({
   views: {},
   tools: {},
   ...loadSelection(),
-  routed: null,
 });
 
 export const useChat = store.use;
@@ -240,7 +236,6 @@ export function applyChatEvent(msg: ChatServerMessage): void {
         const pending = line('harv', '', { tag, reason, streaming: true });
         return { ...t, ...turnStart(t), busy: true, tag, reason, lines: [...t.lines, pending], currentId: pending.id };
       });
-      if (msg.auto) store.set((s) => ({ ...s, routed: `${msg.model} · ${msg.effort}`, routedReason: msg.reason }));
       break;
     }
     case 'chat.delta':
@@ -251,6 +246,18 @@ export function applyChatEvent(msg: ChatServerMessage): void {
       break;
     case 'chat.assistant':
       updateTab(msg.tabId, (t) => withCurrent(t, () => msg.text));
+      break;
+    case 'chat.thinking':
+      // Before the reply it led to: in front of the waiting (still empty) reply line, if there is one.
+      updateTab(msg.tabId, (t) => {
+        const thought = line('thinking', msg.text, { tag: `${msg.seconds}s` });
+        const current = t.lines.find((l) => l.id === t.currentId);
+        if (current && current.text === '') {
+          const at = t.lines.indexOf(current);
+          return { ...t, lines: [...t.lines.slice(0, at), thought, ...t.lines.slice(at)] };
+        }
+        return { ...t, lines: [...finishCurrent(t).lines, thought], currentId: null };
+      });
       break;
     case 'chat.tool':
       updateTab(msg.tabId, (t) => {
@@ -593,6 +600,21 @@ export const chat = {
   unqueue(tabId: string, id: string) {
     sendMessage({ type: 'chat.unqueue', tabId, id });
     updateTab(tabId, (t) => ({ ...t, queued: t.queued?.filter((q) => q.id !== id) }));
+  },
+
+  /**
+   * Takes a queued message back into the input to edit (like Claude Code): it leaves the
+   * queue, its text and files go into the draft, and sending queues it again.
+   */
+  editQueued(tabId: string, id: string) {
+    const item = store
+      .get()
+      .tabs.find((t) => t.id === tabId)
+      ?.queued?.find((q) => q.id === id);
+    if (!item) return;
+    chat.unqueue(tabId, id);
+    setDraftText(tabId, item.text);
+    for (const file of item.attachments ?? []) addAttachment(tabId, file);
   },
 
   /** Runs a queued message now: the current reply stops. */

@@ -72,6 +72,8 @@ export class ChatSession {
    * and Harv looked stuck (the user's report, 2026-10-25). The exact count replaces it at the end.
    */
   private thinkingTokens = 0;
+  /** The thinking block streaming now: its index in the message, when it started, its summary so far. */
+  private thought: { index: number; at: number; text: string } | null = null;
   private progressAt = 0;
   /** What the latest API call sent: the context it had (the turn's summed usage counts the context once per call). */
   private contextIn = 0;
@@ -284,6 +286,15 @@ export class ChatSession {
         const ev = msg.event;
         if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
           this.emit({ type: 'chat.delta', tabId, text: ev.delta.text });
+        } else if (ev.type === 'content_block_start' && ev.content_block.type === 'thinking') {
+          this.thought = { index: ev.index, at: Date.now(), text: '' };
+        } else if (ev.type === 'content_block_delta' && ev.delta.type === 'thinking_delta' && this.thought?.index === ev.index) {
+          this.thought.text += ev.delta.thinking;
+        } else if (ev.type === 'content_block_stop' && this.thought?.index === ev.index) {
+          const { at, text } = this.thought;
+          this.thought = null;
+          if (text.trim())
+            this.emit({ type: 'chat.thinking', tabId, text: text.trim(), seconds: Math.max(1, Math.round((Date.now() - at) / 1000)) });
         } else if (ev.type === 'message_start' && this.toolRunning) {
           this.setBusy(true, false);
         } else if (ev.type === 'message_start' && !this.busy && !this.closed) {
@@ -385,11 +396,9 @@ export class ChatSession {
         if (info.status === 'rejected') {
           // Never offer to buy credits or use overage: Harv is subscription-only.
           this.emit({ type: 'chat.error', tabId, message: `Claude Pro usage limit reached.${resets}` });
-        } else if (info.status === 'allowed_warning' && info.utilization !== undefined) {
-          // Accept either a 0–1 fraction or a 0–100 percentage.
-          const used = info.utilization <= 1 ? info.utilization * 100 : info.utilization;
-          this.emit({ type: 'chat.notice', tabId, message: `Heads up: ${Math.round(used)}% of your Claude Pro limit used.${resets}` });
         }
+        // `allowed_warning` comes with every API call above Claude's own mark, so it says nothing
+        // here: the usage meter warns once per threshold (Settings › Usage warnings).
         return;
       }
 

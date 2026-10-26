@@ -25,13 +25,21 @@ export function chatList(items: HistoryItem[], currentId: string): string {
     .join('\n');
 }
 
-const SPEAKER: Record<StoredLine['kind'], string> = { you: 'user', harv: 'harv', tool: '  tool', notice: '  note', error: '  error' };
+const SPEAKER: Record<StoredLine['kind'], string> = {
+  you: 'user',
+  harv: 'harv',
+  tool: '  tool',
+  notice: '  note',
+  error: '  error',
+  thinking: '  thought',
+};
 
 /** A chat as plain text, newest lines kept when it's too long. */
 export function formatTranscript(lines: StoredLine[]): string {
   const out: string[] = [];
   let total = 0;
-  for (const line of [...lines].reverse()) {
+  // Thinking summaries are Harv's scratch work, not part of the conversation.
+  for (const line of [...lines].reverse().filter((l) => l.kind !== 'thinking')) {
     const body = line.text.length > MAX_LINE_CHARS ? `${line.text.slice(0, MAX_LINE_CHARS)}…` : line.text;
     const files = line.files?.length ? ` [attached: ${line.files.join(', ')}]` : '';
     const entry = `${SPEAKER[line.kind]}: ${body}${files}`;
@@ -155,7 +163,7 @@ export function harvServer(store: ChatStore, tabId: string, delegate?: Delegate,
             ),
             tool(
               'open_project',
-              `Turn this chat into a project chat for an existing project, when the user wants to work on it ("let's work on X"): give the project's name (see list_projects) or a folder path (it gets added). From the next message you work as Claude Code in that folder.`,
+              `Turn this chat into a project chat for an existing project, ONLY when the user explicitly asks to work on it or switch to it ("let's work on X", "switch to X"): give the project's name (see list_projects) or a folder path (it gets added). From the next message you work as Claude Code in that folder. Never call it just to look at something from a project (a mockup, a file, a picture): read or open that file directly from this chat instead, since project folders are readable from any chat.`,
               { project: z.string().min(1).describe('Project name or full folder path') },
               async ({ project }) => text(await projects.open(tabId, project)),
             ),

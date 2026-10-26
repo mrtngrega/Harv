@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { answerStart, applyChatEvent, chat, getChatState, startQuestions } from './chatStore.ts';
+import { getDrafts, getDraftTexts } from './drafts.ts';
 
 vi.mock('./socket.ts', () => ({ onServerMessage: () => {}, sendMessage: () => true }));
 
@@ -45,7 +46,20 @@ describe('chat stream handling', () => {
       ['harv', 'Done.', 'sonnet·medium'],
     ]);
     expect(tab(tabId).lines.every((l) => !l.streaming)).toBe(true);
-    expect(getChatState().routed).toBe('Sonnet 5.5 · medium');
+  });
+
+  it('puts a thought in front of the reply it led to', () => {
+    const tabId = openTab();
+    chat.send('why is the sky blue');
+    applyChatEvent({ type: 'chat.started', tabId, model: 'Opus 5.5', effort: 'medium', auto: true, reason: 'test' });
+    applyChatEvent({ type: 'chat.thinking', tabId, text: 'Rayleigh scattering…', seconds: 4 });
+    applyChatEvent({ type: 'chat.delta', tabId, text: 'Because of scattering.' });
+    applyChatEvent({ type: 'chat.done', tabId, ok: true, stopped: false });
+    expect(tab(tabId).lines.map((l) => [l.kind, l.tag])).toEqual([
+      ['you', undefined],
+      ['thinking', '4s'],
+      ['harv', 'opus·medium'],
+    ]);
   });
 
   it('lets the final assistant text replace streamed text', () => {
@@ -165,5 +179,20 @@ describe('messages typed while Harv answers', () => {
     expect(tab(id).queued).toEqual([{ id: 'q1', text: 'second' }]);
     chat.unqueue(id, 'q1');
     expect(tab(id).queued).toEqual([]);
+  });
+
+  it('takes a queued message back into the input to edit, with its files', () => {
+    const id = openTab();
+    chat.send('first');
+    const file = { id: 'f1', name: 'car.png', size: 10, type: 'image/png', path: 'x/car.png' } as never;
+    applyChatEvent({
+      type: 'chat.queued',
+      tabId: id,
+      items: [{ id: 'q1', text: 'fix the wheel', files: ['car.png'], attachments: [file] }],
+    });
+    chat.editQueued(id, 'q1');
+    expect(tab(id).queued).toEqual([]);
+    expect(getDraftTexts()[id]).toBe('fix the wheel');
+    expect(getDrafts()[id]?.map((p) => p.file)).toEqual([file]);
   });
 });

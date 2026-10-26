@@ -162,7 +162,11 @@ export class ChatManager {
   }
 
   private queuedOf(tabId: string): QueuedMessage[] {
-    return (this.followUps.get(tabId) ?? []).map(({ id, text, files }) => ({ id, text, ...(files?.length ? { files } : {}) }));
+    return (this.followUps.get(tabId) ?? []).map(({ id, text, files, attachments }) => ({
+      id,
+      text,
+      ...(files?.length ? { files, attachments } : {}),
+    }));
   }
 
   private publishQueued(tabId: string) {
@@ -231,6 +235,9 @@ export class ChatManager {
         break;
       case 'chat.notice':
         save({ kind: 'notice', text: msg.message });
+        break;
+      case 'chat.thinking':
+        save({ kind: 'thinking', text: msg.text, tag: `${msg.seconds}s` });
         break;
       case 'chat.context':
         this.store.setContext(msg.tabId, msg.tokens);

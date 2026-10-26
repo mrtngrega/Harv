@@ -1,4 +1,15 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type DragEvent, type FormEvent } from 'react';
+import {
+  lazy,
+  memo,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type DragEvent,
+  type FormEvent,
+} from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { FRESH_HINT_TOKENS } from '@harv/shared';
@@ -62,7 +73,7 @@ function Time({ at }: { at: number }) {
   );
 }
 
-function ChatLine({ line, onHarder }: { line: Line; onHarder?: () => void }) {
+function ChatLineView({ line, onHarder }: { line: Line; onHarder?: () => void }) {
   const { showTimes, showTags } = useSettings();
   switch (line.kind) {
     case 'you':
@@ -111,6 +122,8 @@ function ChatLine({ line, onHarder }: { line: Line; onHarder?: () => void }) {
       );
     case 'tool':
       return <ToolLine line={line} />;
+    case 'thinking':
+      return <ThoughtLine line={line} />;
     case 'notice':
       return (
         <div className="animate-fade-in text-muted">
@@ -124,6 +137,33 @@ function ChatLine({ line, onHarder }: { line: Line; onHarder?: () => void }) {
         </div>
       );
   }
+}
+
+/**
+ * A line re-renders only when it changes (lines are replaced, never edited in place), or
+ * when "try harder" comes or goes. Typing re-renders the panel on every key, and parsing
+ * every reply's Markdown again made typing lag in long chats.
+ */
+const ChatLine = memo(ChatLineView, (a, b) => a.line === b.line && !a.onHarder === !b.onHarder);
+
+/** What Claude thought before answering, folded like Claude Code's: "✻ thought for 12s", open to read. */
+function ThoughtLine({ line }: { line: Line }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="animate-fade-in text-faint">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        title={open ? 'Hide the thinking' : 'Show what Harv thought'}
+        className="cursor-pointer rounded hover:text-muted"
+      >
+        <Time at={line.at} />
+        <span className="text-accent/70">✻</span> thought for {line.tag ?? 'a moment'} {open ? '▾' : '▸'}
+      </button>
+      {open && <div className="mt-1 border-l border-line pl-3 whitespace-pre-wrap text-muted italic">{line.text}</div>}
+    </div>
+  );
 }
 
 /** A tool call; non-green ones show their tier, status and Undo from the action log. */
@@ -254,6 +294,13 @@ export function ChatPanel() {
     if (left < bar.scrollLeft) bar.scrollLeft = left - 8;
     else if (left + tab.offsetWidth > bar.scrollLeft + bar.clientWidth) bar.scrollLeft = left + tab.offsetWidth - bar.clientWidth + 8;
   }, [activeId, tabs.length]);
+
+  // Opening or switching to a chat puts the cursor in its command line, ready to type (the user's wish).
+  // Not while a tab is being renamed, or when the start question covers the chat.
+  useEffect(() => {
+    if (nonChat || renaming || askHere) return;
+    inputRef.current?.focus({ preventScroll: true });
+  }, [activeId, nonChat, renaming, askHere]);
 
   // Keep the newest output in view while Harv streams.
   const lastText = active?.lines.at(-1)?.text;
@@ -553,7 +600,17 @@ export function ChatPanel() {
             {active.queued.map((q) => (
               <div key={q.id} className="flex min-w-0 items-center gap-2">
                 <span className="flex-none text-faint">queued ›</span>
-                <span className="min-w-0 flex-1 truncate text-muted">{q.text || q.files?.join(', ')}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    chat.editQueued(active.id, q.id);
+                    inputRef.current?.focus();
+                  }}
+                  title="Edit: takes it back into the input (↑ in an empty input does too)"
+                  className="min-w-0 flex-1 cursor-pointer truncate rounded text-left text-muted hover:text-ink"
+                >
+                  {q.text || q.files?.join(', ')}
+                </button>
                 <button
                   type="button"
                   onClick={() => chat.sendNow(active.id, q.id)}
@@ -573,7 +630,9 @@ export function ChatPanel() {
                 </button>
               </div>
             ))}
-            <p className="text-[11px] text-faint">Runs when Harv finishes · “send now” stops this reply and sends it right away</p>
+            <p className="text-[11px] text-faint">
+              Runs when Harv finishes · click one (or ↑) to edit it · “send now” stops this reply and sends it right away
+            </p>
           </div>
         )}
 
@@ -644,6 +703,12 @@ export function ChatPanel() {
                     pickCommand(menuItems[menuAt]!.name);
                     return;
                   }
+                }
+                // ↑ in an empty input takes the newest queued message back to edit.
+                if (e.key === 'ArrowUp' && !draft && pending.length === 0 && active?.queued?.length) {
+                  e.preventDefault();
+                  chat.editQueued(active.id, active.queued.at(-1)!.id);
+                  return;
                 }
                 if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
                 // Settings › Chat: Enter sends (Shift+Enter = new line), or Ctrl+Enter sends (Enter = new line).

@@ -13,6 +13,16 @@ Harv loads this in every project chat (a chat bound to a project folder), on top
 7. **Report honestly.** Say plainly what was done, what was verified and how, what failed, and what was skipped. Keep the user posted on long work with a short line now and then.
 8. **Watch the plan limits.** The user is on a Claude subscription with tight limits. Prefer cheap ways to check things, and say when a step will use a lot.
 
+## Pictures and graphics (icons, illustrations, a car on a dashboard…)
+
+Drawing realistic shapes in code is a weak spot: tracing a photo into vector shapes with scripts tends to come out lumpy and wrong, while working from a clean line drawing works well. So:
+
+1. **Get a clean reference first.** A blueprint, line art or a flat, front-on picture from the exact angle needed. Search for one, or ask the user for one, before drawing anything. A photo at an angle is the hardest starting point; say so.
+2. **Rough first, polish later.** Show 2–3 quick, low-detail versions (different styles or approaches) and let the user pick before you spend time on details.
+3. **Look at every step.** Render each version and view it next to the reference at the size it will be used. Check the shape and proportions before details like badges and shading.
+4. **Say early when it isn't working.** If two tries of an approach still look wrong, stop and offer a different one (another reference, a simpler style, the photo itself with a filter, or a placeholder until the user finds a better source) instead of polishing a bad base.
+5. **Keep the tools local.** Put image tools in a venv in the temp folder or the project (never a PC-wide install), and keep the generator scripts in the project so a picture can be remade.
+
 ## Testing (when the user asks for a test pass)
 
 1. Test backend and frontend, functionality and UI, from many angles: normal use, edge cases, restarts, odd input, and for UIs several window widths (phone, ~1100px, ~1280px, wide), many tabs or items, and live-updating parts watched for a while for layout shifts.

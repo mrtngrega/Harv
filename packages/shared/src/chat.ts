@@ -31,6 +31,8 @@ export interface QueuedMessage {
   id: string;
   text: string;
   files?: string[];
+  /** The files themselves, so the message can be taken back into the input to edit. */
+  attachments?: Attachment[];
 }
 
 /** A background task a chat started (a subagent, a shell or a monitor), for the strip above the prompt. */
@@ -77,13 +79,14 @@ export interface ChatUsage {
   durationMs: number;
 }
 
-export type LineKind = 'you' | 'harv' | 'tool' | 'notice' | 'error';
+/** `thinking`: a summary of what Claude thought before answering (shown folded, like Claude Code's). */
+export type LineKind = 'you' | 'harv' | 'tool' | 'notice' | 'error' | 'thinking';
 
 /** A finished chat line as stored in the history database. */
 export interface StoredLine {
   kind: LineKind;
   text: string;
-  /** "sonnet·medium" on Harv's replies. */
+  /** "sonnet·medium" on Harv's replies; how long it thought ("12s") on thinking lines. */
   tag?: string;
   /** Why that model·effort was picked. */
   reason?: string;
@@ -163,6 +166,8 @@ export type ChatServerMessage =
   /** Final text of one assistant message (replaces the streamed text). */
   | { type: 'chat.assistant'; tabId: string; text: string }
   | { type: 'chat.tool'; tabId: string; id: string; name: string; detail: string }
+  /** One stretch of thinking finished: its summary and how long it took. */
+  | { type: 'chat.thinking'; tabId: string; text: string; seconds: number }
   | { type: 'chat.done'; tabId: string; ok: boolean; stopped: boolean; error?: string; usage?: ChatUsage }
   | { type: 'chat.notice'; tabId: string; message: string }
   | { type: 'chat.error'; tabId: string; message: string }

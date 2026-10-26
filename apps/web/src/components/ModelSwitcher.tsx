@@ -22,7 +22,7 @@ function Segment({ on, label, title, onClick }: { on: boolean; label: string; ti
 
 export function ModelSwitcher() {
   const catalog = useCatalog();
-  const { model, effort, routed, routedReason } = useChat();
+  const { model, effort } = useChat();
   const current = catalog?.models.find((m) => m.id === model);
   const efforts = current?.efforts.length ? current.efforts : EFFORT_LEVELS;
 
@@ -40,13 +40,8 @@ export function ModelSwitcher() {
         )}
       </div>
 
-      {model === 'auto' ? (
-        routed && (
-          <span title={routedReason} className="animate-fade-in cursor-help text-xs text-muted">
-            auto → {routed}
-          </span>
-        )
-      ) : (
+      {/* AUTO picks per message; each reply's [model·effort] tag says what it picked and why. */}
+      {model !== 'auto' && (
         <div role="group" aria-label="Effort" className="flex gap-1 rounded-xl bg-black/20 p-[3px]">
           {efforts.map((e) => (
             <Segment key={e} on={effort === e} label={EFFORT_LABEL[e]} title={`${e} effort`} onClick={() => chat.setEffort(e)} />

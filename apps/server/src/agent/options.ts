@@ -207,6 +207,9 @@ export function buildOptions(
       chat ? chat.gate.canUseTool(name, input, toolUseID, chat.tabId) : { behavior: 'deny', message: 'No tools here.' },
     hooks: gateHooks(chat),
     includePartialMessages: true,
+    // Claude's thinking comes as a short summary (not hidden), shown folded above the reply like
+    // Claude Code's. It only changes what's shown: how much Claude thinks stays the same.
+    ...(chat ? { extraArgs: { 'thinking-display': 'summarized' } } : {}),
     // The dashboard can stop each background agent on its own (the strip above harv>),
     // so Stop on a reply ends only the reply, not the agents it started.
     perTaskStopAffordance: true,
