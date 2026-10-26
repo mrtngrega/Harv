@@ -32,7 +32,7 @@ import { loadSettings, projectsDir } from '../settings.ts';
 import type { ProjectServerMessage, SharedUi } from '@harv/shared';
 import { ChatSession } from './session.ts';
 
-/** One /report note for the ideas file: `- [25 Oct 13:05 · PC · chat name] text`, on one line. */
+/** One /report note for harv_report.md: `- [25 Oct 13:05 · PC · chat name] text`, on one line. */
 export function ideaLine(text: string, at: Date, device: string, chat: string): string {
   const day = at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   const time = at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -407,7 +407,7 @@ export class ChatManager {
       if (isNew) this.publishHistory();
       return this.btw(tabId, (btw[1] ?? '').trim());
     }
-    // /report: a note for the user's ideas file, written right here (no model call, never queued).
+    // /report: a note for the user's harv_report.md, written right here (no model call, never queued).
     const report = /^\/report(?:\s+([\s\S]*))?$/i.exec(message.trim());
     if (report && !files.length) {
       if (isNew) this.publishHistory();
@@ -462,10 +462,10 @@ export class ChatManager {
     }
   }
 
-  /** Where /report writes: the ideas file the sync keeps in step between devices (replaced in tests). */
+  /** Where /report writes: harv_report.md, which the sync keeps in step between devices (replaced in tests). */
   ideasFile = SHARED_FILES.ideas!;
 
-  /** /report: appends a dated note to the ideas file, which device sync carries to the other devices. */
+  /** /report: appends a dated note to harv_report.md, which device sync carries to the other devices. */
   private report(tabId: string, text: string) {
     this.addLine(tabId, { kind: 'you', text: text ? `/report ${text}` : '/report' });
     if (!text) return this.notice(tabId, 'Write the note after it: /report the explorer forgets my folder after a restart');
@@ -473,9 +473,9 @@ export class ChatManager {
       const before = existsSync(this.ideasFile) ? readFileSync(this.ideasFile, 'utf8') : '';
       const line = ideaLine(text, new Date(), loadSettings().deviceName || hostname(), this.store.title(tabId) ?? 'chat');
       appendFileSync(this.ideasFile, `${before && !before.endsWith('\n') ? '\n' : ''}${line}\n`, 'utf8');
-      this.notice(tabId, 'Noted in the ideas file.');
+      this.notice(tabId, 'Noted in harv_report.md.');
     } catch (err) {
-      this.notice(tabId, `Couldn’t write the ideas file: ${(err as Error).message}`);
+      this.notice(tabId, `Couldn’t write harv_report.md: ${(err as Error).message}`);
     }
   }
 

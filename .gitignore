@@ -25,5 +25,6 @@ Thumbs.db
 dist/
 scripts/ui-check/out/
 
-# The user's ideas list: personal, kept in step by Harv's device sync (docs/PLAN.md §6m), not git
+# The user's notes about Harv: personal, kept in step by Harv's device sync (docs/PLAN.md §6m), not git
+harv_report.md
 Harv_ideas.txt

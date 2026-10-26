@@ -370,6 +370,7 @@ From the 14 notes the user wrote on the notebook (`Harv_ideas.txt`), checked aga
 11. **One look for all popups:** `Toasts.tsx` replaces `UsageToast.tsx` and `WatchdogToast.tsx`: usage, watchdog and project notes stacked top right below the tab bar, the same card; info fades after 30 s, warnings (critical watchdog alerts, usage at 90% and up) stay until dismissed; at most 4, the oldest info goes first.
 12. **"Does he have a thinking phase like Claude Code?"** Yes, hidden until now. Chats run with `--thinking-display summarized` (only what's shown changes, not how much Claude thinks); each stretch of thinking becomes a folded `✻ thought for 12s ▸` line above the reply (`chat.thinking`, stored as a `thinking` line with the seconds in `tag`, left out of transcripts and hand-offs).
 13. **The Harv app** → planned in §6p.
+14. **The ideas file is now `harv_report.md`** (the user's wish, after all 14 notes were done): Markdown, a short header, `/report` lines below it. Each device moves `Harv_ideas.txt` once at startup (`moveOldReportFile`); it still syncs under the name `ideas`, so both versions agree.
 
 ## 6p. The Harv app (M9, planned 2026-10-26, not built)
 

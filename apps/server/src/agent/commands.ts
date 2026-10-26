@@ -58,10 +58,10 @@ export const FRESH: SlashCommandInfo = {
   argumentHint: '',
 };
 
-/** Harv's own: a note about Harv for the user's ideas file (no model call). */
+/** Harv's own: a note about Harv for the user's harv_report.md (no model call). */
 export const REPORT: SlashCommandInfo = {
   name: 'report',
-  description: 'Note something about Harv (a bug, a wish) in your ideas file, without asking Harv',
+  description: 'Note something about Harv (a bug, a wish) in harv_report.md, without asking Harv',
   argumentHint: '<what happened or what you want>',
 };
 

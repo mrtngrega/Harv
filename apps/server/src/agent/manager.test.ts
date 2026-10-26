@@ -562,9 +562,9 @@ describe("the other device's projects", { timeout: 60_000 }, () => {
 });
 
 describe('/report', () => {
-  it('writes a dated one-line note to the ideas file, without a model call, even mid-reply', async () => {
+  it('writes a dated one-line note to harv_report.md, without a model call, even mid-reply', async () => {
     const { chats, store, sent } = setup();
-    const ideas = join(home, 'ideas.txt');
+    const ideas = join(home, 'harv_report.md');
     writeFileSync(ideas, '- an older note');
     chats.ideasFile = ideas;
     await chats.send('r', 'look at the stats panel', 'sonnet', 'medium');
@@ -575,7 +575,7 @@ describe('/report', () => {
     expect(text[1]).toMatch(/^- \[\d{1,2} \w{3} \d{2}:\d{2} · .+ · Stats\] the GPU fan reads 0 rpm$/);
     expect(text[2]).toBe('');
     expect(FakeSession.all.get('r')!.sent).toHaveLength(1);
-    expect(sent.some((m) => m.type === 'chat.notice' && m.tabId === 'r' && m.message === 'Noted in the ideas file.')).toBe(true);
+    expect(sent.some((m) => m.type === 'chat.notice' && m.tabId === 'r' && m.message === 'Noted in harv_report.md.')).toBe(true);
     expect(chats.openChats().find((c) => c.id === 'r')?.queued).toBeUndefined();
     FakeSession.all.get('r')!.finish();
   });

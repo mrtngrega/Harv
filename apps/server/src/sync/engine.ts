@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,10 +25,20 @@ const CHUNK = /^(\d{12})-(\d{12})\.hrv$/;
 const hash = (s: string | null) => (s === null ? null : createHash('sha256').update(s).digest('hex').slice(0, 16));
 /** A memory name from the other device: letters, digits, spaces, dots, dashes, underscores; no path. */
 const SAFE_NAME = /^\w[\w .-]{0,99}$/;
-/** Text files kept in step between devices, by sync name: the user's ideas list at the repo root (each device has its own checkout). */
+/**
+ * Text files kept in step between devices, by sync name: the user's notes about Harv at the
+ * repo root (each device has its own checkout). Still synced as "ideas", its name before
+ * 2026-10-26 (Harv_ideas.txt), so devices on either version agree.
+ */
 export const SHARED_FILES: Record<string, string> = {
-  ideas: fileURLToPath(new URL('../../../../Harv_ideas.txt', import.meta.url)),
+  ideas: fileURLToPath(new URL('../../../../harv_report.md', import.meta.url)),
 };
+
+/** Harv_ideas.txt became harv_report.md (2026-10-26, the user's wish): moved once at startup. */
+export function moveOldReportFile(): void {
+  const old = fileURLToPath(new URL('../../../../Harv_ideas.txt', import.meta.url));
+  if (existsSync(old) && !existsSync(SHARED_FILES.ideas!)) renameSync(old, SHARED_FILES.ideas!);
+}
 const pad = (n: number) => String(n).padStart(12, '0');
 const isDefault = (key: keyof HarvSettings, value: unknown) => JSON.stringify(DEFAULT_SETTINGS[key]) === JSON.stringify(value);
 

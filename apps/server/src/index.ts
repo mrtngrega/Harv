@@ -41,7 +41,7 @@ import type { FileOp } from '@harv/shared';
 import { IS_WINDOWS, PLATFORM } from './platform.ts';
 import { TerminalManager } from './tools/terminal.ts';
 import { startWatchdog } from './watchdog/monitor.ts';
-import { SyncEngine } from './sync/engine.ts';
+import { moveOldReportFile, SyncEngine } from './sync/engine.ts';
 import { claudeMemoryDir } from './sync/files.ts';
 import { WORKSPACE } from './safety/paths.ts';
 import { SyncStore } from './sync/store.ts';
@@ -152,6 +152,7 @@ const chats = new ChatManager(
   },
   (status) => broadcast({ type: 'harv.status', status, detail: chats.statusDetail }),
 );
+moveOldReportFile();
 const syncStore = new SyncStore(join(HARV_HOME, 'harv.db'));
 const BACKGROUND = /^background\.(jpg|jpeg|png|webp)$/;
 const sync = new SyncEngine(
