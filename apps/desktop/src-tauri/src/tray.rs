@@ -56,26 +56,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .tooltip(tooltip("offline"))
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "open" => crate::show(app),
-            "restart" => harv::restart(),
-            "sensors" => {
-                std::thread::spawn(harv::start_sensors);
-            }
-            "update" => {
-                let app = app.clone();
-                std::thread::spawn(move || {
-                    let behind = app.state::<update::Updates>().0.lock().unwrap().behind;
-                    if behind == 0 {
-                        update::check(&app);
-                    } else if let Err(e) = update::apply(&app) {
-                        crate::notify::show(&app, "Harv didn't update", &e);
-                    }
-                });
-            }
-            "quit" => harv::quit(app),
-            _ => {}
-        })
+        .on_menu_event(|app, event| action(app, event.id.as_ref()))
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
@@ -90,6 +71,30 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
 
     app.manage(TrayMenu { update });
     Ok(())
+}
+
+/// What a menu item does; also `harv --restart` and friends (main.rs), so scripts and the Linux menu can use them.
+pub fn action(app: &AppHandle, id: &str) {
+    match id {
+        "open" => crate::show(app),
+        "restart" => harv::restart(),
+        "sensors" => {
+            std::thread::spawn(harv::start_sensors);
+        }
+        "update" => {
+            let app = app.clone();
+            std::thread::spawn(move || {
+                let behind = app.state::<update::Updates>().0.lock().unwrap().behind;
+                if behind == 0 {
+                    update::check(&app);
+                } else if let Err(e) = update::apply(&app) {
+                    crate::notify::show(&app, "Harv didn't update", &e);
+                }
+            });
+        }
+        "quit" => harv::quit(app),
+        _ => {}
+    }
 }
 
 pub fn set_status(app: &AppHandle, status: &str) {

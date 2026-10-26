@@ -24,6 +24,22 @@ pub fn show(app: &AppHandle) {
     }
 }
 
+/// `harv --restart`, `--quit`, `--sensors`, `--update` do what the tray menu does; anything else shows the window.
+fn flag_action(args: &[String]) -> &'static str {
+    let has = |flag: &str| args.iter().any(|a| a == flag);
+    if has("--restart") {
+        "restart"
+    } else if has("--quit") {
+        "quit"
+    } else if has("--sensors") {
+        "sensors"
+    } else if has("--update") {
+        "update"
+    } else {
+        "open"
+    }
+}
+
 /// The hotkey: up if it's hidden or behind other windows, away if it's in front.
 fn toggle(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -96,10 +112,12 @@ async fn apply_update(app: AppHandle) -> Result<update::UpdateInfo, String> {
 
 fn main() {
     // Autostart opens the app with --hidden: Harv starts, the window waits in the tray.
-    let hidden = std::env::args().any(|a| a == "--hidden");
+    let args: Vec<String> = std::env::args().collect();
+    let hidden = args.iter().any(|a| a == "--hidden");
+    let quitting = flag_action(&args) == "quit";
 
     tauri::Builder::default()
-        // First: a second launch (the menu entry, KDE's hotkey) just shows this one.
+        // First: a second launch (the menu entry, KDE's hotkey) shows this one, or runs its --flag.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show(app)
         }))
@@ -134,6 +152,11 @@ fn main() {
         ])
         .setup(move |app| {
             let handle = app.handle();
+            // `harv --quit` with no app running: stop Harv (if the scripts started it) and close.
+            if quitting {
+                harv::quit(handle);
+                return Ok(());
+            }
             tray::create(handle)?;
             prefs::apply_saved(handle);
             if !hidden {

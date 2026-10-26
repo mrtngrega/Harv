@@ -26,12 +26,21 @@ Terminal=false
 Categories=Utility;
 StartupWMClass=harv
 X-KDE-Shortcuts=Ctrl+Alt+H
+Actions=restart;quit;
+
+[Desktop Action restart]
+Name=Restart Harv
+Exec="$app" --restart
+
+[Desktop Action quit]
+Name=Quit Harv
+Exec="$app" --quit
 EOF
   # KDE's global shortcut for launching it (applies at once if KDE picks it up, else after the next login).
   if command -v kwriteconfig6 >/dev/null; then
     kwriteconfig6 --file kglobalshortcutsrc --group services --group harv.desktop --key _launch 'Ctrl+Alt+H'
   fi
-  message="Harv (the app) is in the application menu; Ctrl+Alt+H brings it up in KDE."
+  message="Harv (the app) is in the application menu (right-click it for Restart and Quit); Ctrl+Alt+H brings it up in KDE."
 else
   cat > "$apps/harv.desktop" <<EOF
 [Desktop Entry]
