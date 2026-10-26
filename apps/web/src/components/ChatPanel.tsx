@@ -302,6 +302,13 @@ export function ChatPanel() {
     inputRef.current?.focus({ preventScroll: true });
   }, [activeId, nonChat, renaming, askHere]);
 
+  // The desktop app's hotkey brings Harv up with the cursor in the command line.
+  useEffect(() => {
+    const onFocus = () => !nonChat && inputRef.current?.focus({ preventScroll: true });
+    window.addEventListener('harv-focus', onFocus);
+    return () => window.removeEventListener('harv-focus', onFocus);
+  }, [nonChat]);
+
   // Keep the newest output in view while Harv streams.
   const lastText = active?.lines.at(-1)?.text;
   useEffect(() => {

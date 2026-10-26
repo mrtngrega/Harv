@@ -1,5 +1,6 @@
-import { useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { ACCENTS, COMPACT_ROWS, DEFAULT_SETTINGS, WARN_CHOICES, type CompactRow, type HarvSettings } from '@harv/shared';
+import { comboOf, desktop, inApp, type AppSettings, type UpdateInfo } from '../lib/desktop.ts';
 import { ago } from '../lib/format.ts';
 import {
   projectActions,
@@ -237,9 +238,97 @@ function RestartButton() {
       <span className="text-[11px] text-faint">
         {state === 'asking'
           ? 'Any reply in progress stops. Tabs, drafts and terminals come back.'
-          : 'Loads changes to Harv’s own server code. Stop and start from the desktop shortcuts.'}
+          : inApp
+            ? 'Loads changes to Harv’s own server code. Quit Harv from the tray icon.'
+            : 'Loads changes to Harv’s own server code. Stop and start from the desktop shortcuts.'}
       </span>
     </div>
+  );
+}
+
+/** The desktop app's own settings (this device only, ~/.harv/app.json): hotkey, autostart, updates. */
+function AppSection() {
+  const [app, setApp] = useState<AppSettings | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [updating, setUpdating] = useState<'checking' | 'updating' | null>(null);
+
+  useEffect(() => {
+    desktop.settings().then(setApp, () => {});
+  }, []);
+
+  const change = (patch: { hotkey?: string; autostart?: boolean }) => {
+    setError(null);
+    desktop.setSettings(patch).then(setApp, (e: unknown) => setError(String(e)));
+  };
+  const onKey = (e: KeyboardEvent) => {
+    e.preventDefault();
+    if (e.key === 'Escape') return setRecording(false);
+    const combo = comboOf(e);
+    if (!combo) return;
+    setRecording(false);
+    change({ hotkey: combo });
+  };
+  const run = (what: 'checking' | 'updating') => {
+    setUpdating(what);
+    setError(null);
+    (what === 'checking' ? desktop.checkUpdates() : desktop.applyUpdate())
+      .then(setUpdate, (e: unknown) => setError(String(e)))
+      .finally(() => setUpdating(null));
+  };
+
+  if (!app) return null;
+  const button =
+    'min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 hover:bg-white/10 disabled:cursor-default disabled:opacity-50';
+  return (
+    <Section title="App">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="w-24 flex-none text-muted">Hotkey</span>
+        {app.hotkeyWorks ? (
+          <button
+            type="button"
+            onClick={() => setRecording(true)}
+            onKeyDown={recording ? onKey : undefined}
+            onBlur={() => setRecording(false)}
+            className={`${button} ${recording ? 'border-accent text-accent' : ''}`}
+          >
+            {recording ? 'Press the keys…' : app.hotkey}
+          </button>
+        ) : (
+          <span className="text-faint">
+            {app.hotkey}, set in KDE’s System Settings › Shortcuts (Wayland doesn’t let apps take a hotkey).
+          </span>
+        )}
+      </div>
+      {app.hotkeyWorks && <p className="m-0 text-[11px] text-faint">Brings Harv up from anywhere, ready to type; again hides it.</p>}
+      <Toggle
+        on={app.autostart}
+        label="Open Harv when I log in"
+        hint="Starts Harv in the tray, ready for the hotkey."
+        onChange={(autostart) => change({ autostart })}
+      />
+      <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+        {update && update.behind > 0 ? (
+          <button type="button" disabled={!!updating || update.dirty} onClick={() => run('updating')} className={button}>
+            {updating === 'updating' ? 'Updating…' : `Update (${update.behind} new)`}
+          </button>
+        ) : (
+          <button type="button" disabled={!!updating} onClick={() => run('checking')} className={button}>
+            {updating === 'checking' ? 'Checking…' : 'Check for updates'}
+          </button>
+        )}
+        <span className="text-[11px] text-faint">
+          {update?.error ??
+            (update?.dirty && update.behind > 0
+              ? 'Harv’s folder has uncommitted changes; the update waits for them.'
+              : update && update.behind === 0
+                ? 'Up to date.'
+                : `App ${app.version}. Updates pull Harv’s repo and restart it; never by themselves.`)}
+        </span>
+      </div>
+      {error && <p className="m-0 text-[11px] text-warn">{error}</p>}
+    </Section>
   );
 }
 
@@ -829,6 +918,8 @@ export function SettingsView() {
       </Section>
 
       <Watchdog />
+
+      {inApp && <AppSection />}
 
       <Section title="Startup">
         <Toggle

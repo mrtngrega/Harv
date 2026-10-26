@@ -23,6 +23,8 @@ Thumbs.db
 
 # Build output
 dist/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/schemas/
 scripts/ui-check/out/
 
 # The user's notes about Harv: personal, kept in step by Harv's device sync (docs/PLAN.md §6m), not git

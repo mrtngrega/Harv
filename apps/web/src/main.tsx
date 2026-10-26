@@ -7,6 +7,7 @@ import './index.css';
 import { App } from './App.tsx';
 import { startSocket } from './lib/socket.ts';
 import './lib/layout.ts';
+import './lib/desktop.ts';
 
 startSocket();
 

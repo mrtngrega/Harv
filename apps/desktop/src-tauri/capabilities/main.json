@@ -1,0 +1,21 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The window: the starting page (bundled) and the dashboard (served by Harv on localhost) may move the window, set the tray status, notify, and read or change the app's own settings.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:5173", "http://127.0.0.1:5173/*"]
+  },
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "allow-window-action",
+    "allow-set-status",
+    "allow-notify",
+    "allow-app-settings",
+    "allow-set-app-settings",
+    "allow-check-updates",
+    "allow-apply-update"
+  ]
+}

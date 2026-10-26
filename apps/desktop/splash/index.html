@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Harv</title>
+    <style>
+      /* Shown while the app starts Harv; the window then moves to the dashboard on localhost. */
+      :root {
+        --ground: #0a1018;
+        --ink: #dbe6f0;
+        --muted: #7d8c9c;
+        --accent: #a8c8e8;
+        --warn: #f2b880;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--ground);
+        color: var(--ink);
+        font:
+          13px 'IBM Plex Mono',
+          ui-monospace,
+          Consolas,
+          'DejaVu Sans Mono',
+          monospace;
+        user-select: none;
+        overflow: hidden;
+      }
+      body {
+        display: grid;
+        place-items: center;
+      }
+      .box {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        max-width: 560px;
+        padding: 0 24px;
+        text-align: center;
+      }
+      .logo {
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        color: var(--accent);
+      }
+      #status {
+        color: var(--muted);
+      }
+      #status.error {
+        color: var(--warn);
+      }
+      .dot {
+        animation: pulse 1.4s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        50% {
+          opacity: 0.3;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .dot {
+          animation: none;
+        }
+      }
+      .controls {
+        position: fixed;
+        top: 10px;
+        right: 12px;
+        display: flex;
+        gap: 4px;
+      }
+      .controls button {
+        width: 28px;
+        height: 28px;
+        border: 0;
+        border-radius: 6px;
+        background: none;
+        color: var(--muted);
+        opacity: 0.6;
+        cursor: pointer;
+        display: grid;
+        place-items: center;
+      }
+      .controls button:hover {
+        opacity: 1;
+        color: var(--accent);
+        background: rgb(255 255 255 / 0.05);
+      }
+      .controls button.close:hover {
+        color: var(--warn);
+      }
+    </style>
+  </head>
+  <body data-tauri-drag-region>
+    <div class="controls">
+      <button type="button" aria-label="Minimize" onclick="act('minimize')">
+        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5.5h8" stroke="currentColor" stroke-width="1.1" /></svg>
+      </button>
+      <button type="button" class="close" aria-label="Close to the tray" onclick="act('close')">
+        <svg width="10" height="10" viewBox="0 0 10 10">
+          <path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" stroke-width="1.1" />
+        </svg>
+      </button>
+    </div>
+    <div class="box" data-tauri-drag-region>
+      <div class="logo" data-tauri-drag-region>[HARV]</div>
+      <div id="status" data-tauri-drag-region>starting<span class="dot">…</span></div>
+    </div>
+    <script>
+      const act = (action) => window.__TAURI_INTERNALS__?.invoke('window_action', { action });
+      /** Called by the app when Harv didn't start. */
+      window.harvFailed = (text) => {
+        const el = document.getElementById('status');
+        el.className = 'error';
+        el.textContent = text;
+      };
+    </script>
+  </body>
+</html>

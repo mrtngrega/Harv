@@ -81,6 +81,8 @@ onServerMessage((msg) => {
 });
 
 export const useConnection = connection.use;
+export const getConnection = connection.get;
+export const subscribeConnection = connection.subscribe;
 /** The OS the server runs on, for code outside React. */
 export const getPlatform = () => connection.get().platform;
 export const useMetrics = metrics.use;

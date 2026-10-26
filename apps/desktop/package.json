@@ -1,0 +1,13 @@
+{
+  "name": "@harv/desktop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "app": "tauri build",
+    "icons": "python make-icons.py && tauri icon src-tauri/icons/source.png"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}
