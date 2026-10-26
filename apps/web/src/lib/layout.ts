@@ -59,3 +59,13 @@ onLayoutRestore((ui) => {
   for (const [id, path] of Object.entries(ui.explorer)) if (!explorerPaths.has(id)) explorerPaths.set(id, path);
   restoreDrafts(ui.drafts, ui.attachments);
 });
+
+// Coming back to the dashboard (from the other device, say) syncs right away, not within 2 minutes.
+let lastReturnSync = 0;
+function syncOnReturn() {
+  if (document.visibilityState !== 'visible' || Date.now() - lastReturnSync < 30_000) return;
+  lastReturnSync = Date.now();
+  sendMessage({ type: 'sync.now' });
+}
+window.addEventListener('focus', syncOnReturn);
+document.addEventListener('visibilitychange', syncOnReturn);

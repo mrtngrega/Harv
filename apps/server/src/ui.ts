@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { EMPTY_UI, type Attachment, type ChatView, type ToolKind, type UiState } from '@harv/shared';
+import { EMPTY_UI, type Attachment, type ChatView, type SharedUi, type ToolKind, type UiState } from '@harv/shared';
 import { HARV_HOME } from './paths.ts';
 
 const uiPath = () => join(HARV_HOME, 'ui.json');
@@ -57,6 +57,22 @@ export function loadUi(): UiState {
 export function saveUi(raw: unknown): void {
   const json = JSON.stringify(cleanUi(raw));
   if (json.length <= MAX_BYTES) writeFileSync(uiPath(), json);
+}
+
+/** The part every device shows the same, and when the layout last changed here (for sync). */
+export function sharedUi(): { ui: SharedUi; at: number } | null {
+  if (!existsSync(uiPath())) return null;
+  const { order, blanks, drafts, attachments } = loadUi();
+  // An empty layout is a reset (Harv started with "reopen tabs" off), not tabs the user closed:
+  // it must not close every tab on the other device. A dashboard always has at least one tab.
+  if (order.length === 0) return null;
+  return { ui: { order, blanks, drafts, attachments }, at: statSync(uiPath()).mtimeMs };
+}
+
+/** The other device's tabs and drafts, kept with this device's own tab, tools and folders. */
+export function applySharedUi(shared: SharedUi): void {
+  const { order, blanks, drafts, attachments } = shared;
+  saveUi({ ...loadUi(), order, blanks, drafts, attachments });
 }
 
 /** Starts the dashboard empty next time (the "reopen tabs" setting is off). */

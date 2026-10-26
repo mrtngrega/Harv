@@ -29,7 +29,7 @@ import { commandName, hiddenReason } from './commands.ts';
 import { formatTranscript, type HandOff, type ProjectTools } from './chatTools.ts';
 import { osPath, pathKey } from '../platform.ts';
 import { loadSettings, projectsDir } from '../settings.ts';
-import type { ProjectServerMessage } from '@harv/shared';
+import type { ProjectServerMessage, SharedUi } from '@harv/shared';
 import { ChatSession } from './session.ts';
 
 /** One /report note for the ideas file: `- [25 Oct 13:05 · PC · chat name] text`, on one line. */
@@ -963,6 +963,45 @@ export class ChatManager {
   /** Makes a new project's GitHub repo and returns its remote; replaced in tests. */
   createRepo = createGitHubRepo;
   private pulling = false;
+  /** After each pull: which projects have work here the other device can't get yet (sync tells it). */
+  onProjectStates?: (states: Record<string, boolean>) => void;
+  /** Projects with unpushed work on the other device, already told ("name@device"). */
+  private peerUnsaved = new Set<string>();
+
+  /**
+   * The other device has work in a project that isn't pushed yet (uncommitted, or committed
+   * but not pushed), so this device's copy is behind without knowing it. Said once per change.
+   */
+  peerProjectState(project: string, device: string, unsaved: boolean): void {
+    const key = `${project}@${device}`;
+    if (!unsaved) return void this.peerUnsaved.delete(key);
+    if (this.peerUnsaved.has(key)) return;
+    this.peerUnsaved.add(key);
+    this.projectNotice(
+      `"${project}" has work on ${device} that isn't pushed yet, so it's missing here. Commit and push it there (or ask Harv there) before working on it here.`,
+    );
+  }
+
+  /**
+   * The other device's tabs and drafts (sync): chats it has open open here too, and ones it
+   * closed close (not while they're working). The dashboards then take the order and drafts.
+   */
+  applyRemoteUi(ui: SharedUi): void {
+    const wanted = new Set(ui.order.filter((id) => !ui.blanks.includes(id)));
+    for (const id of wanted) {
+      if (this.store.exists(id) && !this.store.openChats().some((c) => c.id === id)) {
+        this.store.setOpen(id, true);
+        const chat = this.store.snapshot(id);
+        if (chat) this.broadcast({ type: 'chat.opened', chat, focus: false });
+      }
+    }
+    for (const c of this.store.openChats()) {
+      if (wanted.has(c.id) || this.busy(c.id)) continue;
+      this.close(c.id);
+      this.broadcast({ type: 'chat.removed', tabId: c.id });
+    }
+    this.publishHistory();
+  }
 
   private projectNotice(message: string) {
     this.broadcast({ type: 'project.notice', message });
@@ -1028,11 +1067,16 @@ export class ChatManager {
     if (this.pulling) return;
     this.pulling = true;
     try {
+      const states: Record<string, boolean> = {};
       for (const p of this.store.projects()) {
         if (!p.remote || !existsSync(p.path)) continue;
         if (this.store.openChats().some((c) => c.projectId === p.id && this.busy(c.id))) continue;
-        if ((await pullProject(p.path)) === 'pulled') this.projectNotice(`Pulled the other device's new work into "${p.name}".`);
+        const result = await pullProject(p.path);
+        if (result === 'pulled') this.projectNotice(`Pulled the other device's new work into "${p.name}".`);
+        if (result !== 'failed' && result !== 'no-remote')
+          states[p.name] = result === 'dirty' || result === 'unpushed' || result === 'diverged';
       }
+      this.onProjectStates?.(states);
     } finally {
       this.pulling = false;
     }

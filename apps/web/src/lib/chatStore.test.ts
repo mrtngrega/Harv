@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { answerStart, applyChatEvent, chat, getChatState, startQuestions } from './chatStore.ts';
+import { answerStart, applyChatEvent, chat, getChatState, startQuestions, syncLayout } from './chatStore.ts';
 import { getDrafts, getDraftTexts } from './drafts.ts';
 
 vi.mock('./socket.ts', () => ({ onServerMessage: () => {}, sendMessage: () => true }));
@@ -194,5 +194,25 @@ describe('messages typed while Harv answers', () => {
     expect(tab(id).queued).toEqual([]);
     expect(getDraftTexts()[id]).toBe('fix the wheel');
     expect(getDrafts()[id]?.map((p) => p.file)).toEqual([file]);
+  });
+});
+
+describe("the other device's tabs (sync)", () => {
+  it('takes its blank tabs, order and drafts', () => {
+    const a = openTab();
+    applyChatEvent({ type: 'chat.renamed', tabId: a, title: 'kept' });
+    chat.setActive(a);
+    syncLayout({
+      order: ['remote-blank', a],
+      blanks: ['remote-blank'],
+      drafts: { 'remote-blank': 'typed on the laptop' },
+      attachments: {},
+    });
+    const s = getChatState();
+    // Blank tabs are as on the laptop (saved chats open and close through the server).
+    expect(s.tabs.filter((t) => !t.stored && !t.busy).map((t) => t.id)).toEqual(['remote-blank']);
+    expect(s.tabs[0]!.id).toBe('remote-blank');
+    expect(getDraftTexts()['remote-blank']).toBe('typed on the laptop');
+    expect(s.tabs.some((t) => t.id === s.activeId)).toBe(true);
   });
 });

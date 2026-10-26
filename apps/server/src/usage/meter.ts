@@ -262,6 +262,11 @@ export class UsageMeter {
     }
   }
 
+  /** The other device showed this warning ("session:90"): it isn't shown here too. */
+  markWarned(key: string): void {
+    this.warned.add(key);
+  }
+
   /** A limit was hit. Until `until` (epoch ms), messages queue instead of being sent. */
   pause(until: number | null): void {
     // An unknown reset, or one already past (the server hasn't rolled over yet): look again in a few minutes.

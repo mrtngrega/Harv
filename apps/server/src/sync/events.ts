@@ -1,4 +1,6 @@
-import type { LineKind } from '@harv/shared';
+import type { LineKind, SharedUi } from '@harv/shared';
+
+export type { SharedUi };
 
 /**
  * One change, as a device writes it to its own log (docs/PLAN.md §6m). The other device
@@ -32,7 +34,21 @@ export type SyncEvent =
   /** One shared setting (newest wins per key). */
   | { t: 'setting'; key: string; value: unknown; at: number }
   /** A row of the router's log, for Harv's own usage stats (sent again when its tokens or feedback arrive). */
-  | { t: 'route'; row: RouteRow };
+  | { t: 'route'; row: RouteRow }
+  /** A note in a project's Claude Code memory (null: deleted), by project name. `base` as for memory. */
+  | { t: 'pmemory'; project: string; name: string; content: string | null; base: string | null; at: number }
+  /**
+   * A file in a synced folder (`root`: "workspace" for attachments and Harv's files, "home" for
+   * the background photo) by its path there. Its bytes are a sealed blob in the device's folder
+   * of the repo (`blobs/<hash>.hrv`); null hash: deleted.
+   */
+  | { t: 'blob'; root: string; path: string; hash: string | null; base: string | null; size: number; at: number }
+  /** The shared part of the dashboard's layout: open tabs, their order, unsent drafts (newest wins). */
+  | { t: 'ui'; ui: SharedUi; at: number }
+  /** A plan-usage warning was shown ("session:90"), so the other device doesn't show it again. */
+  | { t: 'warned'; key: string; at: number }
+  /** A project's work on this device that the other one can't have yet: uncommitted or unpushed changes. */
+  | { t: 'pstate'; project: string; unsaved: boolean; at: number };
 
 export interface RouteRow {
   uid: string;

@@ -33,6 +33,9 @@ export interface UiState {
   attachments: Record<string, Attachment[]>;
 }
 
+/** The part of the layout every device shows the same (synced, docs/PLAN.md §6m): tabs, their order, drafts. */
+export type SharedUi = Pick<UiState, 'order' | 'blanks' | 'drafts' | 'attachments'>;
+
 export const EMPTY_UI: UiState = {
   activeId: null,
   settingsOpen: false,
@@ -122,4 +125,7 @@ export type ToolServerMessage =
    * Terminal output; `reset` replaces what the view shows (the replay after attach).
    * `restored`: plain lines from before a restart, shown in grey above the new shell.
    */
-  { type: 'term.data'; id: string; data: string; reset?: boolean; restored?: string[] } | { type: 'term.exit'; id: string; code: number };
+  | { type: 'term.data'; id: string; data: string; reset?: boolean; restored?: string[] }
+  | { type: 'term.exit'; id: string; code: number }
+  /** The other device's tabs and drafts are newer: the dashboard shows them (its own tab and tools stay). */
+  | { type: 'ui.synced'; ui: SharedUi };

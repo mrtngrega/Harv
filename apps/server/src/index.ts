@@ -21,7 +21,7 @@ import { ChatStore } from './store/chats.ts';
 import { RouteStore } from './store/routes.ts';
 import { UsageMeter } from './usage/meter.ts';
 import { loadSettings, updateSettings, workDir } from './settings.ts';
-import { loadUi, resetUi, saveUi } from './ui.ts';
+import { applySharedUi, loadUi, resetUi, saveUi, sharedUi } from './ui.ts';
 import { cleanPath, listFolder, openWithDefault, places, previewType } from './tools/files.ts';
 import {
   copyItems,
@@ -42,6 +42,8 @@ import { IS_WINDOWS, PLATFORM } from './platform.ts';
 import { TerminalManager } from './tools/terminal.ts';
 import { startWatchdog } from './watchdog/monitor.ts';
 import { SyncEngine } from './sync/engine.ts';
+import { claudeMemoryDir } from './sync/files.ts';
+import { WORKSPACE } from './safety/paths.ts';
 import { SyncStore } from './sync/store.ts';
 
 /** The file API's answer for passwords, keys and logins: the same rule as Harv's own tools. */
@@ -105,7 +107,11 @@ const meter = new UsageMeter(
       chats.refreshStatus();
     },
     onResume: () => void chats.flushQueue(),
-    onWarning: (warning) => broadcast({ type: 'usage.warning', warning }),
+    onWarning: (warning) => {
+      broadcast({ type: 'usage.warning', warning });
+      // The other device shares the plan: it doesn't need to say the same.
+      sync.noteWarned(`${warning.kind}:${warning.threshold}`);
+    },
   },
   () => routes.summary(),
   undefined,
@@ -147,13 +153,45 @@ const chats = new ChatManager(
   (status) => broadcast({ type: 'harv.status', status, detail: chats.statusDetail }),
 );
 const syncStore = new SyncStore(join(HARV_HOME, 'harv.db'));
-const sync = new SyncEngine(HARV_HOME, store, routes, syncStore, {
-  chats: (changes) => chats.remote(changes),
-  settings: (settings) => broadcast({ type: 'settings', settings }),
-  status: (status) => broadcast({ type: 'sync.status', status }),
-  log: (message, data) => app.log.warn(data ?? {}, message),
-  synced: () => void chats.pullProjects(),
-});
+const BACKGROUND = /^background\.(jpg|jpeg|png|webp)$/;
+const sync = new SyncEngine(
+  HARV_HOME,
+  store,
+  routes,
+  syncStore,
+  {
+    chats: (changes) => chats.remote(changes),
+    settings: (settings) => broadcast({ type: 'settings', settings }),
+    status: (status) => broadcast({ type: 'sync.status', status }),
+    log: (message, data) => app.log.warn(data ?? {}, message),
+    synced: () => void chats.pullProjects(),
+    ui: (ui) => {
+      chats.applyRemoteUi(ui);
+      applySharedUi(ui);
+      broadcast({ type: 'ui.synced', ui });
+    },
+    warned: (key) => meter.markWarned(key),
+    projectState: (project, device, unsaved) => chats.peerProjectState(project, device, unsaved),
+    fileWritten: (root, path) => {
+      if (root === 'home' && BACKGROUND.test(path)) broadcast({ type: 'background', version: backgroundVersion() });
+    },
+  },
+  undefined,
+  undefined,
+  undefined,
+  // Everything else Harv needs on both devices (docs/PLAN.md §6m): each project's Claude Code memory,
+  // attachments and Harv's own files, the background photo, and the open tabs with their drafts.
+  {
+    projectMemory: () =>
+      Object.fromEntries(store.projects().flatMap((p) => (existsSync(p.path) ? [[p.name, claudeMemoryDir(p.path)]] : []))),
+    folders: {
+      workspace: { dir: WORKSPACE, accept: () => true },
+      home: { dir: HARV_HOME, accept: (rel) => BACKGROUND.test(rel), beforeWrite: removeBackground, shallow: true },
+    },
+    ui: sharedUi,
+  },
+);
+chats.onProjectStates = (states) => sync.noteProjectStates(states);
 // "Reopen tabs" off: Harv starts with no tabs (the chats stay in history).
 if (!loadSettings().restoreTabs) {
   for (const c of store.openChats()) store.setOpen(c.id, false);

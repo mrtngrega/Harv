@@ -8,8 +8,9 @@ import { MEMORY_DIR, toSlug } from '../agent/memory.ts';
 import { loadSettings, onSettingsChange, settingsTime, updateSettings } from '../settings.ts';
 import type { ChatStore } from '../store/chats.ts';
 import type { RouteStore } from '../store/routes.ts';
-import { loadKey, newKey, open, saveKey, seal } from './crypto.ts';
-import type { Chunk, SyncEvent } from './events.ts';
+import { loadKey, newKey, open, openBytes, saveKey, seal, sealBytes } from './crypto.ts';
+import type { Chunk, SharedUi, SyncEvent } from './events.ts';
+import { hashBytes, mergeLines, safeRelPath, scanFolder, type FileState } from './files.ts';
 import { SyncRepo } from './git.ts';
 import type { SyncStore } from './store.ts';
 
@@ -31,6 +32,26 @@ export const SHARED_FILES: Record<string, string> = {
 const pad = (n: number) => String(n).padStart(12, '0');
 const isDefault = (key: keyof HarvSettings, value: unknown) => JSON.stringify(DEFAULT_SETTINGS[key]) === JSON.stringify(value);
 
+/** A folder whose files travel: attachments and Harv's own files, or the background photo. */
+export interface SyncFolder {
+  dir: string;
+  /** Which files of it travel (a path relative to `dir`, forward slashes). */
+  accept: (rel: string) => boolean;
+  /** Before a file from the other device is written (the background photo replaces any other). */
+  beforeWrite?: (rel: string) => void;
+  /** Only the folder's own files, not its subfolders. */
+  shallow?: boolean;
+}
+
+/** More of this device that syncs (docs/PLAN.md §6m "Everything Harv needs"); left out in older tests. */
+export interface SyncExtras {
+  /** Each registered project's Claude Code memory folder, by project name. */
+  projectMemory?: () => Record<string, string>;
+  folders?: Record<string, SyncFolder>;
+  /** The dashboard layout's shared part, and when it last changed here. */
+  ui?: () => { ui: SharedUi; at: number } | null;
+}
+
 /** What changed in the chats after applying the other device's events, for the dashboards. */
 export interface RemoteChanges {
   lines: Map<string, StoredLine[]>;
@@ -46,6 +67,9 @@ export interface RemoteChanges {
   /** Anything that changes the history list. */
   history: boolean;
 }
+
+/** Everything one sync applied: the chat changes, and the newest layout from the other device. */
+type Applied = RemoteChanges & { ui?: SharedUi };
 
 /** How the engine reads and changes settings (replaced in tests, where two devices share one process). */
 export interface SettingsPort {
@@ -70,6 +94,14 @@ export interface SyncHooks {
   log(message: string, data?: Record<string, unknown>): void;
   /** A sync went through: the projects can be pulled now. */
   synced?(): void;
+  /** The other device's tabs and drafts are newer: show them here too (after `chats`). */
+  ui?(ui: SharedUi): void;
+  /** The other device showed this plan-usage warning. */
+  warned?(key: string): void;
+  /** A project has (or no longer has) work on the other device that isn't pushed yet. */
+  projectState?(project: string, device: string, unsaved: boolean): void;
+  /** A file from the other device was written (`root`, `path`): the background photo may have changed. */
+  fileWritten?(root: string, path: string): void;
 }
 
 /** This device's id, made once (~/.harv/device.json). */
@@ -113,6 +145,7 @@ export class SyncEngine {
     private memoryDir = MEMORY_DIR,
     private settings: SettingsPort = realSettings,
     private files: Record<string, string> = SHARED_FILES,
+    private extra: SyncExtras = {},
   ) {
     this.id = deviceId(home);
     this.repo = new SyncRepo(join(home, 'sync'), this.id);
@@ -245,6 +278,9 @@ export class SyncEngine {
       // Local memory edits are noted before the other device's are applied, which would hide them.
       this.diffMemory();
       this.diffFiles();
+      this.diffProjectMemory();
+      this.diffFolders();
+      this.diffUi();
       this.applyPeers(key);
       this.writeChunks(key);
       await this.repo.commit(`${this.name}: changes up to ${this.db.get('written', 0)}`);
@@ -326,8 +362,11 @@ export class SyncEngine {
       const at = this.settingAt(key, settings);
       if (at) this.db.add({ t: 'setting', key, value: settings[key], at });
     }
-    // Memory files go out through the next diff (nothing is marked as sent yet).
+    // Memory files go out through the next diff (nothing is marked as sent yet), and so do the others.
     this.db.set('memory', {});
+    for (const project of this.db.withPrefix('pmemory:').keys()) this.db.set(`pmemory:${project}`, {});
+    for (const root of Object.keys(this.extra.folders ?? {})) this.db.set(`folder:${root}`, {});
+    this.db.set('uiSent', null);
     for (const name of Object.keys(this.files)) this.db.set(`file:${name}`, null);
     this.db.set('snapshot', true);
     this.record(true);
@@ -392,6 +431,7 @@ export class SyncEngine {
       const file = `${pad(from)}-${pad(to)}.hrv`;
       const chunk: Chunk = { v: 1, device: { id: this.id, name: this.name }, events };
       mkdirSync(join(this.repo.dir, this.id), { recursive: true });
+      for (const { e } of events) if (e.t === 'blob' && e.hash) this.writeBlob(key, e.root, e.path, e.hash);
       writeFileSync(join(this.repo.dir, this.id, file), seal(key, `${this.id}/${file}`, chunk));
       written = to;
       this.db.set('written', written);
@@ -400,7 +440,7 @@ export class SyncEngine {
 
   /** Applies what the other devices wrote since their cursors. */
   private applyPeers(key: Buffer) {
-    const changes: RemoteChanges = {
+    const changes: Applied = {
       lines: new Map(),
       forks: new Set(),
       renamed: new Map(),
@@ -431,7 +471,7 @@ export class SyncEngine {
             if (e.t === 'file') this.applyFile(e);
             continue;
           }
-          const changed = this.apply(e, chunk.device.name, changes);
+          const changed = this.apply(e, chunk.device.name, changes, key, peer);
           if (changed) settings = changed;
           last = Math.max(last, e.t === 'route' ? e.row.at : e.at);
         }
@@ -452,6 +492,7 @@ export class SyncEngine {
       this.hooks.chats(changes);
     }
     if (settings) this.hooks.settings(settings);
+    if (changes.ui) this.hooks.ui?.(changes.ui);
     this.db.set('filesReplayed', true);
   }
 
@@ -461,7 +502,7 @@ export class SyncEngine {
   }
 
   /** One event from the other device. Returns the new settings when a shared setting changed. */
-  private apply(e: SyncEvent, deviceName: string, changes: RemoteChanges): HarvSettings | undefined {
+  private apply(e: SyncEvent, deviceName: string, changes: Applied, key: Buffer, peer: string): HarvSettings | undefined {
     switch (e.t) {
       case 'chat': {
         if (this.deleted(e.chat)) break;
@@ -515,6 +556,27 @@ export class SyncEngine {
         break;
       case 'project':
         changes.projects.push({ name: e.name, remote: e.remote, removed: e.removed === true });
+        break;
+      case 'pmemory':
+        this.applyProjectMemory(e);
+        break;
+      case 'blob':
+        this.applyBlob(e, key, peer);
+        break;
+      case 'ui':
+        // Newest wins: a layout changed here since then stays (and goes to the other device).
+        if (e.at > this.db.get('uiAt', 0)) {
+          this.db.set('uiAt', e.at);
+          this.db.set('uiSent', hashBytes(JSON.stringify(e.ui)));
+          changes.ui = e.ui;
+        }
+        break;
+      case 'warned':
+        // An old one (from an earlier 5-hour window) means nothing now.
+        if (Date.now() - e.at < 5 * 60 * 60 * 1000) this.hooks.warned?.(e.key);
+        break;
+      case 'pstate':
+        this.hooks.projectState?.(e.project, deviceName, e.unsaved);
         break;
     }
     return undefined;
@@ -587,5 +649,169 @@ export class SyncEngine {
     if (next !== this.readFile(e.name)) writeFileSync(path, next, 'utf8');
     // What the other device has counts as sent; a merge differs from it, so the next diff sends the merge.
     this.db.set(`file:${e.name}`, e.content);
+  }
+
+  // ── Everything else Harv needs on both devices (docs/PLAN.md §6m) ──
+
+  /** A plan-usage warning shown here: the other device needn't show it again. */
+  noteWarned(key: string): void {
+    if (this.enabled && this.db.get('snapshot', false)) this.db.add({ t: 'warned', key, at: Date.now() });
+  }
+
+  /** Whether each project has work here the other device can't get yet (after each pull); only changes are sent. */
+  noteProjectStates(states: Record<string, boolean>): void {
+    if (!this.enabled || !this.db.get('snapshot', false)) return;
+    for (const [project, unsaved] of Object.entries(states)) {
+      if (this.db.get(`pstate:${project}`, false) === unsaved) continue;
+      this.db.set(`pstate:${project}`, unsaved);
+      this.db.add({ t: 'pstate', project, unsaved, at: Date.now() });
+    }
+  }
+
+  /** Project memory notes changed here since the last sync become events (per project, by name). */
+  private diffProjectMemory() {
+    for (const [project, dir] of Object.entries(this.extra.projectMemory?.() ?? {})) {
+      this.applyPendingMemory(project);
+      const sent = this.db.get<Record<string, string>>(`pmemory:${project}`, {});
+      const now: Record<string, string> = {};
+      if (existsSync(dir)) {
+        for (const f of readdirSync(dir).filter((f) => f.endsWith('.md'))) {
+          const content = readFileSync(join(dir, f), 'utf8');
+          now[f] = hash(content)!;
+          if (sent[f] !== now[f]) {
+            this.db.add({ t: 'pmemory', project, name: f, content, base: sent[f] ?? null, at: statSync(join(dir, f)).mtimeMs });
+          }
+        }
+      }
+      for (const f of Object.keys(sent)) {
+        if (!(f in now)) this.db.add({ t: 'pmemory', project, name: f, content: null, base: sent[f]!, at: Date.now() });
+      }
+      this.db.set(`pmemory:${project}`, now);
+    }
+  }
+
+  /** Notes for a project this device doesn't have yet wait until it does (it may still be cloning). */
+  private applyPendingMemory(project: string) {
+    const pending = this.db.get<Record<string, Extract<SyncEvent, { t: 'pmemory' }>>>('pmemoryPending', {});
+    const mine = Object.entries(pending).filter(([, e]) => e.project === project);
+    if (!mine.length) return;
+    for (const [id] of mine) delete pending[id];
+    this.db.set('pmemoryPending', pending);
+    for (const [, e] of mine) this.applyProjectMemory(e);
+  }
+
+  /**
+   * A project memory note from the other device. Edited on both sides: the newer one, plus the
+   * other's lines it lacks (MEMORY.md is a list of lines, and no note gets lost).
+   */
+  private applyProjectMemory(e: Extract<SyncEvent, { t: 'pmemory' }>) {
+    if (!SAFE_NAME.test(e.name) || !e.name.endsWith('.md') || e.name.includes('..')) return;
+    const dir = this.extra.projectMemory?.()[e.project];
+    if (!dir) {
+      const pending = this.db.get<Record<string, typeof e>>('pmemoryPending', {});
+      pending[`${e.project}/${e.name}`] = e;
+      this.db.set('pmemoryPending', pending);
+      return;
+    }
+    const path = join(dir, e.name);
+    const current = existsSync(path) ? readFileSync(path, 'utf8') : null;
+    if (current !== e.content) {
+      if (e.content === null) {
+        // Deleted there: here too, unless it changed here since.
+        if (current !== null && hash(current) === e.base) rmSync(path, { force: true });
+      } else if (current === null || hash(current) === e.base) {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(path, e.content, 'utf8');
+      } else {
+        const localAt = statSync(path).mtimeMs;
+        // A tie goes by the text, so both devices pick the same one.
+        const remoteWins = e.at > localAt || (e.at === localAt && e.content > current);
+        const merged = remoteWins ? mergeLines(e.content, current) : mergeLines(current, e.content);
+        if (merged !== current) writeFileSync(path, merged, 'utf8');
+      }
+    }
+    // What the other device has counts as sent; a merge (or a kept note) differs from it, so the next diff sends it.
+    const sent = this.db.get<Record<string, string>>(`pmemory:${e.project}`, {});
+    if (e.content === null) delete sent[e.name];
+    else sent[e.name] = hash(e.content)!;
+    this.db.set(`pmemory:${e.project}`, sent);
+  }
+
+  /** Files added, changed or deleted in the synced folders become events; their bytes go out with the chunk. */
+  private diffFolders() {
+    for (const [root, folder] of Object.entries(this.extra.folders ?? {})) {
+      const sent = this.db.get<Record<string, FileState>>(`folder:${root}`, {});
+      const now = scanFolder(folder.dir, folder.accept, sent, folder.shallow);
+      for (const [rel, st] of Object.entries(now)) {
+        if (sent[rel]?.hash === st.hash) continue;
+        this.db.add({ t: 'blob', root, path: rel, hash: st.hash, base: sent[rel]?.hash ?? null, size: st.size, at: st.mtime });
+      }
+      for (const [rel, st] of Object.entries(sent)) {
+        // A file that grew too big to travel is still there: that isn't a delete.
+        if (!(rel in now) && !existsSync(join(folder.dir, ...rel.split('/'))))
+          this.db.add({ t: 'blob', root, path: rel, hash: null, base: st.hash, size: 0, at: Date.now() });
+      }
+      this.db.set(`folder:${root}`, now);
+    }
+  }
+
+  /** The file's bytes, sealed into this device's folder of the repo (once per content). */
+  private writeBlob(key: Buffer, root: string, rel: string, fileHash: string) {
+    const out = join(this.repo.dir, this.id, 'blobs', `${fileHash}.hrv`);
+    if (existsSync(out)) return;
+    const folder = this.extra.folders?.[root];
+    const src = folder && join(folder.dir, ...rel.split('/'));
+    if (!src || !existsSync(src)) return;
+    const data = readFileSync(src);
+    // Changed again since: that version goes out with its own event.
+    if (hashBytes(data) !== fileHash) return;
+    mkdirSync(join(this.repo.dir, this.id, 'blobs'), { recursive: true });
+    writeFileSync(out, sealBytes(key, `blobs/${fileHash}`, data));
+  }
+
+  /** A file from the other device. Changed on both sides: the newer one wins (files aren't merged). */
+  private applyBlob(e: Extract<SyncEvent, { t: 'blob' }>, key: Buffer, peer: string) {
+    const folder = this.extra.folders?.[e.root];
+    if (!folder || !safeRelPath(e.path) || !folder.accept(e.path)) return;
+    const path = join(folder.dir, ...e.path.split('/'));
+    const sent = this.db.get<Record<string, FileState>>(`folder:${e.root}`, {});
+    const current = existsSync(path) ? hashBytes(readFileSync(path)) : null;
+    const remember = () => {
+      if (existsSync(path)) {
+        const st = statSync(path);
+        sent[e.path] = { hash: hashBytes(readFileSync(path)), size: st.size, mtime: st.mtimeMs };
+      } else delete sent[e.path];
+      this.db.set(`folder:${e.root}`, sent);
+    };
+    if (current === e.hash) return remember();
+    // Not the version the other device replaced (changed here too, or never the same): the newer one stays.
+    if (current !== null && current !== e.base && statSync(path).mtimeMs > e.at) return;
+    if (e.hash === null) {
+      if (current !== null && current === e.base) rmSync(path, { force: true });
+      return remember();
+    }
+    const blob = join(this.repo.dir, peer, 'blobs', `${e.hash}.hrv`);
+    if (!existsSync(blob)) {
+      this.hooks.log('Sync: a file from the other device came without its contents', { path: e.path });
+      return;
+    }
+    const data = openBytes(key, `blobs/${e.hash}`, readFileSync(blob));
+    folder.beforeWrite?.(e.path);
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, data);
+    remember();
+    this.hooks.fileWritten?.(e.root, e.path);
+  }
+
+  /** The dashboard layout's shared part changed here since the last sync: it goes out (newest wins on the other side). */
+  private diffUi() {
+    const now = this.extra.ui?.();
+    if (!now) return;
+    const h = hashBytes(JSON.stringify(now.ui));
+    if (h === this.db.get<string | null>('uiSent', null)) return;
+    const at = Math.max(now.at, this.db.get('uiAt', 0) + 1);
+    this.db.set('uiSent', h);
+    this.db.set('uiAt', at);
+    this.db.add({ t: 'ui', ui: now.ui, at });
   }
 }

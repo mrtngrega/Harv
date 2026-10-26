@@ -48,6 +48,23 @@ export function dropDrafts(tabId: string): void {
   drafts.set(({ [tabId]: _gone, ...rest }) => rest);
 }
 
+/**
+ * The other device's drafts (sync): they replace these, text and ready files alike. Files
+ * still uploading here stay.
+ */
+export function replaceDrafts(text: Record<string, string>, files: Record<string, Attachment[]>): void {
+  texts.set(() => ({ ...text }));
+  drafts.set((all) => {
+    const out: Record<string, Pending[]> = {};
+    for (const id of new Set([...Object.keys(all), ...Object.keys(files)])) {
+      const uploading = (all[id] ?? []).filter((p) => !p.file && !p.error);
+      const ready = (files[id] ?? []).map((file) => ({ key: crypto.randomUUID(), name: file.name, size: file.size, file }));
+      if (uploading.length || ready.length) out[id] = [...ready, ...uploading];
+    }
+    return out;
+  });
+}
+
 /** Puts back drafts saved before a restart. */
 export function restoreDrafts(text: Record<string, string>, files: Record<string, Attachment[]>): void {
   texts.set((all) => ({ ...text, ...all }));

@@ -10,13 +10,14 @@ import type {
   LineKind,
   ModelChoice,
   QueuedMessage,
+  SharedUi,
   SlashCommandInfo,
   ToolKind,
   UiState,
 } from '@harv/shared';
 import { terminalId } from '@harv/shared';
 import { createStore } from './createStore.ts';
-import { addAttachment, dropDrafts, setDraftText } from './drafts.ts';
+import { addAttachment, dropDrafts, replaceDrafts, setDraftText } from './drafts.ts';
 import { onServerMessage, sendMessage } from './socket.ts';
 
 export type { LineKind };
@@ -192,6 +193,31 @@ function hydrate(chats: ChatSnapshot[], ui?: UiState) {
     const tools = onlyTabs(ui ? { ...ui.tools, ...s.tools } : s.tools, tabs);
     return { ...s, tabs, activeId, settingsOpen, views, tools };
   });
+}
+
+/**
+ * The other device's tabs (sync, docs/PLAN.md §6m): blank tabs come and go as there, every
+ * tab takes its place in the order, and the drafts are the same. Saved chats open and close
+ * through chat.opened / chat.removed, which come first. Which tab shows stays this device's.
+ */
+export function syncLayout(ui: SharedUi): void {
+  store.set((s) => {
+    let tabs = s.tabs.filter((t) => t.stored || t.busy || ui.blanks.includes(t.id));
+    for (const id of ui.blanks) if (!tabs.some((t) => t.id === id)) tabs.push({ ...blankTab(), id });
+    const rank = (id: string) => {
+      const i = ui.order.indexOf(id);
+      return i === -1 ? Infinity : i;
+    };
+    tabs = tabs
+      .map((t, i) => ({ t, i }))
+      .sort((a, b) => rank(a.t.id) - rank(b.t.id) || a.i - b.i)
+      .map(({ t }) => t);
+    if (tabs.length === 0) tabs.push(blankTab());
+    const valid = (id: string | null) => (id === SETTINGS_TAB && s.settingsOpen) || tabs.some((t) => t.id === id);
+    const activeId = valid(s.activeId) ? s.activeId : tabs.at(-1)!.id;
+    return { ...s, tabs, activeId, views: onlyTabs(s.views, tabs), tools: onlyTabs(s.tools, tabs) };
+  });
+  replaceDrafts(ui.drafts, ui.attachments);
 }
 
 function updateTab(id: string, fn: (tab: Tab) => Tab) {
@@ -427,6 +453,8 @@ onServerMessage((msg) => {
       const { projectId: _old, ...rest } = t;
       return { ...rest, stored: true, ...(msg.projectId ? { projectId: msg.projectId } : {}) };
     });
+  } else if (msg.type === 'ui.synced') {
+    if (restored) syncLayout(msg.ui);
   } else if (msg.type.startsWith('chat.') || msg.type === 'history') {
     applyChatEvent(msg as ChatServerMessage);
   }

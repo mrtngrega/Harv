@@ -26,15 +26,24 @@ export function saveKey(path: string, key: Buffer): void {
 
 /** `label` (the chunk's path in the repo) is authenticated too, so a chunk can't be passed off as another. */
 export function seal(key: Buffer, label: string, data: unknown): Buffer {
-  const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
-  cipher.setAAD(Buffer.from(label));
-  const body = Buffer.concat([cipher.update(gzipSync(JSON.stringify(data))), cipher.final()]);
-  return Buffer.concat([MAGIC, iv, cipher.getAuthTag(), body]);
+  return sealBytes(key, label, gzipSync(JSON.stringify(data)));
 }
 
 /** Throws when the key is wrong or the chunk was changed. */
 export function open<T>(key: Buffer, label: string, sealed: Buffer): T {
+  return JSON.parse(gunzipSync(openBytes(key, label, sealed)).toString('utf8')) as T;
+}
+
+/** A file's bytes, sealed as they are (pictures are compressed already). */
+export function sealBytes(key: Buffer, label: string, data: Buffer): Buffer {
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  cipher.setAAD(Buffer.from(label));
+  const body = Buffer.concat([cipher.update(data), cipher.final()]);
+  return Buffer.concat([MAGIC, iv, cipher.getAuthTag(), body]);
+}
+
+export function openBytes(key: Buffer, label: string, sealed: Buffer): Buffer {
   if (sealed.length < MAGIC.length + IV_BYTES + TAG_BYTES || !sealed.subarray(0, MAGIC.length).equals(MAGIC)) {
     throw new Error('Not a Harv sync chunk');
   }
@@ -43,6 +52,5 @@ export function open<T>(key: Buffer, label: string, sealed: Buffer): T {
   const decipher = createDecipheriv('aes-256-gcm', key, iv);
   decipher.setAAD(Buffer.from(label));
   decipher.setAuthTag(tag);
-  const plain = Buffer.concat([decipher.update(sealed.subarray(MAGIC.length + IV_BYTES + TAG_BYTES)), decipher.final()]);
-  return JSON.parse(gunzipSync(plain).toString('utf8')) as T;
+  return Buffer.concat([decipher.update(sealed.subarray(MAGIC.length + IV_BYTES + TAG_BYTES)), decipher.final()]);
 }

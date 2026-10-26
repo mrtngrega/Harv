@@ -663,3 +663,35 @@ describe('found in the test pass (2026-10-25)', () => {
     rmSync(folder, { recursive: true, force: true });
   });
 });
+
+describe('sync of tabs and project work (docs/PLAN.md §6m)', () => {
+  it("opens the other device's tabs here and closes the ones it closed, but not busy ones", async () => {
+    const { chats, store, sent } = setup();
+    for (const id of ['keep', 'gone', 'busy']) {
+      store.ensureChat(id, id);
+      store.addLine(id, { kind: 'you', text: 'hi' });
+    }
+    store.ensureChat('closed', 'closed');
+    store.addLine('closed', { kind: 'you', text: 'hi' });
+    store.setOpen('closed', false);
+    await chats.send('busy', 'working on it', 'sonnet', 'medium');
+    chats.applyRemoteUi({ order: ['keep', 'closed', 'blank1'], blanks: ['blank1'], drafts: {}, attachments: {} });
+    const open = store.openChats().map((c) => c.id);
+    expect(open).toEqual(expect.arrayContaining(['keep', 'closed', 'busy']));
+    expect(open).not.toContain('gone');
+    expect(sent.some((m) => m.type === 'chat.opened' && m.chat.id === 'closed' && m.focus === false)).toBe(true);
+    expect(sent.some((m) => m.type === 'chat.removed' && m.tabId === 'gone')).toBe(true);
+    FakeSession.all.get('busy')!.finish();
+  });
+
+  it('says once that a project has unpushed work on the other device', () => {
+    const { chats, sent } = setup();
+    const said = () => sent.filter((m) => (m as { type: string }).type === 'project.notice').length;
+    chats.peerProjectState('car_radio', 'notebook', true);
+    chats.peerProjectState('car_radio', 'notebook', true);
+    expect(said()).toBe(1);
+    chats.peerProjectState('car_radio', 'notebook', false);
+    chats.peerProjectState('car_radio', 'notebook', true);
+    expect(said()).toBe(2);
+  });
+});
