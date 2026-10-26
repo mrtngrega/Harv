@@ -17,13 +17,15 @@ export interface Classification {
 
 /**
  * Every step AUTO can take, cheapest first, tuned for Claude Pro: Haiku for trivial
- * work, Sonnet as the workhorse, Opus only near the top. "Try harder" climbs one step.
+ * work, Sonnet as the workhorse, Opus near the top. "Try harder" climbs one step.
+ * The user's picks (2026-10-26): nothing below haiku·medium, and Opus starts at medium
+ * (it usually beats Sonnet·high for far less than Opus·high).
  */
 export const LADDER: readonly Pick[] = [
-  { model: 'haiku', effort: 'low' },
   { model: 'haiku', effort: 'medium' },
   { model: 'sonnet', effort: 'medium' },
   { model: 'sonnet', effort: 'high' },
+  { model: 'opus', effort: 'medium' },
   { model: 'opus', effort: 'high' },
   { model: 'opus', effort: 'xhigh' },
   { model: 'opus', effort: 'max' },
@@ -61,19 +63,18 @@ export function pickFor(c: Classification, weeklyUsed?: number, allowFable = fal
   let pick: Pick;
   switch (c.difficulty) {
     case 1:
+    case 2:
       pick = LADDER[0]!;
       break;
-    case 2:
-      pick = LADDER[1]!;
-      break;
     case 3:
-      pick = code ? LADDER[3]! : LADDER[2]!;
+      pick = code ? LADDER[2]! : LADDER[1]!;
       break;
     case 4:
-      pick = LADDER[4]!;
+      pick = LADDER[3]!;
       break;
     case 5:
-      pick = allowFable ? FABLE_STEPS[0]! : LADDER[6]!;
+      // opus·xhigh and max stay for "Try harder".
+      pick = allowFable ? FABLE_STEPS[0]! : LADDER[4]!;
       break;
   }
   const parts = [`${c.category}, difficulty ${c.difficulty}`];
@@ -85,7 +86,8 @@ export function pickFor(c: Classification, weeklyUsed?: number, allowFable = fal
   // Plan awareness: save usage on easy work only; never downgrade difficulty 4–5.
   if (weeklyUsed !== undefined && weeklyUsed >= TRIM_FROM_PERCENT && c.difficulty <= 3 && c.stakes !== 'high') {
     const lower = EFFORT_LEVELS[EFFORT_LEVELS.indexOf(pick.effort) - 1];
-    if (lower) {
+    // Never below the bottom of the ladder (haiku·medium).
+    if (lower && score({ ...pick, effort: lower }) >= score(LADDER[0]!)) {
       pick = { ...pick, effort: lower };
       parts.push(`effort trimmed, ${Math.round(weeklyUsed)}% of the week used`);
     }

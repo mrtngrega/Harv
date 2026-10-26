@@ -49,9 +49,9 @@ export type RuleResult =
 /** Instant rules: no model call. */
 export function instantRules(text: string, files: Attachment[]): RuleResult {
   const t = text.trim();
-  if (!files.length && SMALL_TALK.test(t)) return { kind: 'decide', pick: { model: 'haiku', effort: 'low' }, why: 'small talk' };
+  if (!files.length && SMALL_TALK.test(t)) return { kind: 'decide', pick: { model: 'haiku', effort: 'medium' }, why: 'small talk' };
   if (RISKY_VERB.test(t) && PC_THING.test(t)) {
-    return { kind: 'decide', pick: { model: 'opus', effort: 'high' }, why: 'a risky action on your PC' };
+    return { kind: 'decide', pick: { model: 'opus', effort: 'medium' }, why: 'a risky action on your PC' };
   }
   const code = /```/.test(t) || files.some((f) => CODE_FILE.test(f.name));
   const large = files.reduce((sum, f) => sum + f.size, 0) > LARGE_FILES_BYTES || t.length > 6000;

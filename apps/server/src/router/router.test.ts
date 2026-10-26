@@ -24,34 +24,39 @@ function newRouter(classify: (text: string, ...rest: unknown[]) => Promise<Class
 describe('table', () => {
   it('maps difficulty to model·effort, tuned for Pro', () => {
     expect(([1, 2, 3, 4, 5] as const).map((d) => tag(pickFor(c(d)).pick))).toEqual([
-      'haiku·low',
+      'haiku·medium',
       'haiku·medium',
       'sonnet·medium',
+      'opus·medium',
       'opus·high',
-      'opus·max',
     ]);
     expect(tag(pickFor(c(3, { category: 'code' })).pick)).toBe('sonnet·high');
   });
 
   it('uses Fable for difficulty 5 only when allowed', () => {
     expect(tag(pickFor(c(5), undefined, true).pick)).toBe('fable·high');
-    expect(tag(pickFor(c(4), undefined, true).pick)).toBe('opus·high');
+    expect(tag(pickFor(c(4), undefined, true).pick)).toBe('opus·medium');
   });
 
   it('pushes high stakes one step up', () => {
     expect(tag(pickFor(c(2, { stakes: 'high' })).pick)).toBe('sonnet·medium');
+    expect(tag(pickFor(c(4, { stakes: 'high' })).pick)).toBe('opus·high');
   });
 
   it('trims effort on easy work late in the week, never on hard work', () => {
     expect(tag(pickFor(c(3), 75).pick)).toBe('sonnet·low');
-    expect(tag(pickFor(c(4), 95).pick)).toBe('opus·high');
+    expect(tag(pickFor(c(4), 95).pick)).toBe('opus·medium');
     expect(tag(pickFor(c(3), 50).pick)).toBe('sonnet·medium');
+    // Never below haiku·medium (the user's floor).
+    expect(tag(pickFor(c(1), 95).pick)).toBe('haiku·medium');
   });
 
   it('climbs the ladder from any pick, manual ones included', () => {
     expect(tag(stepUp({ model: 'sonnet', effort: 'medium' })!)).toBe('sonnet·high');
     expect(tag(stepUp({ model: 'sonnet', effort: 'low' })!)).toBe('sonnet·medium');
     expect(tag(stepUp({ model: 'haiku', effort: 'max' })!)).toBe('sonnet·medium');
+    expect(tag(stepUp({ model: 'sonnet', effort: 'high' })!)).toBe('opus·medium');
+    expect(tag(stepUp({ model: 'opus', effort: 'medium' })!)).toBe('opus·high');
     expect(stepUp({ model: 'fable', effort: 'high' })).toBeNull();
     expect(stepUp({ model: 'opus', effort: 'max' })).toBeNull();
     expect(tag(stepUp({ model: 'opus', effort: 'max' }, true)!)).toBe('fable·high');
@@ -68,8 +73,11 @@ describe('rules', () => {
   });
 
   it('sends small talk to Haiku and risky PC actions to Opus', () => {
-    expect(instantRules('thanks!', [])).toMatchObject({ kind: 'decide', pick: { model: 'haiku', effort: 'low' } });
-    expect(instantRules('uninstall the old Java packages', [])).toMatchObject({ kind: 'decide', pick: { model: 'opus' } });
+    expect(instantRules('thanks!', [])).toMatchObject({ kind: 'decide', pick: { model: 'haiku', effort: 'medium' } });
+    expect(instantRules('uninstall the old Java packages', [])).toMatchObject({
+      kind: 'decide',
+      pick: { model: 'opus', effort: 'medium' },
+    });
     expect(instantRules('remove the comma from this sentence', [])).toBeNull();
   });
 
@@ -114,9 +122,9 @@ describe('router', () => {
   it('asks the classifier once, then reuses the decision for follow-ups', async () => {
     const { router, classify } = newRouter(vi.fn(async () => c(4)));
     const first = await router.route('t', 'Plan the migration of my photo library to the NAS with dedup');
-    expect(first.decision).toMatchObject({ model: 'opus', effort: 'high', source: 'classifier' });
+    expect(first.decision).toMatchObject({ model: 'opus', effort: 'medium', source: 'classifier' });
     const next = await router.route('t', 'ok and what about raw files?');
-    expect(next.decision).toMatchObject({ model: 'opus', effort: 'high', source: 'followup' });
+    expect(next.decision).toMatchObject({ model: 'opus', effort: 'medium', source: 'followup' });
     expect(classify).toHaveBeenCalledTimes(1);
   });
 
@@ -161,7 +169,7 @@ describe('router', () => {
     router.finished('t', false, false);
     expect((await router.route('t', 'try again')).decision).toMatchObject({ model: 'sonnet', effort: 'high', source: 'followup' });
     router.finished('t', true, false);
-    expect(router.harder('t', { model: 'sonnet', effort: 'high' })).toMatchObject({ model: 'opus', effort: 'high', source: 'harder' });
+    expect(router.harder('t', { model: 'sonnet', effort: 'high' })).toMatchObject({ model: 'opus', effort: 'medium', source: 'harder' });
     expect(router.harder('t', { model: 'opus', effort: 'max' })).toBeNull();
     expect(log.split().find((r) => r.model === 'sonnet' && r.effort === 'high')).toMatchObject({ harder: 1 });
   });
@@ -192,8 +200,8 @@ describe('router fixes (2026-10-24)', () => {
   it('gives project work at least sonnet·high, but not small talk', async () => {
     const { router } = newRouter(vi.fn(async () => c(1)));
     expect(tag((await router.route('p', 'what does this function return', [], undefined, { project: true })).decision)).toBe('sonnet·high');
-    expect(tag((await router.route('p2', 'thanks', [], undefined, { project: true })).decision)).toBe('haiku·low');
-    expect(tag((await router.route('p3', 'what does this function return')).decision)).toBe('haiku·low');
+    expect(tag((await router.route('p2', 'thanks', [], undefined, { project: true })).decision)).toBe('haiku·medium');
+    expect(tag((await router.route('p3', 'what does this function return')).decision)).toBe('haiku·medium');
   });
 
   it('passes the last lines of the chat to the classifier', async () => {
