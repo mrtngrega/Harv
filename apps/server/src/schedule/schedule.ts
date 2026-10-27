@@ -3,6 +3,7 @@ import type { Schedule } from '@harv/shared';
 // Scheduled tasks (docs/PLAN.md §6s C4): pure timing, tested with a fixed clock.
 
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const HHMM = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 /** The shortest repeat: anything faster would eat the plan. */
 export const MIN_EVERY_MINUTES = 5;
 
@@ -47,9 +48,12 @@ export function describeSchedule(schedule: Schedule): string {
   }
 }
 
-/** What the schedule_task tool takes. Exactly one of at / in_minutes / every_minutes / daily_at. */
+/** What the schedule_task tool takes. Exactly one of at / in_minutes / time / every_minutes / daily_at. */
 export interface ScheduleInput {
   at?: string;
+  /** One run at HH:MM, `days_from_today` days from now (left out: today, or tomorrow if that time has passed). */
+  time?: string;
+  days_from_today?: number;
   in_minutes?: number;
   every_minutes?: number;
   daily_at?: string;
@@ -58,8 +62,21 @@ export interface ScheduleInput {
 
 /** The tool's arguments as a schedule, or an error to tell the model. */
 export function parseSchedule(input: ScheduleInput, now: number): Schedule | { error: string } {
-  const given = [input.at, input.in_minutes, input.every_minutes, input.daily_at].filter((v) => v !== undefined && v !== '');
-  if (given.length !== 1) return { error: 'Give exactly one of at, in_minutes, every_minutes or daily_at.' };
+  const given = [input.at, input.in_minutes, input.time, input.every_minutes, input.daily_at].filter((v) => v !== undefined && v !== '');
+  if (given.length !== 1) return { error: 'Give exactly one of at, in_minutes, time, every_minutes or daily_at.' };
+  if (input.time !== undefined) {
+    // Worked out here, from the real clock: the model's idea of "now" can be hours old in a long chat.
+    const t = HHMM.exec(input.time);
+    if (!t) return { error: `time must be HH:MM (24-hour), not "${input.time}".` };
+    const days = input.days_from_today;
+    if (days !== undefined && !(Number.isInteger(days) && days >= 0 && days <= 366)) return { error: 'days_from_today must be 0 or more.' };
+    const base = new Date(now);
+    let when = new Date(base.getFullYear(), base.getMonth(), base.getDate() + (days ?? 0), Number(t[1]), Number(t[2])).getTime();
+    if (when <= now && days === undefined)
+      when = new Date(base.getFullYear(), base.getMonth(), base.getDate() + 1, Number(t[1]), Number(t[2])).getTime();
+    if (when <= now) return { error: 'That time has passed already today.' };
+    return { kind: 'once', at: when };
+  }
   if (input.in_minutes !== undefined) {
     if (!(input.in_minutes >= 1)) return { error: 'in_minutes must be at least 1.' };
     return { kind: 'once', at: now + Math.round(input.in_minutes * 60_000) };
@@ -75,7 +92,7 @@ export function parseSchedule(input: ScheduleInput, now: number): Schedule | { e
       return { error: `every_minutes must be at least ${MIN_EVERY_MINUTES} (each run uses the user's plan).` };
     return { kind: 'every', minutes: Math.round(input.every_minutes) };
   }
-  const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(input.daily_at ?? '');
+  const m = HHMM.exec(input.daily_at ?? '');
   if (!m) return { error: `daily_at must be HH:MM (24-hour), not "${input.daily_at}".` };
   const days: number[] = [];
   for (const w of input.weekdays ?? []) {

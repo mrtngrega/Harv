@@ -880,8 +880,8 @@ export class ChatManager {
       this.store.setSession(tabId, null);
       this.store.markStale(tabId);
       files = target.uuid
-        ? 'Files weren’t put back: that message was in an earlier Claude session.'
-        : 'Only the chat went back (no file checkpoint for that message).';
+        ? 'Only the chat went back: that message was in an earlier Claude session (before a /fresh or a project switch), so the files Harv changed since then stay as they are (each change still has its own Undo).'
+        : 'Only the chat went back: that message is from before rewind existed, so the files Harv changed since then stay as they are (each change still has its own Undo).';
     }
     this.store.rewindFrom(tabId, target.line, target.uid);
     this.router.forget(tabId);

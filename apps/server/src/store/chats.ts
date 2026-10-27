@@ -376,12 +376,13 @@ export class ChatStore {
   }
 
   snapshot(id: string): ChatSnapshot | null {
-    const row = this.db.prepare('SELECT id, title, context, project_id FROM chats WHERE id = ?').get(id) as
-      { id: string; title: string; context: number | null; project_id: string | null } | undefined;
+    const row = this.db.prepare('SELECT id, title, context, project_id, session_id FROM chats WHERE id = ?').get(id) as
+      { id: string; title: string; context: number | null; project_id: string | null; session_id: string | null } | undefined;
     if (!row) return null;
     const chat = {
       id: row.id,
       title: row.title,
+      ...(row.session_id ? { resumable: true } : {}),
       ...(row.context ? { context: row.context } : {}),
       ...(row.project_id ? { projectId: row.project_id } : {}),
     };

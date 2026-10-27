@@ -262,6 +262,11 @@ const turnStart = (t: Tab): Partial<Tab> => (t.busy && t.startedAt ? {} : { star
 export function applyChatEvent(msg: ChatServerMessage): void {
   switch (msg.type) {
     case 'chat.started': {
+      // A turn runs in it (sent here, on the other device, or by a schedule): the start question is answered.
+      if (startQuestions.get().includes(msg.tabId)) {
+        startQuestions.set((ids) => ids.filter((id) => id !== msg.tabId));
+        markAnswered(msg.tabId);
+      }
       const tag = `${msg.model.split(' ')[0]!.toLowerCase()}·${msg.effort}`;
       const { reason } = msg;
       updateTab(msg.tabId, (t) => {
@@ -438,7 +443,8 @@ export function askOnStart(chats: ChatSnapshot[], startedAt: number | undefined)
   // A reconnect to the same server (no startedAt from an older server) isn't a new start.
   if (!first && !startedAt) return;
   const done = answered();
-  startQuestions.set(chats.filter((c) => c.lines.some((l) => l.kind === 'harv') && !done.includes(c.id)).map((c) => c.id));
+  // Only a chat with a Claude session here has something to continue (one from the other device starts fresh anyway).
+  startQuestions.set(chats.filter((c) => c.resumable && c.lines.some((l) => l.kind === 'harv') && !done.includes(c.id)).map((c) => c.id));
 }
 
 /**

@@ -11,10 +11,28 @@ mod prefs;
 mod tray;
 mod update;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tauri::window::Color;
 use tauri::{AppHandle, Manager, WebviewWindow, WindowEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
-use tauri_plugin_window_state::StateFlags;
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+
+/// Which window change is the latest, so only the last one of a drag or resize saves.
+static WINDOW_CHANGE: AtomicU64 = AtomicU64::new(0);
+
+/// The window's size, place and maximized state, saved a moment after it changes: the plugin
+/// saves only on a clean quit, so a logout, a crash or a kill lost them (found 2026-10-27).
+fn save_window_soon(app: &AppHandle) {
+    let n = WINDOW_CHANGE.fetch_add(1, Ordering::SeqCst) + 1;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(800));
+        if WINDOW_CHANGE.load(Ordering::SeqCst) == n {
+            let _ = app.save_window_state(StateFlags::all() & !StateFlags::VISIBLE);
+        }
+    });
+}
 
 /// Brings the window to the front with the cursor in the `harv>` line.
 pub fn show(app: &AppHandle) {
@@ -199,9 +217,15 @@ fn main() {
         })
         .on_window_event(|window, event| {
             // × hides to the tray: replies and background tasks go on. Quit is in the tray menu.
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                WindowEvent::Resized(_) | WindowEvent::Moved(_) => {
+                    save_window_soon(window.app_handle())
+                }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())

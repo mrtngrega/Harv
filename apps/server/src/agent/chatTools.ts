@@ -181,7 +181,7 @@ export function harvServer(store: ChatStore, tabId: string, delegate?: Delegate,
         ? [
             tool(
               'schedule_task',
-              `Schedule something to run later or on a repeat, when the user asks ("every morning at 8 tell me…", "check X in an hour", "remind me on Friday…"): each run is a new turn in THIS chat, with the prompt as the request, run by Harv's server on this device while Harv is on (a run missed while it's off happens once when it starts). Each run uses the user's plan, so never repeat faster than the user needs. Give exactly one of at, in_minutes, every_minutes, daily_at. Now is ${new Date().toLocaleString('en-GB')} (local time) when this chat started; for "in an hour" use in_minutes.`,
+              `Schedule something to run later or on a repeat, when the user asks ("every morning at 8 tell me…", "check X in an hour", "remind me on Friday…"): each run is a new turn in THIS chat, with the prompt as the request, run by Harv's server on this device while Harv is on (a run missed while it's off happens once when it starts). Each run uses the user's plan, so never repeat faster than the user needs. Give exactly one of in_minutes, time (+ days_from_today), at, every_minutes, daily_at. Don't work out dates or clock times yourself (your sense of "now" can be hours old): "in an hour" is in_minutes 60, "tomorrow at 8" is time "08:00" with days_from_today 1, "at 18:30" is time "18:30"; use at only for a date the user gave. The result says the real time.`,
               {
                 title: z.string().describe('A short name for the list, like "Morning news"'),
                 prompt: z
@@ -192,6 +192,8 @@ export function harvServer(store: ChatStore, tabId: string, delegate?: Delegate,
                   ),
                 at: z.string().optional().describe('One run at this local date and time, like 2026-10-28T08:00'),
                 in_minutes: z.number().optional().describe('One run this many minutes from now'),
+                time: z.string().optional().describe('One run at HH:MM (24-hour, local): today, or tomorrow if that has passed'),
+                days_from_today: z.number().int().optional().describe('With time: that many days from today (1 = tomorrow)'),
                 every_minutes: z.number().optional().describe('Repeat every N minutes (at least 5)'),
                 daily_at: z.string().optional().describe('Repeat every day at HH:MM (24-hour, local)'),
                 weekdays: z.array(z.string()).optional().describe('With daily_at: only on these days (mon, tue, wed, thu, fri, sat, sun)'),

@@ -152,14 +152,18 @@ describe('start question (continue or new session)', () => {
     const line = (kind: 'you' | 'harv' | 'notice', text: string) => ({ kind, text, at: 0 });
     askOnStart(
       [
-        { id: 'talk', title: 'Weather', lines: [line('you', 'rain?'), line('harv', 'No.')] },
+        { id: 'talk', title: 'Weather', resumable: true, lines: [line('you', 'rain?'), line('harv', 'No.')] },
         { id: 'notes', title: '/report x', lines: [line('you', '/report x'), line('notice', 'Noted in harv_report.md.')] },
         { id: 'empty', title: 'New chat', lines: [] },
+        // From the other device: no Claude session here to continue.
+        { id: 'synced', title: 'From the notebook', lines: [line('you', 'hi'), line('harv', 'Hello.')] },
       ],
       1234,
     );
     expect(startQuestions.get()).toEqual(['talk']);
-    startQuestions.set([]);
+    // A turn in it answers the question.
+    applyChatEvent({ type: 'chat.started', tabId: 'talk', model: 'Haiku', effort: 'low', auto: true, reason: 'x' });
+    expect(startQuestions.get()).toEqual([]);
   });
 
   it('asks each chat on its own; "new" swaps just that tab for a blank chat in the same place', () => {

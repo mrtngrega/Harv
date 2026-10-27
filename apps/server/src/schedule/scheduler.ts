@@ -80,7 +80,14 @@ export class Scheduler {
     const next = nextAt
       ? new Date(nextAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
       : '—';
-    return `Scheduled (id ${id}): ${describeSchedule(schedule)}, first run ${next}, as a turn in this chat on this device (it runs while Harv is on; a run missed while it's off happens once when it starts). The user sees it in Settings › Scheduled tasks and can cancel it there.`;
+    const clock = new Date(now).toLocaleString('en-GB', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    return `Scheduled (id ${id}): ${describeSchedule(schedule)}, first run ${next} (it's ${clock} now), as a turn in this chat on this device (it runs while Harv is on; a run missed while it's off happens once when it starts). The user sees it in Settings › Scheduled tasks and can cancel it there.`;
   }
 
   /** The list_scheduled tool. */

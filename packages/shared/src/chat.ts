@@ -144,6 +144,8 @@ export interface ChatSnapshot {
   tasks?: BackgroundTask[];
   /** The chat is in plan mode (only reading and planning until the user approves a plan). */
   planning?: boolean;
+  /** It has a Claude session on this device to continue (a chat from the other device has none yet). */
+  resumable?: boolean;
 }
 
 export interface HistoryItem {

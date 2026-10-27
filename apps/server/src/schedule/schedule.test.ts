@@ -42,6 +42,11 @@ describe('when a scheduled task runs next', () => {
     expect(parseSchedule({ at: '2026-10-01T08:00' }, now)).toMatchObject({ error: expect.stringContaining('passed') });
     expect(parseSchedule({ daily_at: '25:00' }, now)).toMatchObject({ error: expect.any(String) });
     expect(parseSchedule({ in_minutes: 5, daily_at: '08:00' }, now)).toMatchObject({ error: expect.stringContaining('exactly one') });
+    // From the real clock: today, tomorrow when it has passed, or N days on.
+    expect(parseSchedule({ time: '18:30' }, now)).toEqual({ kind: 'once', at: local(2026, 10, 27, 18, 30) });
+    expect(parseSchedule({ time: '08:00' }, now)).toEqual({ kind: 'once', at: local(2026, 10, 28, 8) });
+    expect(parseSchedule({ time: '08:00', days_from_today: 3 }, now)).toEqual({ kind: 'once', at: local(2026, 10, 30, 8) });
+    expect(parseSchedule({ time: '08:00', days_from_today: 0 }, now)).toMatchObject({ error: expect.stringContaining('passed') });
   });
 });
 
