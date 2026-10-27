@@ -423,3 +423,28 @@ The user asked for Harv on their iPhone 13, "fully functional like on a computer
 - **A phone layout** (below `sm`): chat first, full width; tabs as a swipeable strip; history and stats as slide-in sheets; the stats panel's narrow mode as a top bar; attachments from Photos/Files/camera; terminal and file explorer usable but secondary.
 - **Notifications:** iOS web push for home-screen apps (iOS 16.4+): a reply finished, an approval waiting, usage and watchdog warnings. Free (Apple's push service, no Anthropic billing); the push carries only a short title, never chat content.
 - **Limits:** the PC (or notebook) must be on and awake; no Siri or share-sheet integration without a native app.
+
+## 6s. Everything claude.ai and Claude Code can do (planned 2026-10-27, not built)
+
+The user: "i keep discovering things that harv cant do but claude.ai or claude code can, i want him to be able to do everything possible". Audit of the gaps (subscription only still rules: nothing billed, no API key):
+
+**A. Normal chats get the full Claude Code toolset (the biggest gap).** Today only project chats run with `tools: preset claude_code`, `settingSources: ['user', …]` and `strictMcpConfig: false`; a normal chat has `ENABLED_TOOLS` (read, write/edit, shell, web) only. So outside a project Harv has no skills (docx, xlsx, pptx, pdf, deep-research, docs, google-workspace, morning, skill-creator…), no subagents (Task/Agent) or background shells, no TodoWrite, no claude.ai connectors (Claude Docs and whatever else is connected), no plugins, no slash-command skills. Plan: every chat runs with the Claude Code tool preset and the user's skills/plugins/connectors, keeping Harv's own system prompt (persona, memory, chats) and `cwd` = workspace; the gate keeps classifying every call (connector writes stay red, which with Ask before risky actions off means logged, not asked).
+
+**B. What claude.ai shows that Harv's chat doesn't:**
+1. **Artifacts / live previews:** HTML pages, SVG, React and Mermaid rendered live (claude.ai's artifact panel). Harv: a preview pane in the chat (sandboxed iframe for HTML, inline SVG, Mermaid), opened from a file chip or a fenced block. Also the answer to "image generation like claude.ai" (it draws with code too).
+2. **Images inline:** pictures Harv makes or reads (a chart from Python, a screenshot, `design/car-golf.png`) shown in the chat instead of a path.
+3. **Files as cards:** a file Harv creates (docx, xlsx, pdf, zip) shows as a card with Open / Show in folder.
+4. **Rich text:** math (KaTeX), syntax-highlighted code with a Copy button, Mermaid diagrams in replies.
+5. **Voice** (in the report, later).
+
+**C. What Claude Code has that Harv doesn't handle:**
+1. **AskUserQuestion:** Claude Code's multiple-choice question picker. Harv refuses the tool today; it needs a question card (options, Other, multi-select) that answers the tool.
+2. **Plan mode:** EnterPlanMode/ExitPlanMode are allowed, but there's no "approve the plan" card; add one (and a /plan toggle).
+3. **Rewind (checkpoints):** Claude Code's /rewind restores files and the conversation to an earlier message (`enableFileCheckpointing` + `rewindFiles` in the SDK). Harv has per-action Undo only; add "rewind to here" on a message.
+4. **Scheduled and recurring tasks:** /loop and /schedule are refused (terminal-only / cloud). Harv-native instead: "every morning at 8 tell me…", "check X in an hour", run by Harv's own server on the subscription, shown in a list with stop.
+
+**D. Already on par:** web search and fetch, reading images/PDFs, running code (a real shell instead of a sandbox), memory, projects, background agents in project chats, notifications, /compact (passes through), thinking.
+
+**Not possible on the subscription without other tools:** real photo-style image generation (neither claude.ai nor Claude Code has it), Claude in Chrome and computer use (they're tools of Anthropic's own apps, not the SDK; Windows-MCP in the report covers desktop control).
+
+Proposed order: A (one change, most of the gap), C1 + C2 (Harv would otherwise stall on them once A is in), B1–B4, C3, C4.
