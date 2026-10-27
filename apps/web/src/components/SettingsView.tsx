@@ -472,7 +472,7 @@ function Sync() {
         <Toggle
           on={settings.syncEnabled}
           label="Sync with my other devices"
-          hint="Chats, memory, projects and shared settings, encrypted, through your private Git repo. Every 2 minutes and after each reply."
+          hint="Chats, memory, projects and shared settings, encrypted. Within seconds over Tailscale when both devices are on; otherwise through your private Git repo, every 2 minutes and after each reply."
           onChange={(syncEnabled) => updateSettings({ syncEnabled })}
         />
         <TextSetting

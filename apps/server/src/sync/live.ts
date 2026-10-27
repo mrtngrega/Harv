@@ -123,6 +123,8 @@ export class LiveLink {
   private quietUntil = new Map<string, number>();
   private trusted = new Map<string, { ok: boolean; until: number }>();
   private account: string | null = null;
+  /** The last exchange with each peer, for the heartbeat. */
+  private beats = new Map<string, number>();
 
   constructor(
     private engine: SyncEngine,
@@ -207,9 +209,12 @@ export class LiveLink {
         if ((this.quietUntil.get(peer.id) ?? 0) > Date.now() || !inTailnet(peer.ip)) continue;
         try {
           for (let round = 0; round < 50; round++) {
-            const body = await this.engine.liveOutgoing(peer.id);
+            const beat = round === 0 && Date.now() - (this.beats.get(peer.id) ?? 0) > PROBE_MS - 5000;
+            const body = await this.engine.liveOutgoing(peer.id, beat);
             if (!body) break;
-            if (!this.engine.liveAcked(peer.id, await post(peer.ip, peer.port, body))) break;
+            const more = this.engine.liveAcked(peer.id, await post(peer.ip, peer.port, body));
+            this.beats.set(peer.id, Date.now());
+            if (!more) break;
           }
         } catch {
           // Off, asleep or not on the tailnet right now: git carries the changes, live tries again later.

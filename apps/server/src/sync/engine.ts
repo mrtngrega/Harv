@@ -617,7 +617,7 @@ export class SyncEngine {
    * What to send a peer now: the events it hasn't confirmed yet (none for the first exchange,
    * which only asks where its cursor is), or null when there's nothing new.
    */
-  liveOutgoing(peer: string): Promise<Buffer | null> {
+  liveOutgoing(peer: string, heartbeat = false): Promise<Buffer | null> {
     return this.exclusive(() => {
       const key = this.enabled ? loadKey(this.keyPath) : null;
       if (!key || !this.db.get('snapshot', false)) return null;
@@ -640,7 +640,8 @@ export class SyncEngine {
         }
         events.push(ev);
       }
-      if (ack !== null && !events.length) return null;
+      // Nothing new: only a heartbeat goes (it keeps "live" showing while both are on).
+      if (ack !== null && !events.length && !heartbeat) return null;
       const batch: LiveBatch = { v: 1, device: { id: this.id, name: this.name }, events, blobs, at: Date.now() };
       return Buffer.concat([Buffer.from(`${this.id}\n`), seal(key, `live/${this.id}/${peer}`, batch)]);
     });
@@ -678,6 +679,11 @@ export class SyncEngine {
       if (Math.abs(Date.now() - batch.at) > LIVE_MAX_AGE_MS) throw new Error('Too old');
       let cursor = this.db.get(`cursor:${from}`, 0);
       const fresh = batch.events.filter((ev) => ev.seq > cursor);
+      const peerNow = this.db.get<Omit<SyncPeer, 'id'> | null>(`peer:${from}`, null);
+      if (!fresh.length && peerNow) {
+        this.db.set(`peer:${from}`, { ...peerNow, live: Date.now() });
+        this.publish();
+      }
       if (fresh.length && fresh[0]!.seq > cursor + 1) {
         this.soon();
       } else if (fresh.length) {
