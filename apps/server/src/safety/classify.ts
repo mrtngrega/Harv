@@ -266,25 +266,102 @@ const PRIVATE_MCP = /^claude_ai_Claude_Docs$/i;
 
 /** Words in a connector tool's name that mean it sends something to someone. */
 const MCP_SENDS = /(^|[_-])(send|post|reply|forward|share|invite|publish|comment|message|mail|email|tweet|dm|notify)/i;
-/** Words in the user's message that ask Harv to send (English and Slovak), for the sending check. */
-const ASKS_TO_SEND =
-  /\b(send|e-?mail|mail|message|text|post|reply|share|forward|invite|publish|tweet|dm|upload)|\b(po[sš]li|po[sš]lite|odo[sš]li|nap[ií][sš]|odp[ií][sš]|odpovedz|zdie[lľ]aj|prepo[sš]li|zverejni|nahraj|po[sš]la[tť]|odosla[tť])/i;
+/** A whole word or phrase, letters of any language (JS's \b only knows ASCII, so "napíš" would never end). */
+const phrase = (body: string) => new RegExp(`(?<![\\p{L}\\d])(?:${body})(?![\\p{L}\\d])`, 'iu');
 
 /**
- * A call that sends something to someone (mail, messages, posts, invites, shares, uploads).
- * The user's rule (persona rule 12): Harv asks first only when they didn't ask for it.
+ * What in the user's message asks Harv to send (English and Slovak), as real phrases: "text file",
+ * "Postgres", "shared folder" or "napíš mi funkciu" (write me a function) aren't asking (docs/PLAN.md §6u).
+ */
+const ASKS_TO_SEND = [
+  phrase('send|sends|sending|sent|resend'),
+  phrase('e-?mail(s|ed|ing)?'),
+  phrase('mail\\s+(it|this|that|them|him|her|me|us|to)'),
+  phrase('text\\s+(him|her|them|me|us|my|mom|dad|back)'),
+  phrase('(post|posted|posting)\\s+(it|this|that|them|on|to|in)'),
+  phrase('(reply|replies|replied|respond|answer)\\s+(to|him|her|them)'),
+  phrase('forward(s|ed|ing)?'),
+  phrase('share(d)?\\s+((it|this|that|them)\\s+)?(with|to|on)'),
+  phrase('message\\s+(him|her|them|me|us)|dm|tweet|invite|publish'),
+  // "upload … to <somewhere>", but not to a folder on this PC ("to my workspace").
+  phrase(
+    'upload(ed|ing)?\\s+.{0,40}?(?<![\\p{L}])to\\s+(?!((my|the|your)\\s+)?(workspace|folder|desktop|downloads|documents)(?![\\p{L}]))(?!(my|the|your)\\s+(workspace|folder|desktop|downloads|documents)(?![\\p{L}]))[\\p{L}\\d]+',
+  ),
+  // Slovak: pošli / pošlite / pošleš / poslať, odošli, odpíš / odpovedz, prepošli, zdieľaj s, zverejni.
+  phrase('po[sš]l(i|ite|e[sš]|eme|ete)|posla[tť]|odo[sš]li(te)?|odosla[tť]|odp[ií][sš](te)?|odpovedz(te)?|prepo[sš]li(te)?|zverejni(te)?'),
+  phrase('zdie[lľ]aj(te)?\\s+(to\\s+)?(s|so|na)'),
+  // "napíš" only with someone to write to or a message word ("napíš mu", "napíš Jankovi", "napíš mail").
+  /(?<![\p{L}\d])nap[ií][sš](te)?\s+(mu|jej|im|n[aá]m|mail|e-?mail|spr[aá]vu|sms|odpove[dď]|\p{Lu}\p{Ll}+(ovi|e|i))(?![\p{L}\d])/u,
+];
+
+/** Fields a connector's send tool names its recipients in. */
+const RECIPIENT_KEYS =
+  /^(to|cc|bcc|recipients?|emails?|address(es)?|users?|user_?ids?|usernames?|channels?|channel_?ids?|chats?|chat_?ids?|conversations?|threads?|phone|numbers?|invitees?|attendees?|people)$/i;
+
+function recipientsOf(input: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const add = (v: unknown) => {
+    if (typeof v === 'string' && v.trim())
+      out.push(
+        ...v
+          .split(/[,;]/)
+          .map((x) => x.trim())
+          .filter(Boolean),
+      );
+    else if (Array.isArray(v)) v.forEach(add);
+    else if (v && typeof v === 'object') for (const x of Object.values(v as Record<string, unknown>)) if (typeof x === 'string') add(x);
+  };
+  for (const [k, v] of Object.entries(input)) if (RECIPIENT_KEYS.test(k)) add(v);
+  return out;
+}
+
+const wordsOf = (text: string) => text.toLowerCase().match(/[\p{L}\d._%+-]+/gu) ?? [];
+
+/**
+ * The user's message names this recipient: an address or its name part, a name (Slovak endings
+ * allowed: "Peter" in "Petrovi"), or, for an id nobody types ("C04ABC123"), the service ("on Slack").
+ */
+function mentions(message: string, recipient: string, service: string): boolean {
+  const said = message.toLowerCase();
+  const r = recipient.toLowerCase().replace(/^[@#]/, '');
+  if (said.includes(r)) return true;
+  const local = r.includes('@') ? r.split('@')[0]! : r;
+  const parts = local.split(/[\s._-]+/).filter((p) => p.length >= 3 && /\p{L}/u.test(p));
+  const heard = wordsOf(message);
+  if (parts.some((p) => heard.some((w) => w.startsWith(p.slice(0, Math.max(3, p.length - 2)))))) return true;
+  const idLike = /\d/.test(r) && !/\s/.test(r) && !r.includes('@');
+  return idLike && service.length >= 3 && said.includes(service.toLowerCase());
+}
+
+/**
+ * A call that sends something to someone (mail, messages, posts, invites, shares, uploads, GitHub posts,
+ * copies to another machine, scripts that post or mail). The user's rule (persona rule 12): Harv asks
+ * first only when they didn't ask for it.
  */
 export function isSending(tool: string, input: Record<string, unknown>): boolean {
   if (tool.startsWith('mcp__')) {
     const [, server = '', ...rest] = tool.split('__');
     return !PRIVATE_MCP.test(server) && server !== 'harv' && MCP_SENDS.test(rest.join('__'));
   }
-  return SHELL_TOOLS.includes(tool) && sendsData(str(input, 'command'));
+  if (!SHELL_TOOLS.includes(tool)) return false;
+  const command = str(input, 'command');
+  return sendsData(command) || scriptSends(command);
 }
 
 /** The user's message for this turn asked to send something (a free check of its words, no model call). */
 export function asksToSend(message: string): boolean {
-  return ASKS_TO_SEND.test(message);
+  return ASKS_TO_SEND.some((re) => re.test(message));
+}
+
+/**
+ * The user asked for this send: their message asks to send, and a connector send's recipients are
+ * ones it names. Sending to someone else in the same reply still gets a card.
+ */
+export function askedToSend(tool: string, input: Record<string, unknown>, message: string): boolean {
+  if (!asksToSend(message)) return false;
+  if (!tool.startsWith('mcp__')) return true;
+  const service = (tool.split('__')[1] ?? '').replace(/^claude_ai_/, '').replace(/_/g, ' ');
+  return recipientsOf(input).every((r) => mentions(message, r, service));
 }
 
 /**
@@ -376,11 +453,41 @@ const LINUX_SYSTEM =
   /\b(systemctl\s+(?!(status|list-\S+|is-\S+|show|cat)\b)\S+|crontab|mount|umount|useradd|userdel|usermod|passwd|hostnamectl\s+set-\S+|timedatectl\s+set-\S+|nmcli\s+(con|connection|dev|device|radio|networking)\s+(?!(show|status)\b)\S+|sysctl\s+-w|grubby|modprobe|rmmod)\b/i;
 
 /**
+ * Other ways to send (docs/PLAN.md §6u): GitHub CLI commands that post for others to see, and copies
+ * to another machine (scp/rsync to host:path, sftp, ftp).
+ */
+function sendsElsewhere(command: string): boolean {
+  return splitCommand(command).some((segment) => {
+    if (/(?<![\w.-])gh\s+(issue|pr)\s+(create|comment|review|edit|close|reopen|merge)\b/i.test(segment)) return true;
+    if (/(?<![\w.-])gh\s+(release\s+(create|upload|edit)|gist\s+(create|edit))\b/i.test(segment)) return true;
+    if (
+      /(?<![\w.-])gh\s+api\b/i.test(segment) &&
+      /\s(-X|--method)\s*(post|put|patch|delete)\b|\s(-f|-F|--field|--raw-field|--input)\b/i.test(segment)
+    )
+      return true;
+    if (/(?<![\w.-])(sftp|ftp|lftp)(\.exe)?\s/i.test(segment)) return true;
+    if (!/(?<![\w.-])(scp|rsync|pscp)(\.exe)?\s/i.test(segment)) return false;
+    // A remote target is host:path (a drive letter like C:\ isn't a host).
+    return words(segment)
+      .slice(1)
+      .some((w) => /^[^\s:\\/]{2,}:/.test(unquote(w)) && !/^[a-z]:[\\/]/i.test(unquote(w)));
+  });
+}
+
+/** Code in a command (heredocs, `python -c`, `node -e`) that posts or mails: requests.post, smtplib, fetch with POST… */
+export function scriptSends(command: string): boolean {
+  return /\b(requests|httpx|session|client)\.(post|put|patch)\s*\(|\bsmtplib\b|\burlopen\s*\([^)]*data\s*=|\baxios\.(post|put|patch)\b|\bfetch\s*\([^)]*method\s*:\s*['"](post|put|patch)['"]|\bnodemailer\b|\bwebhook(s)?\.(send|execute)\b|\bdiscord(_webhook)?\b[^\n]*\.(send|post)\s*\(/i.test(
+    command,
+  );
+}
+
+/**
  * Sending data out: curl/wget uploads and POST-like requests, PowerShell web requests
  * with a changing method, mail. curl's flags are case-sensitive (`-f` only fails
  * quietly, `-F` posts a form), so they're read word by word.
  */
 export function sendsData(command: string): boolean {
+  if (sendsElsewhere(command)) return true;
   if (/send-mailmessage|\b(invoke-webrequest|invoke-restmethod|iwr|irm)\b.*-method\s+['"]?(post|put|patch|delete)\b/i.test(command))
     return true;
   return splitCommand(command).some((segment) => {
@@ -450,6 +557,7 @@ const RED_REASONS: [Rule, string][] = [
   [/\b(sudo|pkexec)\b/i, 'Runs as administrator.'],
   [/\bgit\s+push\b/i, 'Pushes to a git remote.'],
   [sendsData, 'Sends data over the network.'],
+  [scriptSends, 'Sends data over the network (from a script).'],
   [/(?<![\w.-])(mv|move|ren|rename|move-item|rename-item|cp|copy|xcopy|robocopy|copy-item)\b/i, 'Moves, renames or copies files.'],
   [/\.(ps1|bat|cmd|vbs|js|py|sh)\b|\b(python3?|py|node|powershell|pwsh|cmd|bash)\b/i, 'Runs a script or another shell.'],
   [/\b(set-content|add-content|out-file|new-item|tee)\b|>/i, 'Writes files.'],
@@ -1072,6 +1180,7 @@ const PROJECT_RED: [Rule, string][] = [
   [LINUX_SYSTEM, 'Changes system settings.'],
   [/\b(runas|sudo|pkexec)\b|-verb\s+runas/i, 'Runs as administrator.'],
   [sendsData, 'Sends data over the network.'],
+  [scriptSends, 'Sends data over the network (from a script).'],
   // `curl … | sh` runs whatever the server sends; `curl … | python3 -c '…'` only parses it with code from the command.
   [
     /\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b[^\n]*\|\s*(sudo\s+)?((sh|bash|zsh|iex|invoke-expression|pwsh|powershell)\b(?!\s+-c\b)|(python3?|node|ruby|perl)(\s+-)?\s*($|[|;&\n]))/i,

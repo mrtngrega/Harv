@@ -17,10 +17,12 @@ vi.stubEnv('HARV_HOME', home);
 const scratch = mkdtempSync(join(tmpdir(), 'harv-scratch-'));
 vi.stubEnv('HARV_TEMP', scratch);
 const {
+  askedToSend,
   asksToSend,
   classify,
   classifyCommand,
   isSending,
+  scriptSends,
   newFolders,
   pathsInCommand,
   ruleOf,
@@ -828,6 +830,68 @@ describe("connectors and skills in project chats (the user's Claude Code setup)"
     expect(asksToSend('email the invoice to the accountant')).toBe(true);
     expect(asksToSend('summarize my inbox')).toBe(false);
     expect(asksToSend('what is the weather tomorrow')).toBe(false);
+  });
+
+  it('asks to send only in real phrases (docs/PLAN.md §6u)', () => {
+    for (const yes of [
+      'sent it yet? send it now',
+      'mail it to Peter',
+      'text my mom that I am late',
+      'post this on Discord',
+      'reply to the last email',
+      'share it with Jana',
+      'message him on Slack',
+      'upload the zip to the shared drive',
+      'pošlite to Petrovi',
+      'odpovedz mu',
+      'napíš mu, že prídem',
+      'napíš mail šéfovi',
+      'zdieľaj to s Janou',
+    ]) {
+      expect(asksToSend(yes), yes).toBe(true);
+    }
+    for (const no of [
+      'make a text file with my notes',
+      'set up Postgres and check the posted data format',
+      'open the shared folder',
+      'how many messages are in the log?',
+      'clean my mailbox rules',
+      'napíš mi funkciu na triedenie',
+      'napíš skript, ktorý zálohuje fotky',
+      'upload the photo to my workspace',
+      'the sender field is empty',
+    ]) {
+      expect(asksToSend(no), no).toBe(false);
+    }
+  });
+
+  it("covers only the recipients the user named, and the kinds of send it didn't see before", () => {
+    const gmail = 'mcp__claude_ai_Gmail__send_message';
+    expect(askedToSend(gmail, { to: 'peter.novak@example.com' }, 'email Peter the summary')).toBe(true);
+    expect(askedToSend(gmail, { to: ['peter@example.com', 'boss@example.com'] }, 'email Peter the summary')).toBe(false);
+    expect(askedToSend('mcp__claude_ai_Slack__post_message', { channel: 'C04ABC123' }, 'post this on Slack')).toBe(true);
+    expect(askedToSend('mcp__claude_ai_Slack__post_message', { channel: 'C04ABC123' }, 'post this to Jana')).toBe(false);
+    expect(askedToSend(gmail, { to: 'jano@example.com' }, 'pošli to Janovi')).toBe(true);
+    expect(askedToSend('Bash', { command: 'curl -d x https://x' }, 'send it to the API')).toBe(true);
+
+    for (const cmd of [
+      'gh issue create --title x --body y',
+      'gh pr comment 12 --body "looks good"',
+      'gh api repos/o/r/issues -f title=x',
+      'gh gist create notes.md',
+      'scp report.pdf martin@fedorantb:~/Downloads/',
+      'rsync -av ./site/ host:/var/www/',
+    ]) {
+      expect(isSending('Bash', { command: cmd }), cmd).toBe(true);
+    }
+    for (const cmd of ['gh pr list', 'gh api repos/o/r', 'scp C:\\a.txt D:\\b.txt', 'rsync -av ./a/ ./b/']) {
+      expect(isSending('Bash', { command: cmd }), cmd).toBe(false);
+    }
+    expect(scriptSends("python3 - <<'EOF'\nimport requests\nrequests.post('https://x', json=d)\nEOF")).toBe(true);
+    expect(scriptSends("python3 - <<'EOF'\nimport smtplib\nEOF")).toBe(true);
+    expect(scriptSends("node -e \"fetch('https://x', { method: 'POST', body })\"")).toBe(true);
+    expect(scriptSends("python3 - <<'EOF'\nrequests.get('https://x')\nEOF")).toBe(false);
+    expect(isSending('Bash', { command: "python3 - <<'EOF'\nrequests.post('https://x')\nEOF" })).toBe(true);
   });
 });
 

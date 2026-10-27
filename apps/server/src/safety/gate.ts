@@ -5,7 +5,7 @@ import type { ActionStore } from '../store/actions.ts';
 import { createBackup, readBackup, restoreBackup, type Backup } from './backup.ts';
 import {
   AGENT_TOOLS,
-  asksToSend,
+  askedToSend,
   classify,
   FILE_WRITE_TOOLS,
   isSending,
@@ -224,7 +224,7 @@ export class SafetyGate {
     // Red asks when "Ask before risky actions" is on; yellow too when "confirm changes" is on (both in Settings › Safety).
     // Sending to someone the user didn't ask to send to asks even with cards off (persona rule 12).
     const settings = loadSettings();
-    const sending = verdict.tier !== 'blocked' && isSending(tool, input) && !asksToSend(this.turnText.get(tabId) ?? '');
+    const sending = verdict.tier !== 'blocked' && isSending(tool, input) && !askedToSend(tool, input, this.turnText.get(tabId) ?? '');
     const asks =
       ((verdict.tier === 'red' && settings.askRisky) || (verdict.tier === 'yellow' && settings.confirmYellow) || sending) &&
       !this.trustedTurns.has(tabId);

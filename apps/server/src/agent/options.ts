@@ -64,6 +64,29 @@ function otherChats(chat: ChatContext): string {
   ].join('\n\n');
 }
 
+/**
+ * The skills a normal chat lists (docs/PLAN.md §6u): documents, research and the like. Claude Code's
+ * own dev skills (config, keybindings, code review, init…) and ones that can't work in Harv (the
+ * browsers, computer use, /loop, /schedule) only cost context there; project chats keep them all.
+ * Each name twice: as Claude Code lists it and as the claude.ai plugin names it.
+ */
+export const CHAT_SKILLS = [
+  'docx',
+  'xlsx',
+  'pptx',
+  'pdf',
+  'deep-research',
+  'docs',
+  'google-workspace',
+  'dataviz',
+  'skill-creator',
+  'morning',
+  'import-memory',
+].flatMap((s) => [s, `anthropic-skills:${s}`]);
+/** Tools no chat uses: Claude Code's schedulers (Harv has its own), and in normal chats the coding-only ones. */
+const NEVER_TOOLS = ['CronCreate', 'CronDelete', 'CronList', 'ScheduleWakeup', 'RemoteTrigger'];
+const CODING_TOOLS = ['EnterWorktree', 'ExitWorktree', 'NotebookEdit', 'LSP', 'Workflow'];
+
 /** The safety note while "Ask before risky actions" is off (the user's choice, 2026-10-27). */
 const NO_CARDS =
   "- Harv's safety gate checks every action, but it doesn't ask the user first: everything runs right away (the user's choice, Settings › Safety › Ask before risky actions). Files a command names are backed up before they change or go, and every action is logged with Undo. Formatting drives, " +
@@ -217,6 +240,7 @@ export function buildOptions(
           strictMcpConfig: false,
           systemPrompt: { type: 'preset', preset: 'claude_code', append: projectPrompt(chat!, project) },
           tools: { type: 'preset', preset: 'claude_code' },
+          disallowedTools: NEVER_TOOLS,
           settings: planSettings,
         }
       : chat
@@ -230,6 +254,8 @@ export function buildOptions(
             settings: { ...planSettings, autoMemoryEnabled: false },
             systemPrompt: systemPrompt(chat),
             tools: { type: 'preset', preset: 'claude_code' },
+            disallowedTools: [...NEVER_TOOLS, ...CODING_TOOLS],
+            skills: CHAT_SKILLS,
           }
         : {
             // The model catalog: nothing loaded, no tools.

@@ -357,7 +357,7 @@ describe('questions, plans and sending (docs/PLAN.md §6s)', () => {
     // Asked to send: it just sends (logged).
     gate.setTurn('tab', 'send Peter the summary by email');
     expect(
-      decision(await gate.preToolUse('tab', 'mcp__claude_ai_Gmail__send_message', { to: 'p@example.com' }, 's2', signal()))
+      decision(await gate.preToolUse('tab', 'mcp__claude_ai_Gmail__send_message', { to: 'peter@example.com' }, 's2', signal()))
         ?.permissionDecision,
     ).toBe('allow');
     // The turn is over: the next one is checked on its own words.
