@@ -7,6 +7,7 @@ Small scripts for looking at the running dashboard the way a person would, witho
 | `node scripts/ui-check/shots.mjs [widths…]` | Screenshots at 420/1100/1280/1500px (or the widths given), stats panel collapsed and expanded; reports sideways overflow and a page that scrolled by itself. |
 | `node scripts/ui-check/watch-shifts.mjs [width] [seconds]` | Watches the stats panel while values tick and reports vertical layout shifts. |
 | `node scripts/ui-check/usage.mjs` | Prints the Claude plan meters Harv knows (no tokens). |
+| `bash scripts/ui-check/battery.sh <label>` | Linux: 10 s average CPU of the Harv app and its WebKit process, and GPU busy %. Change one setting between runs to see what costs battery (docs/PLAN.md §6p "Battery"). |
 | `node scripts/ui-check/sync.mjs [--now \| --on <repo> [--name <device>] \| --off]` | Sync status with the other devices; can sync now or turn it on/off (no tokens). |
 
 For a custom check, import `launch` from `cdp.mjs`: `goto`, `click(selector, text?)`, `type`, `key`, `eval`, `shot(name)`, `logs`.
