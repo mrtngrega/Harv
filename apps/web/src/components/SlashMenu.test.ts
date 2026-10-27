@@ -14,8 +14,8 @@ describe('slash menu', () => {
     expect(
       matchCommands('/', cc)
         .map((c) => c.name)
-        .slice(0, 4),
-    ).toEqual(['model', 'attach', 'new', 'help']);
+        .slice(0, 6),
+    ).toEqual(['model', 'attach', 'new', 'plan', 'rewind', 'help']);
   });
 
   it('closes once arguments start, and for normal text or paths', () => {

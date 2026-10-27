@@ -26,16 +26,35 @@ class FakeSession {
     readonly hooks: SessionHooks,
     _store?: unknown,
     _gate?: unknown,
-    _resume?: string,
+    readonly start: { resume?: string; resumeAt?: string; chainEnd?: string; planning?: boolean } = {},
     _delegate?: unknown,
     readonly mode: { project?: Project } = {},
   ) {
     FakeSession.all.set(tabId, this);
+    this.chain = start.resumeAt ?? start.chainEnd;
   }
+
+  private chain: string | undefined;
+  rewound: string[] = [];
+  planning: boolean[] = [];
 
   async send(content: unknown, model: string, effort: EffortLevel, raw = false) {
     this.busy = true;
     this.sent.push({ content, model, effort, raw });
+    const uuid = `${this.tabId}-msg-${this.sent.length}`;
+    const mark = { uuid, ...(this.chain ? { forkAt: this.chain } : {}) };
+    // The reply is the conversation's next entry.
+    this.chain = `${uuid}-reply`;
+    return mark;
+  }
+
+  async rewindFiles(uuid: string) {
+    this.rewound.push(uuid);
+    return { canRewind: true, filesChanged: ['C:/x/a.txt'] };
+  }
+
+  async setPlanning(on: boolean) {
+    this.planning.push(on);
   }
 
   context(tokens: number) {
@@ -545,6 +564,7 @@ describe("the other device's projects", { timeout: 60_000 }, () => {
         renamed: new Map(),
         moved: new Set<string>(),
         cleared: new Set<string>(),
+        rewound: new Set<string>(),
         deleted: new Set<string>(),
         history: false,
       };
@@ -701,5 +721,66 @@ describe('sync of tabs and project work (docs/PLAN.md §6m)', () => {
     chats.peerProjectState('car_radio', 'notebook', false);
     chats.peerProjectState('car_radio', 'notebook', true);
     expect(said()).toBe(2);
+  });
+});
+
+describe('rewind and plan mode (docs/PLAN.md §6s C2, C3)', () => {
+  it('puts files and the conversation back to before a message, drops it and what came after', async () => {
+    const { chats, store, sent } = setup();
+    await chats.send('rw', 'first', 'sonnet', 'medium');
+    store.setSession('rw', 'session-rw');
+    FakeSession.all.get('rw')!.reply('one');
+    FakeSession.all.get('rw')!.finish();
+    await chats.send('rw', 'second', 'sonnet', 'medium');
+    FakeSession.all.get('rw')!.reply('two');
+    FakeSession.all.get('rw')!.finish();
+    await settle();
+
+    await chats.rewind('rw', 0);
+    const old = FakeSession.all.get('rw')!;
+    expect(old.rewound).toEqual(['rw-msg-2']);
+    const rewound = sent.find((m) => m.type === 'chat.rewound');
+    expect(rewound?.type === 'chat.rewound' && rewound.text).toBe('second');
+    expect(store.snapshot('rw')!.lines.map((l) => l.text)).toEqual([
+      'first',
+      'one',
+      expect.stringMatching(/^Rewound to before “second”\. Put back/),
+    ]);
+
+    // The next message resumes the conversation cut back to before "second".
+    await chats.send('rw', 'second, better', 'sonnet', 'medium');
+    const next = FakeSession.all.get('rw')!;
+    expect(next).not.toBe(old);
+    expect(next.start).toMatchObject({ resume: 'session-rw', resumeAt: 'rw-msg-1-reply' });
+  });
+
+  it("rewinding to the session's first message starts a new session", async () => {
+    const { chats, store } = setup();
+    await chats.send('rw1', 'only', 'sonnet', 'medium');
+    store.setSession('rw1', 'session-1');
+    FakeSession.all.get('rw1')!.finish();
+    await settle();
+    await chats.rewind('rw1', 0);
+    expect(store.getSession('rw1')).toBeNull();
+    expect(store.snapshot('rw1')!.lines.filter((l) => l.kind === 'you')).toHaveLength(0);
+  });
+
+  it('waits for the reply to end', async () => {
+    const { chats, store } = setup();
+    await chats.send('rw2', 'busy one', 'sonnet', 'medium');
+    await chats.rewind('rw2', 0);
+    expect(store.snapshot('rw2')!.lines.some((l) => l.text === 'busy one')).toBe(true);
+    FakeSession.all.get('rw2')!.finish();
+  });
+
+  it('switches plan mode on the session and tells the chat', async () => {
+    const { chats, sent } = setup();
+    await chats.send('pl', 'plan this', 'sonnet', 'medium');
+    chats.setPlanning('pl', true);
+    chats.planningChanged('pl', true);
+    await settle();
+    expect(FakeSession.all.get('pl')!.planning).toContain(true);
+    expect(sent.some((m) => m.type === 'chat.plan' && m.on)).toBe(true);
+    expect(chats.openChats().find((c) => c.id === 'pl')?.planning).toBe(true);
   });
 });

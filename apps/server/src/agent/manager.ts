@@ -126,6 +126,8 @@ export class ChatManager {
   private followUps = new Map<string, FollowUp[]>();
   /** Each running session's slash commands (otherwise the catalog's). */
   private commands = new Map<string, SlashCommandInfo[]>();
+  /** Chats just rewound: their next session resumes the conversation cut back to this entry. */
+  private forkAt = new Map<string, string>();
   catalog: Catalog | null = null;
 
   constructor(
@@ -160,7 +162,13 @@ export class ChatManager {
       const queued = this.queuedOf(chat.id);
       const commands = this.commands.get(chat.id);
       const tasks = this.sessions.get(chat.id)?.tasks() ?? [];
-      return { ...chat, ...(queued.length ? { queued } : {}), ...(commands ? { commands } : {}), ...(tasks.length ? { tasks } : {}) };
+      return {
+        ...chat,
+        ...(queued.length ? { queued } : {}),
+        ...(commands ? { commands } : {}),
+        ...(tasks.length ? { tasks } : {}),
+        ...(this.gate.isPlanning(chat.id) ? { planning: true } : {}),
+      };
     });
   }
 
@@ -343,6 +351,9 @@ export class ChatManager {
     if (this.dropping.delete(tabId)) this.dropSession(tabId);
     let session = this.sessions.get(tabId);
     if (session) return session;
+    const resume = this.store.getSession(tabId) ?? undefined;
+    const resumeAt = this.forkAt.get(tabId);
+    this.forkAt.delete(tabId);
     session = new ChatSession(
       tabId,
       model,
@@ -351,6 +362,7 @@ export class ChatManager {
       {
         onStateChange: () => this.onStatus(this.status),
         onSessionId: (id) => this.store.setSession(tabId, id),
+        onChainEnd: (uuid) => this.store.setChainEnd(tabId, uuid),
         onAutoTurn: () => {
           // Shown and logged as a turn of its own, at the model and effort the session runs.
           const last = this.lastRun.get(tabId) ?? this.lastTagged(tabId) ?? AUTO_FALLBACK;
@@ -391,7 +403,7 @@ export class ChatManager {
       },
       this.store,
       this.gate,
-      this.store.getSession(tabId) ?? undefined,
+      { resume, resumeAt: resume ? resumeAt : undefined, chainEnd: this.store.chainEnd(tabId), planning: this.gate.isPlanning(tabId) },
       (req, signal) => this.delegate(tabId, req, signal),
       { project: this.store.projectOf(tabId), projects: this.projectTools },
     );
@@ -695,6 +707,8 @@ export class ChatManager {
     }
     let decision: RouteDecision;
     let text: string;
+    // The sending check (persona rule 12) reads what this turn was asked to do.
+    this.gate.setTurn(tabId, message);
     // "thinking" from routing until the session has the message, so the status pill doesn't blink idle in between.
     this.setRouting(tabId, true);
     try {
@@ -786,7 +800,8 @@ export class ChatManager {
     this.lastRun.set(tabId, { model, effort });
     this.emit({ type: 'chat.started', tabId, model: this.modelName(model), effort, auto, reason: decision.reason });
     try {
-      await session.send(content, model, effort, raw);
+      const mark = await session.send(content, model, effort, raw);
+      if (mark) this.store.markTurn(tabId, mark);
     } catch (err) {
       this.emit({ type: 'chat.error', tabId, message: `Couldn’t send: ${(err as Error).message}` });
       this.emit({ type: 'chat.done', tabId, ok: false, stopped: false });
@@ -799,6 +814,81 @@ export class ChatManager {
       this.emit({ type: 'chat.notice', tabId, message: `Removed ${dropped === 1 ? 'the queued message' : `${dropped} queued messages`}.` });
     this.gate.cancel(tabId);
     await this.sessions.get(tabId)?.stop();
+  }
+
+  /** Plan mode on or off for a chat (/plan, Claude's EnterPlanMode, an approved plan): the gate keeps it. */
+  setPlanning(tabId: string, on: boolean): void {
+    this.gate.setPlanning(tabId, on);
+  }
+
+  /** The gate changed a chat's plan mode: Claude Code's own mode follows, and the dashboard shows it. */
+  planningChanged(tabId: string, on: boolean): void {
+    void this.sessions
+      .get(tabId)
+      ?.setPlanning(on)
+      .catch(() => {});
+    this.broadcast({ type: 'chat.plan', tabId, on });
+    if (this.store.exists(tabId))
+      this.emit({
+        type: 'chat.notice',
+        tabId,
+        message: on ? 'Plan mode: Harv only reads and plans, then shows you the plan to approve.' : 'Plan mode off.',
+      });
+  }
+
+  /**
+   * Rewind (Claude Code's /rewind, docs/PLAN.md §6s C3): the files Claude changed and the
+   * conversation go back to before one of the user's messages; it and everything after it
+   * leave the chat, and its text goes back into the input.
+   */
+  async rewind(tabId: string, fromEnd: number): Promise<void> {
+    if (!this.store.exists(tabId)) return;
+    if (this.busy(tabId)) {
+      this.broadcast({ type: 'chat.notice', tabId, message: 'Harv is still answering in this tab. Stop it first, then rewind.' });
+      return;
+    }
+    const target = this.store.rewindTarget(tabId, fromEnd);
+    if (!target) return;
+    const sessionId = this.store.getSession(tabId);
+    let files: string;
+    if (target.uuid && target.session && target.session === sessionId) {
+      try {
+        const last = this.lastRun.get(tabId) ?? this.lastTagged(tabId) ?? AUTO_FALLBACK;
+        const result = await this.session(tabId, last.model, last.effort).rewindFiles(target.uuid);
+        const changed = result.filesChanged ?? [];
+        files = !result.canRewind
+          ? `Files weren’t put back: ${result.error ?? 'there’s no checkpoint for that message'}.`
+          : changed.length
+            ? `Put back ${changed.length === 1 ? changed[0] : `${changed.length} files`}.`
+            : 'No files to put back.';
+      } catch (err) {
+        files = `Files weren’t put back: ${(err as Error).message}.`;
+      }
+      this.dropSession(tabId);
+      if (target.forkAt) {
+        this.forkAt.set(tabId, target.forkAt);
+        this.store.setChainEnd(tabId, target.forkAt);
+      } else {
+        this.store.setSession(tabId, null);
+      }
+    } else {
+      // From an earlier Claude session (/fresh, a project switch, an older chat): the chat goes back, and
+      // the next message starts a new session with the chat so far. Files can't be put back from there.
+      this.dropSession(tabId);
+      this.store.setSession(tabId, null);
+      this.store.markStale(tabId);
+      files = target.uuid
+        ? 'Files weren’t put back: that message was in an earlier Claude session.'
+        : 'Only the chat went back (no file checkpoint for that message).';
+    }
+    this.store.rewindFrom(tabId, target.line, target.uid);
+    this.router.forget(tabId);
+    const chat = this.store.snapshot(tabId);
+    if (chat)
+      this.broadcast({ type: 'chat.rewound', tabId, chat, text: target.text, ...(target.files.length ? { files: target.files } : {}) });
+    const quoted = target.text.length > 50 ? `${target.text.slice(0, 49)}…` : target.text;
+    this.emit({ type: 'chat.notice', tabId, message: `Rewound to before “${quoted}”. ${files}` });
+    this.publishHistory();
   }
 
   /** Stops one background task of a chat (the strip's ■), leaving the reply running. */
@@ -883,6 +973,12 @@ export class ChatManager {
       this.router.forget(id);
       restart(id);
       this.broadcast({ type: 'chat.cleared', tabId: id });
+    }
+    for (const id of changes.rewound) {
+      this.router.forget(id);
+      restart(id);
+      const chat = this.store.snapshot(id);
+      if (chat) this.broadcast({ type: 'chat.rewound', tabId: id, chat, text: '' });
     }
     for (const id of changes.moved) {
       restart(id);

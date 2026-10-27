@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { query, type Query, type SDKMessage, type SDKRateLimitInfo, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ChatServerMessage, EffortLevel, Project, SlashCommandInfo } from '@harv/shared';
 import type { SafetyGate } from '../safety/gate.ts';
@@ -26,6 +27,25 @@ export interface SessionHooks {
   onCommands?: (commands: SlashCommandInfo[]) => void;
   /** Claude started a turn by itself (a background task it started finished): no message from the user began it. */
   onAutoTurn?: () => void;
+  /** A turn ended: the last entry of the conversation so far, where a later rewind can resume. */
+  onChainEnd?: (uuid: string) => void;
+}
+
+/** Where one of the user's messages sits in the Claude conversation, for rewinding to before it. */
+export interface TurnMark {
+  /** The message's own uuid (file checkpoints are taken there). */
+  uuid: string;
+  /** The conversation's last entry before it (none: it was the session's first message). */
+  forkAt?: string;
+}
+
+/** How a session starts: resumed, cut back to a point (a rewind), in plan mode. */
+export interface SessionStart {
+  resume?: string;
+  resumeAt?: string;
+  /** The last entry of the conversation so far (stored), so the next message knows where it starts. */
+  chainEnd?: string;
+  planning?: boolean;
 }
 
 /** What a local command like /context or /usage printed (it comes back as a user message). */
@@ -81,6 +101,9 @@ export class ChatSession {
   private taskTracker = new TaskTracker();
   /** Background Bash commands by tool call (subagents' too), so stopping one can end what it started. */
   private shellCommands = new Map<string, string>();
+  /** The conversation's latest entry (an assistant message or a tool result), for rewind marks. */
+  private chainEnd: string | undefined;
+  private resume?: string;
 
   constructor(
     readonly tabId: string,
@@ -90,19 +113,39 @@ export class ChatSession {
     private hooks: SessionHooks,
     private store: ChatStore,
     gate: SafetyGate,
-    private resume?: string,
+    start: SessionStart = {},
     delegate?: Delegate,
     mode: { project?: Project; projects?: ProjectTools } = {},
   ) {
+    this.resume = start.resume;
+    this.chainEnd = start.resumeAt ?? start.chainEnd;
     this.q = query({
       prompt: this.input,
-      options: buildOptions(model, effort, this.abort, { resume, chat: { store, tabId, gate, delegate, ...mode } }),
+      options: buildOptions(model, effort, this.abort, {
+        resume: start.resume,
+        resumeAt: start.resumeAt,
+        planning: start.planning,
+        chat: { store, tabId, gate, delegate, ...mode },
+      }),
     });
     void this.consume();
   }
 
-  /** `raw`: a slash command, sent exactly as typed (a memory note in front would stop Claude Code seeing the command). */
-  async send(content: string | ContentBlockParam[], model: string, effort: EffortLevel, raw = false): Promise<void> {
+  /** Plan mode on or off: Claude Code's own plan mode, so Claude gets its planning instructions. */
+  async setPlanning(on: boolean): Promise<void> {
+    await this.q.setPermissionMode(on ? 'plan' : 'default');
+  }
+
+  /** Puts the files Claude changed back as they were before this message (file checkpoints). */
+  rewindFiles(uuid: string) {
+    return this.q.rewindFiles(uuid);
+  }
+
+  /**
+   * `raw`: a slash command, sent exactly as typed (a memory note in front would stop Claude Code seeing the command).
+   * Returns where the message sits in the conversation, for a later rewind.
+   */
+  async send(content: string | ContentBlockParam[], model: string, effort: EffortLevel, raw = false): Promise<TurnMark> {
     if (model !== this.model) {
       await this.q.setModel(model);
       this.model = model;
@@ -118,7 +161,11 @@ export class ChatSession {
     this.thinkingTokens = 0;
     this.setBusy(true);
     const message = raw ? content : this.withMemoryNote(content);
-    this.input.push({ type: 'user', message: { role: 'user', content: message }, parent_tool_use_id: null });
+    const uuid = randomUUID();
+    const mark: TurnMark = { uuid, ...(this.chainEnd ? { forkAt: this.chainEnd } : {}) };
+    this.chainEnd = uuid;
+    this.input.push({ type: 'user', message: { role: 'user', content: message }, parent_tool_use_id: null, uuid });
+    return mark;
   }
 
   /** Tells Claude about memories other chats saved or forgot since this one last knew. */
@@ -274,6 +321,7 @@ export class ChatSession {
 
       case 'user': {
         if (msg.parent_tool_use_id) return;
+        if (msg.uuid) this.chainEnd = msg.uuid;
         const content = msg.message.content;
         const text = typeof content === 'string' ? content : '';
         const output = [...text.matchAll(LOCAL_OUTPUT)].map((m) => m[1]!.replace(ANSI, '').trim()).filter(Boolean);
@@ -320,6 +368,7 @@ export class ChatSession {
           }
         }
         if (msg.parent_tool_use_id) return;
+        if (msg.uuid) this.chainEnd = msg.uuid;
         if (msg.error === 'rate_limit') this.hooks.onRateLimit({ status: 'rejected' });
         if (msg.error && msg.error !== 'max_output_tokens') {
           this.emit({ type: 'chat.error', tabId, message: ERROR_TEXT[msg.error] ?? `Claude error: ${msg.error}` });
@@ -374,6 +423,7 @@ export class ChatSession {
           },
         });
         this.stopping = false;
+        if (this.chainEnd) this.hooks.onChainEnd?.(this.chainEnd);
         this.setBusy(false);
         return;
       }

@@ -24,6 +24,8 @@ export type SyncEvent =
       at: number;
     }
   | { t: 'clear'; chat: string; at: number }
+  /** A rewind: the line with this uid and everything after it went. */
+  | { t: 'rewind'; chat: string; uid: string; at: number }
   | { t: 'delete'; chat: string; at: number }
   /** A memory file written (or deleted, with null). `base` is the hash of the version it replaced, to spot edits on both sides. */
   | { t: 'memory'; name: string; content: string | null; base: string | null; at: number }

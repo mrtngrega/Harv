@@ -5,6 +5,8 @@ import { IS_WINDOWS, osPath, pathKey } from '../platform.ts';
 
 /** Harv's own working folder, the only place it may create and change files freely. */
 export const WORKSPACE = join(HARV_HOME, 'workspace');
+/** Where Claude Code writes its plans (options.ts), so plan mode can write only there. */
+export const PLANS_DIR = join(WORKSPACE, 'plans');
 export const BACKUPS_DIR = join(HARV_HOME, 'backups');
 
 /**

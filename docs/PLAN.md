@@ -1,6 +1,6 @@
 # Harv: build plan
 
-Status (2026-10-27, evening): approval cards off by the user's choice (Settings › Safety › Ask before risky actions; blocked stays blocked), tab-bar fixes, see-through window, Settings reworked into big sections (Background = Photo / See-through / Plain, panel Frost), the laptop's idle battery drain fixed (~50% → ~6% of a core, §6p "Battery"), persona rule 12 (send only what the user asked). Live on both devices. Next: the user picks the order of §6s (Harv can do everything claude.ai and Claude Code can), M10c/M11/M10d and the report notes; nothing is built until they say. Open talks: image generation, anything still off in Settings.
+Status (2026-10-27, evening): approval cards off by the user's choice (Settings › Safety › Ask before risky actions; blocked stays blocked), tab-bar fixes, see-through window, Settings reworked into big sections (Background = Photo / See-through / Plain, panel Frost), the laptop's idle battery drain fixed (~50% → ~6% of a core, §6p "Battery"), persona rule 12 (send only what the user asked). Live on both devices. Next: the user picks the order of §6s (Harv can do everything claude.ai and Claude Code can), M10c/M11/M10d and the notes in §6t; nothing is built until they say. Open talks: image generation, anything still off in Settings.
 
 ## 1. Can Harv run on a Claude subscription? (research summary)
 
@@ -436,7 +436,7 @@ The user: "i keep discovering things that harv cant do but claude.ai or claude c
 2. **Images inline:** pictures Harv makes or reads (a chart from Python, a screenshot, `design/car-golf.png`) shown in the chat instead of a path.
 3. **Files as cards:** a file Harv creates (docx, xlsx, pdf, zip) shows as a card with Open / Show in folder.
 4. **Rich text:** math (KaTeX), syntax-highlighted code with a Copy button, Mermaid diagrams in replies.
-5. **Voice** (in the report, later).
+5. **Voice:** talk to Harv and hear it answer (later; details when we build it).
 
 **C. What Claude Code has that Harv doesn't handle:**
 1. **AskUserQuestion:** Claude Code's multiple-choice question picker. Harv refuses the tool today; it needs a question card (options, Other, multi-select) that answers the tool.
@@ -446,10 +446,24 @@ The user: "i keep discovering things that harv cant do but claude.ai or claude c
 
 **D. Already on par:** web search and fetch, reading images/PDFs, running code (a real shell instead of a sandbox), memory, projects, background agents in project chats, notifications, /compact (passes through), thinking.
 
-**Not possible on the subscription without other tools:** real photo-style image generation (neither claude.ai nor Claude Code has it), Claude in Chrome and computer use (they're tools of Anthropic's own apps, not the SDK; Windows-MCP in the report covers desktop control).
+**Not possible on the subscription without other tools:** real photo-style image generation (neither claude.ai nor Claude Code has it), Claude in Chrome and computer use (they're tools of Anthropic's own apps, not the SDK; Windows-MCP in §6t covers desktop control).
 
 **Sending to people (the user's rule, 2026-10-27):** "if i dont tell him to do it and he decides alone to send something to someone only then should he need approval but when i ask him to do it he doesnt ask me". In `harv/persona.md` (rule 12) now. In the gate (to build with A): sending actions (connector writes that send — mail, messages, posts, invites, shares — and `sendsData` shell commands) get a card even with Ask before risky actions off, unless the user's message for this turn asked to send (a free check of the turn's text: send/email/mail/message/text/post/reply/share/forward/pošli/napíš…, no model call). Everything else stays logged-only.
 
 **The user's answers (2026-10-27):** order of the phases: they'll say later. Sending check by the turn's words: OK. Full tools in every chat: add all of it. Scheduled tasks run on the device where they were made (wait for the hub when it's asleep): yes. Connectors: probably none on claude.ai yet. Voice and car radio: details when we build them. Laptop's idle GPU: look into it. Not to be built yet: first a talk about the background, blur and settings ("some of it is bugged or not good").
 
 Proposed order: A (one change, most of the gap), C1 + C2 (Harv would otherwise stall on them once A is in), B1–B4, C3, C4.
+
+## 6t. Notes moved from the report (2026-10-27, not built)
+
+The user moved every open `harv_report.md` note here, to pick what gets built next.
+
+1. **Desktop control (from 26 Oct, PC):** try a Windows desktop-control MCP server (Windows-MCP by CursorTouch is the top pick; MCPControl and WinRemote MCP are alternatives): screen reading, mouse/keyboard, windows, clipboard. Explore everything it offers, then plug it into Harv with gate rules (reading the screen free; sending, deleting, buying ask). Goal: "send this file to X on Discord" just works.
+2. **Other apps (from 26 Oct, PC):** Discord through Harv's own bot (automating the user's account breaks Discord's rules; a webhook for one channel is the simple option), then what else could plug in (email, calendar, Spotify, other MCP servers). Tokens live in Harv's config, never read by the model.
+3. **Old chats blink on startup (27 Oct, notebook):** old chats flash when Harv starts; with it, a polish pass over everything, the UI too.
+4. **Context number shifted down (27 Oct, notebook):** UI bug, the context label at the top right sits too low.
+5. **Harv in the car radio (27 Oct, PC):** Harv on the car_radio head unit (only noted; details when we build it).
+
+Image generation and voice are in §6s (B1, B5).
+
+**Build round (decided 2026-10-27, evening):** building §6s A, B1–B4, C1–C4, M10c and §6t items 3 and 4; voice (B5) later. Then a polish review of everything (backend, frontend, settings, optimization) as a **report first**, fixed after the user's green light. The user's answers: previews open in a **side pane** (a card in the chat opens it); rewind **drops** the later messages (Claude Code's /rewind); a scheduled task's run is a turn **in the chat that made it** (reopened if closed) plus a notification; a run missed while Harv was off runs **once on start**, marked late; M10c sends **events within seconds** (a reply in progress shows on the other device line by line, no live typing), and an inbound firewall rule for its one port from Tailscale's range (100.64.0.0/10) only is OK (firewalld: the tailscale0 interface).

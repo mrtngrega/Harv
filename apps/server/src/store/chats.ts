@@ -124,6 +124,13 @@ export class ChatStore {
     // Project sync (docs/PLAN.md §6n): a project's GitHub repo.
     const projectColumns = this.db.prepare('PRAGMA table_info(projects)').all() as { name: string }[];
     if (!projectColumns.some((c) => c.name === 'remote')) this.db.exec('ALTER TABLE projects ADD COLUMN remote TEXT');
+    // Rewind (docs/PLAN.md §6s C3): where each of the user's messages sits in its Claude conversation.
+    if (!columns.some((c) => c.name === 'msg_uuid')) {
+      this.db.exec('ALTER TABLE lines ADD COLUMN msg_uuid TEXT');
+      this.db.exec('ALTER TABLE lines ADD COLUMN fork_at TEXT');
+      this.db.exec('ALTER TABLE lines ADD COLUMN msg_session TEXT');
+    }
+    if (!chatColumns.some((c) => c.name === 'chain_end')) this.db.exec('ALTER TABLE chats ADD COLUMN chain_end TEXT');
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS lines_by_uid ON lines(uid)');
     const missing = this.db.prepare('SELECT id FROM lines WHERE uid IS NULL').all() as { id: number }[];
     if (missing.length) {
@@ -264,6 +271,69 @@ export class ChatStore {
 
   setSession(id: string, sessionId: string | null): void {
     this.db.prepare('UPDATE chats SET session_id = ? WHERE id = ?').run(sessionId, id);
+    if (!sessionId) this.db.prepare('UPDATE chats SET chain_end = NULL WHERE id = ?').run(id);
+    // A new session's first message was marked before Claude named the session.
+    else
+      this.db
+        .prepare('UPDATE lines SET msg_session = ? WHERE chat_id = ? AND msg_uuid IS NOT NULL AND msg_session IS NULL')
+        .run(sessionId, id);
+  }
+
+  /** The last entry of a chat's Claude conversation (where its next message starts). */
+  chainEnd(id: string): string | undefined {
+    const row = this.db.prepare('SELECT chain_end FROM chats WHERE id = ?').get(id) as { chain_end: string | null } | undefined;
+    return row?.chain_end ?? undefined;
+  }
+
+  setChainEnd(id: string, uuid: string): void {
+    this.db.prepare('UPDATE chats SET chain_end = ? WHERE id = ?').run(uuid, id);
+  }
+
+  /** The user's newest message went to Claude: where it sits in the conversation, for a rewind. */
+  markTurn(chatId: string, mark: { uuid: string; forkAt?: string }): void {
+    this.db
+      .prepare(
+        `UPDATE lines SET msg_uuid = ?, fork_at = ?, msg_session = (SELECT session_id FROM chats WHERE id = ?)
+         WHERE id = (SELECT id FROM lines WHERE chat_id = ? AND kind = 'you' ORDER BY id DESC LIMIT 1) AND msg_uuid IS NULL`,
+      )
+      .run(mark.uuid, mark.forkAt ?? null, chatId, chatId);
+  }
+
+  /** One of the user's messages, counted from the end (0 = the newest), with its place in the conversation. */
+  rewindTarget(chatId: string, fromEnd: number) {
+    const row = this.db
+      .prepare(
+        `SELECT id, uid, text, files, msg_uuid, fork_at, msg_session FROM lines
+         WHERE chat_id = ? AND kind = 'you' ORDER BY id DESC LIMIT 1 OFFSET ?`,
+      )
+      .get(chatId, Math.max(0, Math.floor(fromEnd))) as
+      | {
+          id: number;
+          uid: string | null;
+          text: string;
+          files: string | null;
+          msg_uuid: string | null;
+          fork_at: string | null;
+          msg_session: string | null;
+        }
+      | undefined;
+    if (!row) return undefined;
+    return {
+      line: row.id,
+      uid: row.uid,
+      text: row.text,
+      files: row.files ? (JSON.parse(row.files) as string[]) : [],
+      uuid: row.msg_uuid ?? undefined,
+      forkAt: row.fork_at ?? undefined,
+      session: row.msg_session ?? undefined,
+    };
+  }
+
+  /** A rewind: this line and everything after it go. */
+  rewindFrom(chatId: string, lineId: number, uid: string | null): void {
+    this.db.prepare('DELETE FROM lines WHERE chat_id = ? AND id >= ?').run(chatId, lineId);
+    this.db.prepare('UPDATE chats SET context = NULL WHERE id = ?').run(chatId);
+    if (uid) this.onEvent?.({ t: 'rewind', chat: chatId, uid, at: Date.now() });
   }
 
   getSession(id: string): string | null {
@@ -500,6 +570,15 @@ export class ChatStore {
     return { chat, line: { ...line, at: e.at }, ...(forked ? { forked } : {}) };
   }
 
+  /** A rewind on the other device: the line and everything after it go, and the next message here starts fresh. */
+  applyRewind(chatId: string, uid: string): boolean {
+    const row = this.db.prepare('SELECT id FROM lines WHERE chat_id = ? AND uid = ?').get(chatId, uid) as { id: number } | undefined;
+    if (!row) return false;
+    this.db.prepare('DELETE FROM lines WHERE chat_id = ? AND id >= ?').run(chatId, row.id);
+    this.db.prepare('UPDATE chats SET context = NULL, session_id = NULL, chain_end = NULL, stale = 1 WHERE id = ?').run(chatId);
+    return true;
+  }
+
   /** /clear on the other device. */
   applyClear(id: string): boolean {
     if (!this.exists(id)) return false;
@@ -510,6 +589,11 @@ export class ChatStore {
 
   applyDelete(id: string): boolean {
     return this.db.prepare('DELETE FROM chats WHERE id = ?').run(id).changes > 0;
+  }
+
+  /** The chat's Claude session didn't see its lines as they are now: the next message brings them as context. */
+  markStale(id: string): void {
+    this.db.prepare('UPDATE chats SET stale = 1 WHERE id = ?').run(id);
   }
 
   /** Whether the chat got lines from the other device since its Claude session last ran here (and clears the mark). */

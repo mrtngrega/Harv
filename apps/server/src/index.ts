@@ -104,6 +104,7 @@ const gate = new SafetyGate(actions, {
   // Files and folders the user attached in a chat: trusted there (the user's wish, 2026-10-26).
   attachedOf: (tabId) => store.attachedPaths(tabId),
   allow: (rules) => broadcast({ type: 'settings', settings: updateSettings({ allowRules: [...loadSettings().allowRules, ...rules] }) }),
+  onPlanMode: (tabId, on) => chats.planningChanged(tabId, on),
 });
 const routes = new RouteStore(join(HARV_HOME, 'harv.db'));
 const meter = new UsageMeter(
@@ -472,8 +473,17 @@ app.get('/ws', { websocket: true }, (socket) => {
       case 'chat.rename':
         chats.rename(msg.tabId, msg.title);
         break;
+      case 'chat.plan':
+        chats.setPlanning(msg.tabId, msg.on === true);
+        break;
+      case 'chat.rewind':
+        void chats.rewind(msg.tabId, Number(msg.fromEnd) || 0);
+        break;
       case 'approval.answer':
-        gate.answer(msg.id, msg.approve, msg.command, msg.always === true, msg.all === true);
+        gate.answer(msg.id, msg.approve, msg.command, msg.always === true, msg.all === true, {
+          ...(msg.answers && typeof msg.answers === 'object' ? { answers: msg.answers } : {}),
+          ...(typeof msg.why === 'string' ? { why: msg.why.slice(0, 4000) } : {}),
+        });
         break;
       case 'action.undo':
         gate.undo(msg.id);

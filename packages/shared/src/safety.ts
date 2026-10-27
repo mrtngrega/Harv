@@ -22,8 +22,21 @@ export interface ActionEntry {
   result?: string;
 }
 
-/** A red action waiting for the user's decision. */
+/** One of Claude's multiple-choice questions (Claude Code's AskUserQuestion). */
+export interface QuestionItem {
+  question: string;
+  /** A short chip label. */
+  header: string;
+  options: { label: string; description: string; preview?: string }[];
+  multiSelect: boolean;
+}
+
+/**
+ * Something waiting for the user's decision: a red action (`action`, the default), Claude's
+ * questions (`question`: the answers go back to Claude) or a plan to approve (`plan`).
+ */
 export interface ApprovalRequest {
+  kind?: 'action' | 'question' | 'plan';
   id: string;
   tabId: string;
   at: number;
@@ -40,6 +53,12 @@ export interface ApprovalRequest {
   backupNote?: string;
   /** What "Don't ask again" would allow (e.g. ["npm install"]); missing when it can't be offered. */
   rules?: string[];
+  /** `question`: what Claude asks. */
+  questions?: QuestionItem[];
+  /** `plan`: the plan, as Markdown. */
+  plan?: string;
+  /** This action sends something to someone the user didn't ask to send to (asked even with cards off). */
+  sending?: boolean;
 }
 
 export type SafetyClientMessage =
@@ -47,7 +66,20 @@ export type SafetyClientMessage =
    * `always`: approve, and don't ask again for this kind of command (Settings › Safety lists the rules).
    * `all`: approve this and everything else the current reply asks, until it ends.
    */
-  | { type: 'approval.answer'; id: string; approve: boolean; command?: string; always?: boolean; all?: boolean }
+  /**
+   * `answers`: a question card's answers by question text (several picks joined with ", ").
+   * `why`: what the user said instead (a denied plan's feedback, or a reason).
+   */
+  | {
+      type: 'approval.answer';
+      id: string;
+      approve: boolean;
+      command?: string;
+      always?: boolean;
+      all?: boolean;
+      answers?: Record<string, string>;
+      why?: string;
+    }
   | { type: 'action.undo'; id: string };
 
 export type SafetyServerMessage =

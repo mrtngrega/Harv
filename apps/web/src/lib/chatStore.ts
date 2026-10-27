@@ -66,6 +66,8 @@ export interface Tab {
   activity?: string;
   /** How the last finished turn went, shown faintly when idle. */
   lastTurn?: { ms: number; tokens: number };
+  /** Plan mode: Harv only reads and plans until the user approves a plan. */
+  planning?: boolean;
 }
 
 /** The Settings tab's id in `activeId`; it sits in the tab bar after the chats. */
@@ -142,7 +144,12 @@ const fromSnapshot = (chat: ChatSnapshot): Tab => ({
   ...(chat.queued?.length ? { queued: chat.queued } : {}),
   ...(chat.commands ? { commands: chat.commands } : {}),
   ...(chat.tasks?.length ? { tasks: chat.tasks } : {}),
-  lines: chat.lines.map((l) => ({
+  ...(chat.planning ? { planning: true } : {}),
+  lines: linesOf(chat),
+});
+
+const linesOf = (chat: ChatSnapshot): Line[] =>
+  chat.lines.map((l) => ({
     id: newId(),
     at: l.at ?? Date.now(),
     kind: l.kind,
@@ -151,8 +158,7 @@ const fromSnapshot = (chat: ChatSnapshot): Tab => ({
     ...(l.reason ? { reason: l.reason } : {}),
     ...(l.files ? { files: l.files } : {}),
     ...(l.ref ? { ref: l.ref } : {}),
-  })),
-});
+  }));
 
 /** Keeps only the entries of a per-chat map whose chat is still a tab. */
 const onlyTabs = <T>(map: Record<string, T>, tabs: Tab[]) =>
@@ -350,6 +356,14 @@ export function applyChatEvent(msg: ChatServerMessage): void {
       break;
     case 'chat.cleared':
       updateTab(msg.tabId, (t) => ({ ...t, lines: [], currentId: null, context: undefined, lastTurn: undefined }));
+      break;
+    case 'chat.plan':
+      updateTab(msg.tabId, (t) => ({ ...t, planning: msg.on }));
+      break;
+    case 'chat.rewound':
+      // The lines as the server has them now; the message it went back before goes into the input to edit.
+      updateTab(msg.tabId, (t) => ({ ...t, lines: linesOf(msg.chat), currentId: null, context: msg.chat.context, lastTurn: undefined }));
+      if (msg.text) setDraftText(msg.tabId, msg.text);
       break;
     case 'chat.removed':
       store.set((s) => {
@@ -620,6 +634,28 @@ export const chat = {
 
   stop(tabId: string) {
     sendMessage({ type: 'chat.stop', tabId });
+  },
+
+  /** Plan mode on or off for a chat (/plan). */
+  setPlanning(tabId: string, on: boolean) {
+    updateTab(tabId, (t) => ({ ...t, planning: on }));
+    if (!sendMessage({ type: 'chat.plan', tabId, on })) chat.localNotice('Not connected to the Harv server.', 'error');
+  },
+
+  /** Rewind to before one of the user's messages (the ⟲ on it), counted from the end so the server finds the same one. */
+  rewind(lineId: string) {
+    const tab = store.get().tabs.find((t) => t.lines.some((l) => l.id === lineId));
+    if (!tab) return;
+    const mine = tab.lines.filter((l) => l.kind === 'you');
+    const at = mine.findIndex((l) => l.id === lineId);
+    if (at !== -1) sendMessage({ type: 'chat.rewind', tabId: tab.id, fromEnd: mine.length - 1 - at });
+  },
+
+  /** /rewind: to before the last message. */
+  rewindLast(tabId: string) {
+    const tab = store.get().tabs.find((t) => t.id === tabId);
+    if (!tab?.stored || !tab.lines.some((l) => l.kind === 'you')) return chat.localNotice('Nothing to rewind in this chat yet.');
+    sendMessage({ type: 'chat.rewind', tabId, fromEnd: 0 });
   },
 
   /** Stops one background agent or shell; the reply goes on. */

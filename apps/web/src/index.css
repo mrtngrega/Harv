@@ -192,3 +192,47 @@ html.see-through body {
   padding-left: 0.8em;
   color: var(--color-muted);
 }
+
+/* Code highlighting (rehype-highlight), in the ice palette. */
+.harv-code pre {
+  margin: 0;
+  padding: 0.6em 0.9em;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in,
+.hljs-literal {
+  color: #a8c8e8;
+}
+.hljs-string,
+.hljs-attr,
+.hljs-template-tag,
+.hljs-regexp {
+  color: #b5d8a8;
+}
+.hljs-number,
+.hljs-symbol,
+.hljs-variable,
+.hljs-title {
+  color: #f2b880;
+}
+.hljs-comment,
+.hljs-quote,
+.hljs-meta {
+  color: rgb(220 232 245 / 0.45);
+  font-style: italic;
+}
+.hljs-type,
+.hljs-class,
+.hljs-function,
+.hljs-tag,
+.hljs-name {
+  color: #d6c3f0;
+}
+.harv-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+.katex {
+  font-size: 1.05em;
+}

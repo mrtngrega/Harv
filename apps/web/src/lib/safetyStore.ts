@@ -30,8 +30,16 @@ onServerMessage((msg) => {
 });
 
 export const safety = {
-  /** `always`: don't ask again for this kind of command; `all`: approve the rest of this reply too. */
-  answer(id: string, approve: boolean, command?: string, { always = false, all = false } = {}) {
+  /**
+   * `always`: don't ask again for this kind of command; `all`: approve the rest of this reply too;
+   * `answers`: a question card's answers; `why`: what the user wrote instead (a plan's changes).
+   */
+  answer(
+    id: string,
+    approve: boolean,
+    command?: string,
+    { always = false, all = false, answers, why }: { always?: boolean; all?: boolean; answers?: Record<string, string>; why?: string } = {},
+  ) {
     sendMessage({
       type: 'approval.answer',
       id,
@@ -39,6 +47,8 @@ export const safety = {
       ...(command !== undefined ? { command } : {}),
       ...(always ? { always } : {}),
       ...(all ? { all } : {}),
+      ...(answers ? { answers } : {}),
+      ...(why?.trim() ? { why: why.trim() } : {}),
     });
   },
   undo(id: string) {

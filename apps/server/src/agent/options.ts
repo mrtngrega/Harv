@@ -4,9 +4,8 @@ import { fileURLToPath } from 'node:url';
 import type { HookCallbackMatcher, HookEvent, Options } from '@anthropic-ai/claude-agent-sdk';
 import { HARV_VERSION, type EffortLevel, type Project } from '@harv/shared';
 import { IS_WINDOWS, OS_NAME } from '../platform.ts';
-import { ENABLED_TOOLS } from '../safety/classify.ts';
 import type { SafetyGate } from '../safety/gate.ts';
-import { WORKSPACE } from '../safety/paths.ts';
+import { PLANS_DIR, WORKSPACE } from '../safety/paths.ts';
 import { loadSettings, workDir } from '../settings.ts';
 import type { ChatStore } from '../store/chats.ts';
 import { harvServer, recentChatsContext, type Delegate, type ProjectTools } from './chatTools.ts';
@@ -89,6 +88,7 @@ function projectPrompt(chat: ChatContext, project: Project): string {
         ? "- Harv's safety gate checks every action, and in a project chat it asks only for the risky kinds. Editing files and dev commands (npm, tests, builds, scripts, heredoc scripts like `python3 - <<'EOF'`, git add/commit and a normal git push) run without asking, in the project folder and in the temp folder (your scratch space); git is the undo, and deletes are backed up. Work that touches files elsewhere also runs, logged, with the small files it names backed up first; downloads without uploading run too. It asks the user (an approval card) for deleting outside the project or with targets it can't see (variables, substitutions), force-pushing or deleting remote branches, throwing away uncommitted work, installing software for the whole PC, sudo, stopping programs, system or registry changes, sending data (uploads, POST requests), piping a download into a shell, and changing a connected Android device. Blocked things stay blocked. If something is denied, don't work around it."
         : NO_CARDS,
       '- Background agents you start show in a strip above the prompt, where the user can stop each one; use ListAgents to check on them, and SendMessage to talk to one.',
+      "- Harv's own tools: schedule_task / list_scheduled / cancel_scheduled for anything to run later or on a repeat (Claude Code's Cron and ScheduleWakeup tools don't work here). Files you make show as cards, pictures by full path show in the chat, and HTML, SVG and Mermaid open in a live preview pane.",
       `- The user's home folder is ${homedir()}. Today is ${today}.`,
     ].join('\n'),
     '## How the user likes project work done',
@@ -109,7 +109,8 @@ function systemPrompt(chat?: ChatContext): string {
     '## Right now',
     [
       `- You're running inside Harv's dashboard on the user's ${OS_NAME}. Replies render as Markdown in a log-style chat, so keep formatting light.`,
-      `- Your tools: read and search files, search and fetch the web, create and edit files, ${IS_WINDOWS ? 'run PowerShell and Bash commands (prefer PowerShell for Windows tasks)' : 'run Bash commands'}, remember/forget for your memory, list_chats/read_chat for your other chats, and hand_off to give a task to another chat tab.`,
+      `- Your tools are Claude Code's full toolset: read and search files, search and fetch the web, create and edit files, ${IS_WINDOWS ? 'run PowerShell and Bash commands (prefer PowerShell for Windows tasks)' : 'run Bash commands'}, background shells and subagents (Agent; they show in a strip above the prompt where the user can stop each one), a task list (TodoWrite) for longer jobs, AskUserQuestion to give the user choices (it shows as a card), plan mode, and the user's own Claude Code setup: their skills (docx, xlsx, pptx, pdf, deep-research, skill-creator and the rest; use them for documents and research), plugins and claude.ai connectors (Claude Docs for docs they asked for). Plus Harv's own: remember/forget for your memory, list_chats/read_chat for your other chats, hand_off to give a task to another chat tab, and schedule_task / list_scheduled / cancel_scheduled for anything to run later or on a repeat ("every morning at 8…", "check X in an hour"; Claude Code's own Cron and ScheduleWakeup tools don't work here).`,
+      '- Files you make show as cards with Open and Show in folder; pictures (png, jpg, svg, gif, webp) you make or mention by full path show right in the chat, and HTML pages, SVG and Mermaid open in a live preview pane. So when the user wants a drawing, a diagram, a chart or a small page, make it as a file (SVG, HTML with inline JS/CSS, a Mermaid ```mermaid block, or a picture from Python) and say its full path. Math in replies renders with $…$ and $$…$$.',
       ...(asks
         ? [
             `- Harv's safety gate checks every action. Reading is free, and so is creating files in your workspace (${WORKSPACE}). Editing or creating the user's files is backed up first and they can Undo it. Riskier things (deleting, installing, stopping programs, scripts, ${IS_WINDOWS ? 'the registry, ' : 'sudo, '}system settings, sending data, git push) show the user an approval card with the exact command, and you wait for their answer. Formatting drives, touching ${IS_WINDOWS ? 'the Windows folder' : "the system's own folders (/usr, /etc…)"}, turning off antivirus or the firewall, and reading stored credentials are always blocked.${IS_WINDOWS ? '' : " sudo can't type a password here, so leave anything that needs it to the user."}`,
@@ -188,15 +189,19 @@ export function buildOptions(
   model: string,
   effort: EffortLevel,
   abortController: AbortController,
-  { resume, chat }: { resume?: string; chat?: ChatContext } = {},
+  { resume, resumeAt, planning, chat }: { resume?: string; resumeAt?: string; planning?: boolean; chat?: ChatContext } = {},
 ): Options {
   mkdirSync(WORKSPACE, { recursive: true });
+  // Plans go in the workspace, where plan mode may write (the gate allows only that folder then).
+  const planSettings = { plansDirectory: PLANS_DIR };
   const project = chat?.project && existsSync(chat.project.path) ? chat.project : undefined;
   return {
     model,
     effort,
     abortController,
     resume,
+    // A rewind resumes the conversation cut back to the entry before the message it went back to.
+    ...(resume && resumeAt ? { resumeSessionAt: resumeAt } : {}),
     env: subscriptionEnv(),
     ...(project
       ? {
@@ -210,17 +215,32 @@ export function buildOptions(
           strictMcpConfig: false,
           systemPrompt: { type: 'preset', preset: 'claude_code', append: projectPrompt(chat!, project) },
           tools: { type: 'preset', preset: 'claude_code' },
+          settings: planSettings,
         }
-      : {
-          cwd: WORKSPACE,
-          // Isolation: don't load the user's Claude Code settings, CLAUDE.md files or MCP servers.
-          settingSources: [],
-          systemPrompt: systemPrompt(chat),
-          tools: ENABLED_TOOLS,
-          strictMcpConfig: true,
-        }),
+      : chat
+        ? {
+            // Every chat has Claude Code's full toolset and the user's own Claude Code setup (skills,
+            // plugins, claude.ai connectors; since 2026-10-27, the user's wish) with Harv's own prompt.
+            // Claude Code's auto-memory stays off: Harv's memory is ~/.harv/memory.
+            cwd: WORKSPACE,
+            settingSources: ['user'],
+            strictMcpConfig: false,
+            settings: { ...planSettings, autoMemoryEnabled: false },
+            systemPrompt: systemPrompt(chat),
+            tools: { type: 'preset', preset: 'claude_code' },
+          }
+        : {
+            // The model catalog: nothing loaded, no tools.
+            cwd: WORKSPACE,
+            settingSources: [],
+            systemPrompt: systemPrompt(),
+            tools: [],
+            strictMcpConfig: true,
+          }),
     mcpServers: chat ? { harv: harvServer(chat.store, chat.tabId, chat.delegate, chat.projects) } : {},
-    permissionMode: 'default',
+    permissionMode: planning ? 'plan' : 'default',
+    // Checkpoints of the files Claude edits, so a rewind can put them back.
+    ...(chat ? { enableFileCheckpointing: true } : {}),
     canUseTool: async (name, input, { toolUseID }) =>
       chat ? chat.gate.canUseTool(name, input, toolUseID, chat.tabId) : { behavior: 'deny', message: 'No tools here.' },
     hooks: gateHooks(chat),

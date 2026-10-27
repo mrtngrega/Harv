@@ -71,6 +71,8 @@ export interface RemoteChanges {
   /** Chats whose project changed (their Claude session must start again). */
   moved: Set<string>;
   cleared: Set<string>;
+  /** Chats rewound on the other device (their lines are shorter now). */
+  rewound: Set<string>;
   deleted: Set<string>;
   /** Projects the other device added or removed, in order (linked, cloned or unlisted here by the manager). */
   projects: { name: string; remote: string; removed: boolean }[];
@@ -456,6 +458,7 @@ export class SyncEngine {
       renamed: new Map(),
       moved: new Set(),
       cleared: new Set(),
+      rewound: new Set(),
       deleted: new Set(),
       projects: [],
       history: false,
@@ -495,6 +498,7 @@ export class SyncEngine {
       changes.renamed.size ||
       changes.moved.size ||
       changes.cleared.size ||
+      changes.rewound.size ||
       changes.deleted.size ||
       changes.projects.length ||
       changes.history
@@ -536,6 +540,13 @@ export class SyncEngine {
         if (this.chats.applyClear(e.chat)) {
           changes.cleared.add(e.chat);
           changes.lines.delete(e.chat);
+        }
+        break;
+      case 'rewind':
+        if (this.chats.applyRewind(e.chat, e.uid)) {
+          changes.rewound.add(e.chat);
+          changes.lines.delete(e.chat);
+          changes.history = true;
         }
         break;
       case 'delete':

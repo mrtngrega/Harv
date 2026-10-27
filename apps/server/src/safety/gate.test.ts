@@ -252,3 +252,119 @@ describe('SafetyGate', () => {
     expect(decision(await gate.preToolUse('tab', 'PowerShell', { command: 'format D:' }, 'q2', signal()))?.permissionDecision).toBe('deny');
   });
 });
+
+describe('questions, plans and sending (docs/PLAN.md §6s)', () => {
+  beforeEach(() => writeSettings({ askRisky: false }));
+  const deny = (out: unknown) =>
+    (out as { hookSpecificOutput?: { permissionDecisionReason?: string } }).hookSpecificOutput?.permissionDecisionReason ?? '';
+  const question = {
+    questions: [
+      {
+        question: 'Which colour?',
+        header: 'Colour',
+        multiSelect: false,
+        options: [
+          { label: 'Blue', description: 'cool' },
+          { label: 'Amber', description: 'warm' },
+        ],
+      },
+    ],
+  };
+
+  it("shows Claude's questions as a card and gives the answers back in the tool's input", async () => {
+    const { gate, sent } = setup();
+    const out = gate.preToolUse('tab', 'AskUserQuestion', question, 'ask1', signal());
+    await Promise.resolve();
+    const card = sent.find((m) => m.type === 'approval.request');
+    expect(card?.type === 'approval.request' && card.approval).toMatchObject({
+      kind: 'question',
+      questions: [{ question: 'Which colour?' }],
+    });
+    gate.answer('ask1', true, undefined, false, false, { answers: { 'Which colour?': 'Amber' } });
+    expect(decision(await out)).toMatchObject({
+      permissionDecision: 'allow',
+      updatedInput: { ...question, answers: { 'Which colour?': 'Amber' } },
+    });
+  });
+
+  it('passes on what the user wrote instead of picking, and Stop is not a refusal', async () => {
+    const { gate } = setup();
+    const out = gate.preToolUse('tab', 'AskUserQuestion', question, 'ask2', signal());
+    await Promise.resolve();
+    gate.answer('ask2', false, undefined, false, false, { why: 'neither, use green' });
+    expect(deny(await out)).toContain('neither, use green');
+    const stopped = gate.preToolUse('tab', 'AskUserQuestion', question, 'ask3', signal());
+    await Promise.resolve();
+    gate.cancel('tab');
+    expect(deny(await stopped)).toContain('pressed Stop');
+  });
+
+  it('keeps plan mode to reading and planning until the user approves the plan', async () => {
+    const changes: [string, boolean][] = [];
+    const store = new ActionStore(':memory:');
+    const sent: SafetyServerMessage[] = [];
+    const gate = new SafetyGate(store, {
+      broadcast: (m) => sent.push(m),
+      notice: () => {},
+      onChange: () => {},
+      onPlanMode: (tab, on) => changes.push([tab, on]),
+    });
+    expect(decision(await gate.preToolUse('tab', 'EnterPlanMode', {}, 'p0', signal()))?.permissionDecision).toBe('allow');
+    expect(gate.isPlanning('tab')).toBe(true);
+    const file = join(userDir, 'plan-target.txt');
+    expect(decision(await gate.preToolUse('tab', 'Write', { file_path: file, content: 'x' }, 'p1', signal()))?.permissionDecision).toBe(
+      'deny',
+    );
+    expect(decision(await gate.preToolUse('tab', 'Read', { file_path: file }, 'p2', signal()))?.permissionDecision).toBe('allow');
+    const planFile = join(home, 'workspace', 'plans', 'plan.md');
+    expect(
+      decision(await gate.preToolUse('tab', 'Write', { file_path: planFile, content: '# Plan' }, 'p3', signal()))?.permissionDecision,
+    ).toBe('allow');
+    // Other chats aren't in plan mode.
+    expect(decision(await gate.preToolUse('other', 'Write', { file_path: file, content: 'x' }, 'p4', signal()))?.permissionDecision).toBe(
+      'allow',
+    );
+
+    const asked = gate.preToolUse('tab', 'ExitPlanMode', { plan: '1. Do it' }, 'p5', signal());
+    await Promise.resolve();
+    const card = sent.findLast((m) => m.type === 'approval.request');
+    expect(card?.type === 'approval.request' && card.approval).toMatchObject({ kind: 'plan', plan: '1. Do it' });
+    gate.answer('p5', false, undefined, false, false, { why: 'add tests' });
+    expect(deny(await asked)).toContain('add tests');
+    expect(gate.isPlanning('tab')).toBe(true);
+
+    const again = gate.preToolUse('tab', 'ExitPlanMode', { plan: '1. Do it\n2. Test it' }, 'p6', signal());
+    await Promise.resolve();
+    gate.answer('p6', true);
+    expect(decision(await again)?.permissionDecision).toBe('allow');
+    expect(gate.isPlanning('tab')).toBe(false);
+    expect(changes).toEqual([
+      ['tab', true],
+      ['tab', false],
+    ]);
+  });
+
+  it("asks before sending something the user didn't ask to send, even with cards off", async () => {
+    const { gate, sent } = setup();
+    gate.setTurn('tab', 'summarize my inbox');
+    const out = gate.preToolUse('tab', 'mcp__claude_ai_Gmail__send_message', { to: 'x@example.com' }, 's1', signal());
+    await Promise.resolve();
+    const card = sent.find((m) => m.type === 'approval.request');
+    expect(card?.type === 'approval.request' && card.approval.sending).toBe(true);
+    gate.answer('s1', false);
+    expect(decision(await out)?.permissionDecision).toBe('deny');
+
+    // Asked to send: it just sends (logged).
+    gate.setTurn('tab', 'send Peter the summary by email');
+    expect(
+      decision(await gate.preToolUse('tab', 'mcp__claude_ai_Gmail__send_message', { to: 'p@example.com' }, 's2', signal()))
+        ?.permissionDecision,
+    ).toBe('allow');
+    // The turn is over: the next one is checked on its own words.
+    gate.turnEnded('tab');
+    void gate.preToolUse('tab', 'mcp__claude_ai_Gmail__send_message', { to: 'p@example.com' }, 's3', signal());
+    await Promise.resolve();
+    expect(gate.waiting).toBe(1);
+    gate.cancel('tab');
+  });
+});

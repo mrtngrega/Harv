@@ -1,10 +1,24 @@
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import type { HookJSONOutput, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
-import type { ApprovalRequest, SafetyServerMessage } from '@harv/shared';
+import type { ApprovalRequest, QuestionItem, SafetyServerMessage } from '@harv/shared';
 import type { ActionStore } from '../store/actions.ts';
 import { createBackup, readBackup, restoreBackup, type Backup } from './backup.ts';
-import { classify, FILE_WRITE_TOOLS, rulesFor, SHELL_TOOLS, type ClassifyContext, type Verdict } from './classify.ts';
-import { loadSettings } from './paths.ts';
+import {
+  AGENT_TOOLS,
+  asksToSend,
+  classify,
+  FILE_WRITE_TOOLS,
+  isSending,
+  READ_TOOLS,
+  rulesFor,
+  SHELL_TOOLS,
+  type ClassifyContext,
+  type Verdict,
+} from './classify.ts';
+import { fullPath, isInside, loadSettings, PLANS_DIR } from './paths.ts';
+
+/** Harv's own tools that only look or note things: fine in plan mode. */
+const PLAN_SAFE_HARV = ['remember', 'forget', 'list_chats', 'read_chat', 'list_projects', 'list_scheduled'].map((t) => `mcp__harv__${t}`);
 
 // Every tool call passes through here (Agent SDK hooks, so it can't be skipped):
 //   green   → run
@@ -26,9 +40,52 @@ export interface GateHooks {
   attachedOf?: (tabId: string) => string[];
   /** "Don't ask again": save these rules (Settings › Safety). */
   allow?: (rules: string[]) => void;
+  /** A chat went into plan mode (Claude's EnterPlanMode, /plan) or out of it (the user approved the plan). */
+  onPlanMode?: (tabId: string, on: boolean) => void;
 }
 
-type Decision = { approve: boolean; command?: string; why?: string; always?: boolean; all?: boolean };
+type Decision = {
+  approve: boolean;
+  command?: string;
+  why?: string;
+  always?: boolean;
+  all?: boolean;
+  answers?: Record<string, string>;
+};
+
+const allow = (updatedInput?: Record<string, unknown>): HookJSONOutput => ({
+  hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', ...(updatedInput ? { updatedInput } : {}) },
+});
+
+/** Claude's questions from an AskUserQuestion call, cleaned (the card shows only what's well-formed). */
+function questionsOf(input: Record<string, unknown>): QuestionItem[] {
+  const raw = Array.isArray(input.questions) ? (input.questions as Record<string, unknown>[]) : [];
+  return raw
+    .filter((q) => q && typeof q.question === 'string')
+    .map((q) => ({
+      question: String(q.question),
+      header: typeof q.header === 'string' ? q.header : '',
+      multiSelect: q.multiSelect === true,
+      options: (Array.isArray(q.options) ? (q.options as Record<string, unknown>[]) : [])
+        .filter((o) => o && typeof o.label === 'string')
+        .map((o) => ({
+          label: String(o.label),
+          description: typeof o.description === 'string' ? o.description : '',
+          ...(typeof o.preview === 'string' ? { preview: o.preview } : {}),
+        })),
+    }));
+}
+
+/** The plan an ExitPlanMode call presents: in its input, or in the plan file Claude Code wrote. */
+function planOf(input: Record<string, unknown>): string {
+  if (typeof input.plan === 'string' && input.plan.trim()) return input.plan.trim();
+  const file = typeof input.planFilePath === 'string' ? input.planFilePath : '';
+  try {
+    return file && existsSync(file) ? readFileSync(file, 'utf8').trim() : '';
+  } catch {
+    return '';
+  }
+}
 
 const MAX_RESULT = 300;
 
@@ -84,6 +141,10 @@ export class SafetyGate {
   private backups = new Map<string, Backup>();
   /** Tabs where the user chose "Approve all for this reply": their red calls run without a card until the turn ends. */
   private trustedTurns = new Set<string>();
+  /** What the user asked for in each chat's current turn: the sending check reads it. */
+  private turnText = new Map<string, string>();
+  /** Chats in plan mode: only reading and planning until the user approves the plan. */
+  private planning = new Set<string>();
 
   constructor(
     private actions: ActionStore,
@@ -117,15 +178,55 @@ export class SafetyGate {
     return { project: this.hooks.projectOf?.(tabId), projects: this.hooks.projects?.(), attached: this.hooks.attachedOf?.(tabId) };
   }
 
+  /** A new turn starts in a chat with this message (from the user, another chat or a scheduled task). */
+  setTurn(tabId: string, text: string): void {
+    this.turnText.set(tabId, text);
+  }
+
+  isPlanning(tabId: string): boolean {
+    return this.planning.has(tabId);
+  }
+
+  /** Plan mode on or off (the /plan toggle, Claude's EnterPlanMode, or an approved plan). */
+  setPlanning(tabId: string, on: boolean): void {
+    if (on === this.planning.has(tabId)) return;
+    if (on) this.planning.add(tabId);
+    else this.planning.delete(tabId);
+    this.hooks.onPlanMode?.(tabId, on);
+  }
+
+  /** What plan mode lets through: reading, planning, asking, and writing the plan file. */
+  private planSafe(tool: string, input: Record<string, unknown>, verdict: Verdict): boolean {
+    if (READ_TOOLS.includes(tool) || AGENT_TOOLS.includes(tool) || PLAN_SAFE_HARV.includes(tool)) return true;
+    if (FILE_WRITE_TOOLS.includes(tool)) return isInside(fullPath(String(input.file_path ?? '')), PLANS_DIR);
+    if (SHELL_TOOLS.includes(tool)) return verdict.tier === 'green';
+    return (
+      tool.startsWith('mcp__') && !tool.startsWith('mcp__harv__') && verdict.tier === 'green' && verdict.reason.startsWith('Only reads')
+    );
+  }
+
   /** The PreToolUse hook. Red calls wait here until the user answers the approval card. */
   async preToolUse(tabId: string, tool: string, input: Record<string, unknown>, id: string, signal: AbortSignal): Promise<HookJSONOutput> {
+    if (tool === 'AskUserQuestion') return this.askQuestions(tabId, input, id, signal);
+    if (tool === 'ExitPlanMode') return this.askPlan(tabId, input, id, signal);
+    if (tool === 'EnterPlanMode') {
+      this.setPlanning(tabId, true);
+      return allow();
+    }
     const ctx = this.contextOf(tabId);
     const verdict = classify(tool, input, ctx);
+    if (this.planning.has(tabId) && verdict.tier !== 'blocked' && !this.planSafe(tool, input, verdict)) {
+      return deny(
+        `Plan mode: only reading and planning until the user approves the plan (write it in ${PLANS_DIR} and present it with ExitPlanMode).`,
+      );
+    }
     const at = Date.now();
     // Red asks when "Ask before risky actions" is on; yellow too when "confirm changes" is on (both in Settings › Safety).
+    // Sending to someone the user didn't ask to send to asks even with cards off (persona rule 12).
     const settings = loadSettings();
+    const sending = verdict.tier !== 'blocked' && isSending(tool, input) && !asksToSend(this.turnText.get(tabId) ?? '');
     const asks =
-      ((verdict.tier === 'red' && settings.askRisky) || (verdict.tier === 'yellow' && settings.confirmYellow)) &&
+      ((verdict.tier === 'red' && settings.askRisky) || (verdict.tier === 'yellow' && settings.confirmYellow) || sending) &&
       !this.trustedTurns.has(tabId);
     const status = verdict.tier === 'blocked' ? 'blocked' : asks ? 'pending' : 'running';
     this.actions.add({ id, tabId, at, tool, tier: verdict.tier, summary: verdict.summary, reason: verdict.reason, status, input });
@@ -167,6 +268,7 @@ export class SafetyGate {
       backups: backedUp,
       ...(notes.length ? { backupNote: notes.join(' ') } : {}),
       ...(rules?.length ? { rules } : {}),
+      ...(sending ? { sending: true } : {}),
     };
     this.publish(id);
     const decision = await this.ask(approval, signal);
@@ -177,6 +279,8 @@ export class SafetyGate {
         result: decision.why === STOPPED ? 'Stopped by the user.' : (decision.why ?? 'Denied by the user.'),
       });
       this.publish(id);
+      if (decision.why && decision.why !== STOPPED)
+        return deny(`The user denied this action and said: "${decision.why}". Go by that; don’t retry it unchanged.`);
       return deny(decision.why ?? 'The user denied this action. Ask what they would like instead; don’t retry it unchanged.');
     }
 
@@ -208,6 +312,61 @@ export class SafetyGate {
     };
   }
 
+  /** Claude's multiple-choice questions: a question card, and the answers go back in the tool's input. */
+  private async askQuestions(tabId: string, input: Record<string, unknown>, id: string, signal: AbortSignal): Promise<HookJSONOutput> {
+    const questions = questionsOf(input);
+    if (!questions.length) return deny('AskUserQuestion needs at least one question with options.');
+    const card: ApprovalRequest = {
+      kind: 'question',
+      id,
+      tabId,
+      at: Date.now(),
+      tool: 'AskUserQuestion',
+      summary: questions[0]!.question,
+      reason: '',
+      preview: '',
+      backups: [],
+      questions,
+    };
+    const decision = await this.ask(card, signal);
+    if (decision.why === STOPPED) return deny(STOPPED);
+    if (!decision.approve || !decision.answers) {
+      return deny(
+        decision.why
+          ? `The user didn't pick an answer; they wrote: "${decision.why}". Go by that.`
+          : "The user dismissed the questions without answering. Don't ask them again; go on with sensible defaults or ask in plain text.",
+      );
+    }
+    return allow({ ...input, answers: decision.answers });
+  }
+
+  /** ExitPlanMode: the plan goes on a card; approving it ends plan mode, a note sends Claude back to revise it. */
+  private async askPlan(tabId: string, input: Record<string, unknown>, id: string, signal: AbortSignal): Promise<HookJSONOutput> {
+    const card: ApprovalRequest = {
+      kind: 'plan',
+      id,
+      tabId,
+      at: Date.now(),
+      tool: 'ExitPlanMode',
+      summary: 'Plan ready',
+      reason: '',
+      preview: '',
+      backups: [],
+      plan: planOf(input),
+    };
+    const decision = await this.ask(card, signal);
+    if (decision.why === STOPPED) return deny(STOPPED);
+    if (decision.approve) {
+      this.setPlanning(tabId, false);
+      return allow();
+    }
+    return deny(
+      decision.why
+        ? `The user wants changes to the plan: "${decision.why}". Stay in plan mode, revise the plan and present it again with ExitPlanMode.`
+        : "The user didn't approve the plan. Stay in plan mode and ask what they'd like changed.",
+    );
+  }
+
   private ask(approval: ApprovalRequest, signal: AbortSignal): Promise<Decision> {
     return new Promise((resolve) => {
       const finish = (d: Decision) => {
@@ -225,12 +384,26 @@ export class SafetyGate {
     });
   }
 
-  /** The user's answer from the approval card. */
-  answer(id: string, approve: boolean, command?: string, always = false, all = false): void {
+  /** The user's answer from a card (a question card's `answers`; `why`: what they wrote instead). */
+  answer(
+    id: string,
+    approve: boolean,
+    command?: string,
+    always = false,
+    all = false,
+    extra: { answers?: Record<string, string>; why?: string } = {},
+  ): void {
     const pending = this.pending.get(id);
     if (!pending) return;
-    pending.resolve({ approve, ...(approve && command !== undefined ? { command } : {}), ...(approve && always ? { always } : {}) });
-    if (!approve || !all) return;
+    const why = extra.why?.trim();
+    pending.resolve({
+      approve,
+      ...(approve && command !== undefined ? { command } : {}),
+      ...(approve && always ? { always } : {}),
+      ...(approve && extra.answers ? { answers: extra.answers } : {}),
+      ...(why ? { why } : {}),
+    });
+    if (!approve || !all || pending.approval.kind === 'question' || pending.approval.kind === 'plan') return;
     // "Approve all for this reply": this card, the others waiting in the tab, and whatever else this turn asks.
     const { tabId } = pending.approval;
     this.trustedTurns.add(tabId);
@@ -240,6 +413,7 @@ export class SafetyGate {
   /** The turn ended (or was stopped): "Approve all for this reply" is over. */
   turnEnded(tabId: string): void {
     this.trustedTurns.delete(tabId);
+    this.turnText.delete(tabId);
   }
 
   /** Stop: every approval waiting in this tab is denied. */

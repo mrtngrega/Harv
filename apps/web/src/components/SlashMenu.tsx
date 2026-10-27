@@ -6,6 +6,8 @@ export const DASHBOARD_COMMANDS: SlashCommandInfo[] = [
   { name: 'model', argumentHint: 'auto|opus|sonnet|haiku|fable [effort]', description: 'Switch the model and effort (Harv)' },
   { name: 'attach', argumentHint: '', description: 'Add files to the message (Harv)' },
   { name: 'new', argumentHint: '', description: 'Open a new chat tab (Harv)' },
+  { name: 'plan', argumentHint: '[on|off]', description: 'Plan mode: Harv only reads and plans, then shows a plan to approve (Harv)' },
+  { name: 'rewind', argumentHint: '', description: 'Go back to before your last message: files and chat (Harv)' },
   { name: 'help', argumentHint: '', description: 'Show Harv’s commands (Harv)' },
 ];
 

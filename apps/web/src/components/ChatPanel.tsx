@@ -10,8 +10,6 @@ import {
   type DragEvent,
   type FormEvent,
 } from 'react';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { FRESH_HINT_TOKENS, type PathSuggestion } from '@harv/shared';
 import { formatSize, uploadAttachment } from '../lib/attachments.ts';
 import { lineTime, resetTime, tokens } from '../lib/format.ts';
@@ -20,6 +18,10 @@ import { useCatalog, useSettings, useUsage } from '../lib/useHarvSocket.ts';
 import { chat, getChatState, SETTINGS_TAB, startQuestions, useChat, type Line } from '../lib/chatStore.ts';
 import { useSafety } from '../lib/safetyStore.ts';
 import { ActionBadge, ApprovalCard } from './ApprovalCard.tsx';
+import { FileCards } from './chat/FileCards.tsx';
+import { PreviewPane } from './chat/PreviewPane.tsx';
+import { RichText } from './chat/RichText.tsx';
+import { usePreviews } from '../lib/preview.ts';
 import { SettingsView } from './SettingsView.tsx';
 import { StartChoice } from './StartChoice.tsx';
 import { StatusLine } from './StatusLine.tsx';
@@ -94,12 +96,44 @@ function Time({ at }: { at: number }) {
   );
 }
 
+/** Rewind (Claude Code's /rewind): asks once more, since the later messages go. */
+function RewindButton({ line }: { line: Line }) {
+  const [sure, setSure] = useState(false);
+  const btn = 'cursor-pointer rounded px-1.5 text-[11px] hover:bg-white/10';
+  if (!sure)
+    return (
+      <button
+        type="button"
+        onClick={() => setSure(true)}
+        title="Rewind: put the files Harv changed and the conversation back to before this message (the later messages go)"
+        className={`${btn} text-muted opacity-0 group-hover:opacity-100 hover:text-accent focus:opacity-100`}
+      >
+        ⟲ rewind
+      </button>
+    );
+  return (
+    <span className="text-[11px] text-warn">
+      rewind to here? this and everything after it goes ·{' '}
+      <button type="button" onClick={() => chat.rewind(line.id)} className={`${btn} text-warn`}>
+        yes
+      </button>
+      <button type="button" onClick={() => setSure(false)} className={`${btn} text-muted`}>
+        no
+      </button>
+    </span>
+  );
+}
+
+/** Messages Harv's own commands handled: never sent to Claude, so there's nothing to rewind to. */
+const LOCAL_COMMAND = /^\/(report|btw)\b/i;
+
 function ChatLineView({ line, onHarder }: { line: Line; onHarder?: () => void }) {
   const { showTimes, showTags } = useSettings();
   switch (line.kind) {
     case 'you':
       return (
-        <div className="animate-fade-in rounded-md border-l-2 border-accent bg-accent/10 px-2.5 py-1.5 whitespace-pre-wrap text-white">
+        <div className="group animate-fade-in rounded-md border-l-2 border-accent bg-accent/10 px-2.5 py-1.5 whitespace-pre-wrap text-white">
+          <div className="float-right ml-2">{!LOCAL_COMMAND.test(line.text) && <RewindButton line={line} />}</div>
           <Time at={line.at} />
           <span className="text-accent">you ›</span> {line.text}
           {line.files && (
@@ -137,9 +171,10 @@ function ChatLineView({ line, onHarder }: { line: Line; onHarder?: () => void })
           </div>
           {line.text && (
             <div className="harv-md mt-1">
-              <Markdown remarkPlugins={[remarkGfm]}>{line.text}</Markdown>
+              <RichText text={line.text} />
             </div>
           )}
+          {line.text && !line.streaming && <FileCards text={line.text} />}
         </div>
       );
     case 'tool':
@@ -259,6 +294,8 @@ export function ChatPanel() {
   const pending = (activeId && pendingByTab[activeId]) || [];
   const uploading = pending.some((p) => !p.file && !p.error);
   const waiting = approvals.filter((a) => a.tabId === activeId);
+  const previews = usePreviews();
+  const preview = active && view === 'chat' ? previews[active.id] : undefined;
   // "Try harder" sits on the newest reply, once the tab is idle.
   const lastReplyId = active?.lines.findLast((l) => l.kind === 'harv' && l.tag)?.id;
   // Chats from before Harv started ask "continue or new session?" in their own tab (not while a turn runs in them).
@@ -392,6 +429,8 @@ export function ChatPanel() {
       if (command.kind === 'attach') openAttach();
       else if (command.kind === 'new') chat.newTab();
       else if (command.kind === 'help') chat.localNotice(HELP);
+      else if (command.kind === 'plan') chat.setPlanning(chat.ensureTab(), command.on ?? !active?.planning);
+      else if (command.kind === 'rewind') chat.rewindLast(chat.ensureTab());
       else if (command.kind === 'error') chat.localNotice(command.message, 'error');
       else {
         if (command.model) chat.setModel(command.model);
@@ -634,22 +673,29 @@ export function ChatPanel() {
             <Explorer key={active.id} id={active.id} />
           </Suspense>
         ) : (
-          <div
-            ref={logRef}
-            className={`flex flex-1 flex-col overflow-y-auto px-5 ${density === 'compact' ? 'gap-1.5 py-3 leading-normal' : 'gap-3.5 py-4 leading-relaxed'}`}
-          >
-            {!active || active.lines.length === 0 ? (
-              <p className="m-auto text-center text-muted">
-                {active ? 'New chat. Ask Harv anything.' : 'No chat open. Press + to start one.'}
-              </p>
-            ) : (
-              active.lines.map((l) => (
-                <ChatLine key={l.id} line={l} onHarder={!active.busy && l.id === lastReplyId ? () => chat.harder(active.id) : undefined} />
-              ))
-            )}
-            {waiting.map((a) => (
-              <ApprovalCard key={a.id} approval={a} />
-            ))}
+          <div className={`flex min-h-0 flex-1 ${preview ? 'flex-col gap-2 pb-2 lg:flex-row lg:pr-2' : ''}`}>
+            <div
+              ref={logRef}
+              className={`flex min-w-0 flex-1 flex-col overflow-y-auto px-5 ${preview ? 'max-lg:max-h-[45%] lg:max-w-[50%]' : ''} ${density === 'compact' ? 'gap-1.5 py-3 leading-normal' : 'gap-3.5 py-4 leading-relaxed'}`}
+            >
+              {!active || active.lines.length === 0 ? (
+                <p className="m-auto text-center text-muted">
+                  {active ? 'New chat. Ask Harv anything.' : 'No chat open. Press + to start one.'}
+                </p>
+              ) : (
+                active.lines.map((l) => (
+                  <ChatLine
+                    key={l.id}
+                    line={l}
+                    onHarder={!active.busy && l.id === lastReplyId ? () => chat.harder(active.id) : undefined}
+                  />
+                ))
+              )}
+              {waiting.map((a) => (
+                <ApprovalCard key={a.id} approval={a} />
+              ))}
+            </div>
+            {active && preview && <PreviewPane tabId={active.id} preview={preview} />}
           </div>
         )}
 
@@ -747,6 +793,19 @@ export function ChatPanel() {
 
         {!nonChat && <TaskStrip tab={active ?? undefined} />}
         {!nonChat && <StatusLine tab={active ?? undefined} />}
+        {!nonChat && active?.planning && (
+          <div className="flex items-center gap-2 px-5 pt-1 text-[11px] text-accent">
+            <span>◇ plan mode</span>
+            <span className="text-faint">Harv only reads and plans, then shows you the plan to approve</span>
+            <button
+              type="button"
+              onClick={() => chat.setPlanning(active.id, false)}
+              className="cursor-pointer rounded px-1.5 text-muted hover:bg-white/10 hover:text-accent"
+            >
+              turn off
+            </button>
+          </div>
+        )}
 
         {!nonChat && (
           <form onSubmit={send} className="relative flex items-end gap-2.5 pt-1 pr-3 pb-2.5 pl-5">

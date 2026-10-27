@@ -1,10 +1,18 @@
 import { EFFORT_LEVELS, type EffortLevel } from '@harv/shared';
 
 /** Commands the dashboard handles itself; they never reach Claude, so they cost nothing. */
-export type Command = { kind: 'model'; model?: string; effort?: EffortLevel } | { kind: 'attach' } | { kind: 'new' } | { kind: 'help' };
+export type Command =
+  | { kind: 'model'; model?: string; effort?: EffortLevel }
+  | { kind: 'attach' }
+  | { kind: 'new' }
+  | { kind: 'help' }
+  /** Plan mode: `on` undefined toggles it. */
+  | { kind: 'plan'; on?: boolean }
+  | { kind: 'rewind' };
 
 export const HELP =
-  'Commands: /model auto|opus|sonnet|haiku|fable [low|medium|high|xhigh|max] switches the model, /attach adds files, /new opens a tab. ' +
+  'Commands: /model auto|opus|sonnet|haiku|fable [low|medium|high|xhigh|max] switches the model, /attach adds files, /new opens a tab, ' +
+  '/plan turns plan mode on or off (Harv only reads and plans, then shows you the plan to approve), /rewind goes back to before your last message (⟲ on any of your messages goes further back). ' +
   'Start a message with /opus, /sonnet, /max… to run just that message at that model or effort. ' +
   'Claude Code’s commands and skills (/compact, /context, /init, /code-review…) go straight to Claude: type / to see them all. ' +
   'While Harv answers, what you send waits its turn; STOP ends the reply and runs it now.';
@@ -20,6 +28,13 @@ export function parseCommand(text: string): Command | { kind: 'error'; message: 
       return args.length ? null : { kind: 'attach' };
     case '/new':
       return args.length ? null : { kind: 'new' };
+    case '/plan': {
+      const a = args[0]?.toLowerCase();
+      if (args.length > 1 || (a && a !== 'on' && a !== 'off')) return null;
+      return { kind: 'plan', ...(a ? { on: a === 'on' } : {}) };
+    }
+    case '/rewind':
+      return args.length ? null : { kind: 'rewind' };
     case '/help':
     case '/?':
       return { kind: 'help' };

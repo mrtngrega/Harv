@@ -142,6 +142,8 @@ export interface ChatSnapshot {
   commands?: SlashCommandInfo[];
   /** Background tasks it started that are running or ended a short while ago. */
   tasks?: BackgroundTask[];
+  /** The chat is in plan mode (only reading and planning until the user approves a plan). */
+  planning?: boolean;
 }
 
 export interface HistoryItem {
@@ -171,6 +173,14 @@ export type ChatClientMessage =
   | { type: 'chat.delete'; tabId: string }
   /** The user renamed a chat (right-click on its tab); auto-naming leaves it alone after that. */
   | { type: 'chat.rename'; tabId: string; title: string }
+  /** Plan mode on or off (/plan): Claude only reads and plans, then shows a plan to approve. */
+  | { type: 'chat.plan'; tabId: string; on: boolean }
+  /**
+   * Rewind: files and the conversation go back to before one of the user's messages, and the
+   * later messages are dropped (Claude Code's /rewind). `fromEnd`: how many of the user's
+   * messages come after it in the chat (0 = the last one).
+   */
+  | { type: 'chat.rewind'; tabId: string; fromEnd: number }
   | { type: 'history.search'; query: string };
 
 export type ChatServerMessage =
@@ -204,5 +214,9 @@ export type ChatServerMessage =
   | { type: 'chat.commands'; tabId: string; commands: SlashCommandInfo[] }
   /** A chat's background tasks (the whole list, replacing the last one). */
   | { type: 'chat.tasks'; tabId: string; tasks: BackgroundTask[] }
+  /** A chat went into plan mode or out of it. */
+  | { type: 'chat.plan'; tabId: string; on: boolean }
+  /** A rewind ran: the chat's lines now (replacing them), and the message it went back before, for the input. */
+  | { type: 'chat.rewound'; tabId: string; chat: ChatSnapshot; text: string; files?: string[] }
   /** The history list; `query` echoes the search it answers ("" = everything). */
   | { type: 'history'; items: HistoryItem[]; query: string };

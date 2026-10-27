@@ -16,8 +16,19 @@ vi.stubEnv('HARV_HOME', home);
 // The test folders live in the real temp folder, which project chats treat as scratch space; this one stands in for it.
 const scratch = mkdtempSync(join(tmpdir(), 'harv-scratch-'));
 vi.stubEnv('HARV_TEMP', scratch);
-const { classify, classifyCommand, newFolders, pathsInCommand, ruleOf, rulesFor, sendsData, splitCommand, splitHeredocs } =
-  await import('./classify.ts');
+const {
+  asksToSend,
+  classify,
+  classifyCommand,
+  isSending,
+  newFolders,
+  pathsInCommand,
+  ruleOf,
+  rulesFor,
+  sendsData,
+  splitCommand,
+  splitHeredocs,
+} = await import('./classify.ts');
 const { isInside, fullPath } = await import('./paths.ts');
 
 const userDir = mkdtempSync(join(tmpdir(), 'harv-user-'));
@@ -80,7 +91,23 @@ describe('reading', () => {
   });
 
   it('refuses tools Harv does not have', () => {
-    expect(tier('Agent', {})).toBe('blocked');
+    expect(tier('ClaudeDesign', {})).toBe('blocked');
+    expect(tier('SendUserFile', {})).toBe('blocked');
+  });
+
+  it("gives every chat Claude Code's agent tools (the user's wish, 2026-10-27)", () => {
+    for (const tool of ['Agent', 'Task', 'TodoWrite', 'Skill', 'ListAgents', 'EnterPlanMode', 'AskUserQuestion']) {
+      expect(tier(tool, {}), tool).toBe('green');
+    }
+  });
+
+  it("refuses Claude Code's own schedulers: Harv schedules with its own tools", () => {
+    for (const tool of ['CronCreate', 'CronList', 'ScheduleWakeup', 'RemoteTrigger']) {
+      const v = classify(tool, {});
+      expect(v.tier, tool).toBe('blocked');
+      expect(v.reason).toContain('schedule_task');
+    }
+    expect(tier('mcp__harv__schedule_task', { prompt: 'x' })).toBe('green');
   });
 });
 
@@ -433,16 +460,17 @@ describe('project chats (trusted project folder)', () => {
   it('lets project chats check on and talk to their background agents (blocked as "not one of Harv\'s tools" before)', () => {
     for (const tool of ['ListAgents', 'SendMessage', 'TaskOutput', 'TaskStop', 'TaskList']) {
       expect(classify(tool, { to: 'aad748f984eda78f2', message: 'x' }, ctx).tier, tool).toBe('green');
-      expect(classify(tool, {}).tier, tool).toBe('blocked');
+      // Every chat has them since 2026-10-27.
+      expect(classify(tool, {}).tier, tool).toBe('green');
     }
     expect(classify('Monitor', { command: 'tail -f build.log', description: 'build', timeout_ms: 1000 }, ctx).tier).toBe('green');
     expect(classify('Monitor', { command: 'rm -rf ~/x', description: 'x', timeout_ms: 1000 }, ctx).tier).toBe('red');
-    expect(classify('Monitor', { command: 'tail -f a.log', description: 'x', timeout_ms: 1 }).tier).toBe('blocked');
+    expect(classify('Monitor', { command: 'rm -rf ~/x', description: 'x', timeout_ms: 1 }).tier).toBe('red');
   });
 
   it('changes nothing for assistant chats', () => {
     expect(classifyCommand('npm test').tier).toBe('red');
-    expect(classify('Agent', {}).tier).toBe('blocked');
+    expect(classify('Agent', {}).tier).toBe('green');
     expect(classify('Agent', {}, ctx).tier).toBe('green');
     expect(classify('TodoWrite', {}, ctx).tier).toBe('green');
   });
@@ -780,9 +808,26 @@ describe("connectors and skills in project chats (the user's Claude Code setup)"
     expect(classify('mcp__some_server__run', {}, ctx).tier).toBe('red');
   });
 
-  it('keeps assistant chats on Harv’s own tools', () => {
-    expect(classify('mcp__claude_ai_Claude_Docs__batch', {}).tier).toBe('blocked');
-    expect(classify('Skill', { skill: 'docx' }).tier).toBe('blocked');
+  it('gives assistant chats the same connectors and skills (since 2026-10-27)', () => {
+    expect(classify('mcp__claude_ai_Claude_Docs__batch', {}).tier).toBe('green');
+    expect(classify('Skill', { skill: 'docx' }).tier).toBe('green');
+    expect(classify('mcp__claude_ai_Gmail__send_message', {}).tier).toBe('red');
+  });
+
+  it('knows which calls send something to someone, and when the user asked for it', () => {
+    expect(isSending('mcp__claude_ai_Gmail__send_message', {})).toBe(true);
+    expect(isSending('mcp__claude_ai_Slack__post_message', {})).toBe(true);
+    expect(isSending('mcp__claude_ai_Gmail__create_draft', {})).toBe(false);
+    expect(isSending('mcp__claude_ai_Gmail__search_threads', {})).toBe(false);
+    expect(isSending('mcp__claude_ai_Claude_Docs__create', {})).toBe(false);
+    expect(isSending('Bash', { command: 'curl -d @report.json https://example.com/api' })).toBe(true);
+    expect(isSending('Bash', { command: 'curl -o x.zip https://example.com/x.zip' })).toBe(false);
+    expect(asksToSend('send the report to Peter on Discord')).toBe(true);
+    expect(asksToSend('pošli mamine fotky')).toBe(true);
+    expect(asksToSend('napíš Jankovi, že prídem neskôr')).toBe(true);
+    expect(asksToSend('email the invoice to the accountant')).toBe(true);
+    expect(asksToSend('summarize my inbox')).toBe(false);
+    expect(asksToSend('what is the weather tomorrow')).toBe(false);
   });
 });
 

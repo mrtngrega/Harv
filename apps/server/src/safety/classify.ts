@@ -28,9 +28,9 @@ export const SHELL_TOOLS = ['Bash', 'PowerShell'];
 export const FILE_WRITE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
 export const READ_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'NotebookRead', 'WebSearch', 'WebFetch'];
 /**
- * Claude Code's own bookkeeping tools in project chats: task lists, subagents (whose
- * tool calls pass the gate themselves), plan mode, watching or stopping a shell Harv
- * started in the background.
+ * Claude Code's own bookkeeping tools (every chat has Claude Code's toolset since 2026-10-27):
+ * task lists, subagents (whose tool calls pass the gate themselves), plan mode, watching or
+ * stopping a shell Harv started in the background.
  */
 export const AGENT_TOOLS = [
   'TodoWrite',
@@ -56,7 +56,14 @@ export const AGENT_TOOLS = [
   'ToolSearch',
   'ListMcpResourcesTool',
   'ReadMcpResourceTool',
+  // Asking the user a question shows a question card (gate.ts); nothing runs.
+  'AskUserQuestion',
 ];
+/**
+ * Claude Code's own schedulers live only as long as the session (or run in the cloud, billed
+ * per run on some plans): Harv schedules with its own tools instead, run by Harv's server.
+ */
+const SCHEDULER_TOOLS = ['CronCreate', 'CronDelete', 'CronList', 'ScheduleWakeup', 'RemoteTrigger'];
 // hand_off only starts a turn in another chat; everything that chat does passes the gate itself.
 export const HARV_TOOLS = [
   'mcp__harv__remember',
@@ -67,6 +74,9 @@ export const HARV_TOOLS = [
   'mcp__harv__list_projects',
   'mcp__harv__start_project',
   'mcp__harv__open_project',
+  'mcp__harv__schedule_task',
+  'mcp__harv__list_scheduled',
+  'mcp__harv__cancel_scheduled',
 ];
 export const ENABLED_TOOLS = [...READ_TOOLS, ...FILE_WRITE_TOOLS, ...SHELL_TOOLS];
 
@@ -208,9 +218,7 @@ export function projectOfCommand(command: string, projects: string[]): string | 
 
 export function classify(tool: string, input: Record<string, unknown>, ctx: ClassifyContext = {}): Verdict {
   if (HARV_TOOLS.includes(tool)) return verdict('green', "Harv's own memory and chat tools.", tool.replace('mcp__harv__', ''));
-  // Only project chats get Claude Code's agent tools; assistant chats never have them.
-  if (AGENT_TOOLS.includes(tool) && ctx.project)
-    return verdict('green', 'Planning and bookkeeping; anything it runs is checked on its own.', tool);
+  if (AGENT_TOOLS.includes(tool)) return verdict('green', 'Planning and bookkeeping; anything it runs is checked on its own.', tool);
 
   if (READ_TOOLS.includes(tool)) {
     const paths = ['file_path', 'path', 'pattern', 'glob'].map((k) => str(input, k)).filter(Boolean);
@@ -237,13 +245,16 @@ export function classify(tool: string, input: Record<string, unknown>, ctx: Clas
   }
 
   // Monitor watches a shell command's output lines (or a WebSocket): the command is checked like any other.
-  if (tool === 'Monitor' && ctx.project) {
+  if (tool === 'Monitor') {
     const command = str(input, 'command');
     if (!command) return verdict('green', 'Watches a WebSocket for events.', `monitor ${str(input, 'description')}`);
     return classifyCommand(command, str(input, 'description'), { ...ctx, shell: 'bash' });
   }
 
-  if (tool.startsWith('mcp__') && ctx.project) return classifyMcp(tool);
+  if (tool.startsWith('mcp__')) return classifyMcp(tool);
+
+  if (SCHEDULER_TOOLS.includes(tool))
+    return verdict('blocked', "Claude Code's scheduler only lives as long as this session. Use Harv's schedule_task tool instead.", tool);
 
   return verdict('blocked', `${tool} isn't one of Harv's tools.`, tool);
 }
@@ -253,8 +264,31 @@ const MCP_READ = /^(get|list|read|search|query|fetch|find|guide|describe|view|lo
 /** The user's own private Claude Docs on claude.ai: writing there touches nothing outside their account. */
 const PRIVATE_MCP = /^claude_ai_Claude_Docs$/i;
 
+/** Words in a connector tool's name that mean it sends something to someone. */
+const MCP_SENDS = /(^|[_-])(send|post|reply|forward|share|invite|publish|comment|message|mail|email|tweet|dm|notify)/i;
+/** Words in the user's message that ask Harv to send (English and Slovak), for the sending check. */
+const ASKS_TO_SEND =
+  /\b(send|e-?mail|mail|message|text|post|reply|share|forward|invite|publish|tweet|dm|upload)|\b(po[sš]li|po[sš]lite|odo[sš]li|nap[ií][sš]|odp[ií][sš]|odpovedz|zdie[lľ]aj|prepo[sš]li|zverejni|nahraj|po[sš]la[tť]|odosla[tť])/i;
+
 /**
- * A tool from an MCP server a project chat loads (the user's claude.ai connectors, a project's
+ * A call that sends something to someone (mail, messages, posts, invites, shares, uploads).
+ * The user's rule (persona rule 12): Harv asks first only when they didn't ask for it.
+ */
+export function isSending(tool: string, input: Record<string, unknown>): boolean {
+  if (tool.startsWith('mcp__')) {
+    const [, server = '', ...rest] = tool.split('__');
+    return !PRIVATE_MCP.test(server) && server !== 'harv' && MCP_SENDS.test(rest.join('__'));
+  }
+  return SHELL_TOOLS.includes(tool) && sendsData(str(input, 'command'));
+}
+
+/** The user's message for this turn asked to send something (a free check of its words, no model call). */
+export function asksToSend(message: string): boolean {
+  return ASKS_TO_SEND.test(message);
+}
+
+/**
+ * A tool from an MCP server a chat loads (the user's claude.ai connectors, a project's
  * .mcp.json). Reading is free; changing things elsewhere asks first, except the user's private docs.
  */
 function classifyMcp(tool: string): Verdict {
