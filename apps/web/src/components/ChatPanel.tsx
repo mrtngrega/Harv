@@ -480,7 +480,7 @@ export function ChatPanel() {
                   setDragTab(null);
                   setDropAt(null);
                 }}
-                className={`animate-fade-in flex min-w-[84px] flex-[0_1_200px] items-center gap-0.5 rounded-t-[10px] border border-b-0 ${
+                className={`animate-fade-in flex max-w-[200px] min-w-[84px] flex-[0_1_200px] items-center gap-0.5 rounded-t-[10px] border border-b-0 ${
                   on ? 'border-[rgb(220_232_245/0.18)] bg-white/10' : 'border-transparent'
                 } ${dragTab === t.id ? 'opacity-40' : ''} ${
                   dragTab && dragTab !== t.id && dropAt?.id === t.id
@@ -529,7 +529,7 @@ export function ChatPanel() {
                       // F2 renames too, for the keyboard.
                       if (e.key === 'F2') setRenaming(t.id);
                     }}
-                    className={`flex min-h-9 cursor-pointer items-center gap-1.5 truncate pr-1 pl-3 text-xs ${on ? 'text-ink' : 'text-muted'}`}
+                    className={`flex min-h-9 min-w-0 flex-1 cursor-pointer items-center gap-1.5 truncate pr-1 pl-3 text-xs ${on ? 'text-ink' : 'text-muted'}`}
                   >
                     {approvals.some((a) => a.tabId === t.id) ? (
                       <span title="Needs your approval" className="flex-none font-semibold text-warn">
@@ -560,7 +560,7 @@ export function ChatPanel() {
                   type="button"
                   onClick={() => chat.closeTab(t.id)}
                   aria-label={`Close ${t.title}`}
-                  className="mr-1 size-7 cursor-pointer rounded-md text-[13px] text-muted hover:bg-white/10"
+                  className="mr-1 size-7 flex-none cursor-pointer rounded-md text-[13px] text-muted hover:bg-white/10"
                 >
                   ×
                 </button>

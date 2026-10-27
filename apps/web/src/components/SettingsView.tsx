@@ -788,6 +788,14 @@ export function SettingsView() {
             unit="%"
             onChange={(scrim) => updateSettings({ scrim })}
           />
+          {inApp && (
+            <Toggle
+              on={settings.seeThrough}
+              label="See-through window"
+              hint={`The app shows what's behind it${navigator.userAgent.includes('Windows') ? ', frosted' : ''} instead of the photo. Darkness still tints it. Only on this device.`}
+              onChange={(seeThrough) => updateSettings({ seeThrough })}
+            />
+          )}
         </Section>
       </div>
 
@@ -883,6 +891,12 @@ export function SettingsView() {
       <Projects />
 
       <Section title="Safety">
+        <Toggle
+          on={settings.askRisky}
+          label="Ask before risky actions"
+          hint="Off: deleting, installing, stopping programs, system changes and sending data run right away, backed up first and logged with Undo. On: Harv shows an approval card first. Blocked things always stay blocked."
+          onChange={(askRisky) => updateSettings({ askRisky })}
+        />
         <Toggle
           on={settings.confirmYellow}
           label="Ask before changing my files too"

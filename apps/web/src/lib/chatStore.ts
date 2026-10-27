@@ -407,15 +407,18 @@ function markAnswered(id: string) {
   }
 }
 
-/** On a fresh server start, every chat with messages asks once (unless answered before a reload). */
-function askOnStart(chats: ChatSnapshot[], startedAt: number | undefined) {
+/**
+ * On a fresh server start, every chat Harv has answered in asks once (unless answered before a reload).
+ * One with only notes (`/report`, notices) has no Claude session to continue, so it doesn't ask.
+ */
+export function askOnStart(chats: ChatSnapshot[], startedAt: number | undefined) {
   if (startedAt === boot) return;
   const first = boot === null;
   boot = startedAt ?? 0;
   // A reconnect to the same server (no startedAt from an older server) isn't a new start.
   if (!first && !startedAt) return;
   const done = answered();
-  startQuestions.set(chats.filter((c) => c.lines.length > 0 && !done.includes(c.id)).map((c) => c.id));
+  startQuestions.set(chats.filter((c) => c.lines.some((l) => l.kind === 'harv') && !done.includes(c.id)).map((c) => c.id));
 }
 
 /**

@@ -122,8 +122,11 @@ export class SafetyGate {
     const ctx = this.contextOf(tabId);
     const verdict = classify(tool, input, ctx);
     const at = Date.now();
-    // Red always asks; yellow asks too when the user turned on "confirm changes" in Settings.
-    const asks = (verdict.tier === 'red' || (verdict.tier === 'yellow' && loadSettings().confirmYellow)) && !this.trustedTurns.has(tabId);
+    // Red asks when "Ask before risky actions" is on; yellow too when "confirm changes" is on (both in Settings › Safety).
+    const settings = loadSettings();
+    const asks =
+      ((verdict.tier === 'red' && settings.askRisky) || (verdict.tier === 'yellow' && settings.confirmYellow)) &&
+      !this.trustedTurns.has(tabId);
     const status = verdict.tier === 'blocked' ? 'blocked' : asks ? 'pending' : 'running';
     this.actions.add({ id, tabId, at, tool, tier: verdict.tier, summary: verdict.summary, reason: verdict.reason, status, input });
 
@@ -136,7 +139,9 @@ export class SafetyGate {
     if (!asks) {
       if (verdict.tier === 'red') {
         this.approved.add(id);
-        this.actions.update(id, { result: 'Approved with the rest of this reply.' });
+        this.actions.update(id, {
+          result: this.trustedTurns.has(tabId) ? 'Approved with the rest of this reply.' : 'Ran without asking (Settings › Safety).',
+        });
       }
       this.backup(id, verdict.targets);
       this.publish(id);

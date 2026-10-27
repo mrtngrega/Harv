@@ -110,6 +110,12 @@ body {
   font-size: 13px;
 }
 
+/* The app's see-through window: nothing opaque under the panels. */
+html.see-through,
+html.see-through body {
+  background: transparent;
+}
+
 /* Harv's Markdown replies, kept compact to fit the log style. */
 .harv-md > :first-child {
   margin-top: 0;

@@ -402,20 +402,21 @@ const matches = (rule: Rule, text: string) => (typeof rule === 'function' ? rule
 
 /** Red-action categories, for a clear reason on the approval card. */
 const RED_REASONS: [Rule, string][] = [
-  [/\b(rm|rmdir|rd|del|erase|remove-item|ri)\b/i, 'Deletes files or folders.'],
+  // (?<![\w.-]): a word, not a flag or part of a name (`java -cp`, `docker run --rm`).
+  [/(?<![\w.-])(rm|rmdir|rd|del|erase|remove-item|ri)\b/i, 'Deletes files or folders.'],
   [
     /\b(winget|choco|scoop|msiexec)\b|\b(npm|pnpm|yarn|pip3?)\s+(i|install|add|uninstall|remove)\b|\b(install|uninstall)-\w+/i,
     'Installs or uninstalls software.',
   ],
   [LINUX_INSTALL, 'Installs or uninstalls software.'],
-  [/\b(taskkill|kill|pkill|killall|stop-process|spps)\b/i, 'Stops running programs.'],
-  [/\b(reg|regedit)\b|-itemproperty\b|\bhk(lm|cu|cr|u|cc):?\\/i, 'Changes the Windows registry.'],
+  [/(?<![\w.-])(taskkill|kill|pkill|killall|stop-process|spps)\b/i, 'Stops running programs.'],
+  [/(?<![\w.-])reg\b(?!\s+(query|export)\b)|\bregedit\b|-itemproperty\b|\bhk(lm|cu|cr|u|cc):?\\/i, 'Changes the Windows registry.'],
   [/\b(netsh|sc|bcdedit|powercfg|schtasks|setx|set-service|set-netadapter|set-executionpolicy)\b/i, 'Changes system settings.'],
   [LINUX_SYSTEM, 'Changes system settings.'],
   [/\b(sudo|pkexec)\b/i, 'Runs as administrator.'],
   [/\bgit\s+push\b/i, 'Pushes to a git remote.'],
   [sendsData, 'Sends data over the network.'],
-  [/\b(mv|move|ren|rename|move-item|rename-item|cp|copy|xcopy|robocopy|copy-item)\b/i, 'Moves, renames or copies files.'],
+  [/(?<![\w.-])(mv|move|ren|rename|move-item|rename-item|cp|copy|xcopy|robocopy|copy-item)\b/i, 'Moves, renames or copies files.'],
   [/\.(ps1|bat|cmd|vbs|js|py|sh)\b|\b(python3?|py|node|powershell|pwsh|cmd|bash)\b/i, 'Runs a script or another shell.'],
   [/\b(set-content|add-content|out-file|new-item|tee)\b|>/i, 'Writes files.'],
 ];
@@ -1031,8 +1032,8 @@ const PROJECT_RED: [Rule, string][] = [
   [/\b(winget|choco|scoop|msiexec)\b|\b(install|uninstall)-(module|package|script)\b/i, 'Installs or removes software for the whole PC.'],
   [installsPythonPackages, 'Installs or removes Python packages for the whole PC.'],
   [LINUX_INSTALL, 'Installs or removes software for the whole PC.'],
-  [/\b(taskkill|kill|pkill|killall|stop-process|spps)\b/i, 'Stops running programs.'],
-  [/\b(reg|regedit)\b|-itemproperty\b|\bhk(lm|cu|cr|u|cc):?\\/i, 'Changes the Windows registry.'],
+  [/(?<![\w.-])(taskkill|kill|pkill|killall|stop-process|spps)\b/i, 'Stops running programs.'],
+  [/(?<![\w.-])reg\b(?!\s+(query|export)\b)|\bregedit\b|-itemproperty\b|\bhk(lm|cu|cr|u|cc):?\\/i, 'Changes the Windows registry.'],
   [/\b(netsh|sc|bcdedit|powercfg|schtasks|setx|set-service|set-executionpolicy|shutdown|reboot|poweroff)\b/i, 'Changes system settings.'],
   [LINUX_SYSTEM, 'Changes system settings.'],
   [/\b(runas|sudo|pkexec)\b|-verb\s+runas/i, 'Runs as administrator.'],

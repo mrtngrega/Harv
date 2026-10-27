@@ -38,6 +38,7 @@ export function cleanSettings(raw: Raw, base: HarvSettings = DEFAULT_SETTINGS): 
   };
   return {
     protectedPaths: paths,
+    askRisky: bool(raw.askRisky, base.askRisky),
     confirmYellow: bool(raw.confirmYellow, base.confirmYellow),
     allowRules: Array.isArray(raw.allowRules)
       ? [...new Set(raw.allowRules.filter((r): r is string => typeof r === 'string' && r.trim() !== '').map((r) => r.trim().toLowerCase()))]
@@ -47,6 +48,7 @@ export function cleanSettings(raw: Raw, base: HarvSettings = DEFAULT_SETTINGS): 
     backgroundBlur: num(raw.backgroundBlur, 0, 30, base.backgroundBlur),
     scrim: num(raw.scrim, 0, 90, base.scrim),
     glass: num(raw.glass, 20, 95, base.glass),
+    seeThrough: bool(raw.seeThrough, base.seeThrough),
     uiScale: num(raw.uiScale, 80, 130, base.uiScale),
     density: oneOf(raw.density, ['comfy', 'compact'] as const, base.density),
     showTimes: bool(raw.showTimes, base.showTimes),

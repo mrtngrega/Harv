@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SafetyServerMessage } from '@harv/shared';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const home = mkdtempSync(join(tmpdir(), 'harv-gate-'));
 vi.stubEnv('HARV_HOME', home);
@@ -25,6 +25,9 @@ function setup() {
 }
 
 const signal = () => new AbortController().signal;
+/** These tests are about the approval cards, so "Ask before risky actions" is on unless a test says otherwise. */
+const writeSettings = (extra: Record<string, unknown> = {}) =>
+  writeFileSync(join(home, 'settings.json'), JSON.stringify({ askRisky: true, ...extra }));
 const decision = (out: unknown) =>
   (out as { hookSpecificOutput?: { permissionDecision?: string; updatedInput?: Record<string, unknown> } }).hookSpecificOutput;
 
@@ -48,6 +51,8 @@ describe('backups', () => {
 });
 
 describe('SafetyGate', () => {
+  beforeEach(() => writeSettings());
+
   it('deletes inside a folder the user attached to that chat without a card, backed up first', async () => {
     const store = new ActionStore(':memory:');
     const sent: SafetyServerMessage[] = [];
@@ -175,7 +180,7 @@ describe('SafetyGate', () => {
   });
 
   it('asks before yellow edits too when "confirm changes" is on', async () => {
-    writeFileSync(join(home, 'settings.json'), JSON.stringify({ confirmYellow: true }));
+    writeSettings({ confirmYellow: true });
     try {
       const { gate, store, sent } = setup();
       const file = join(userDir, 'confirm.txt');
@@ -189,7 +194,7 @@ describe('SafetyGate', () => {
       expect(decision(await pending)?.permissionDecision).toBe('allow');
       expect(store.get('t8')?.backups).toEqual([file]);
     } finally {
-      rmSync(join(home, 'settings.json'), { force: true });
+      writeSettings();
     }
   });
 
@@ -203,7 +208,7 @@ describe('SafetyGate', () => {
       onChange: () => {},
       allow: (rules) => {
         saved.push(rules);
-        writeFileSync(join(home, 'settings.json'), JSON.stringify({ allowRules: rules }));
+        writeSettings({ allowRules: rules });
       },
     });
     try {
@@ -224,7 +229,26 @@ describe('SafetyGate', () => {
       expect(gate.waiting).toBe(1);
       gate.cancel('tab');
     } finally {
-      rmSync(join(home, 'settings.json'), { force: true });
+      writeSettings();
     }
+  });
+
+  it('runs red commands without a card when "Ask before risky actions" is off, backed up and logged', async () => {
+    writeSettings({ askRisky: false });
+    const { gate, store, sent } = setup();
+    const file = join(userDir, 'gone.txt');
+    writeFileSync(file, 'keep a copy');
+    const out = await gate.preToolUse('tab', 'PowerShell', { command: `Remove-Item "${file}"` }, 'q1', signal());
+    expect(decision(out)?.permissionDecision).toBe('allow');
+    expect(store.get('q1')).toMatchObject({
+      tier: 'red',
+      status: 'running',
+      backups: [file],
+      result: 'Ran without asking (Settings › Safety).',
+    });
+    expect(sent.some((m) => m.type === 'approval.request')).toBe(false);
+    expect(await gate.canUseTool('PowerShell', { command: `Remove-Item "${file}"` }, 'q1', 'tab')).toMatchObject({ behavior: 'allow' });
+    // Blocked stays blocked.
+    expect(decision(await gate.preToolUse('tab', 'PowerShell', { command: 'format D:' }, 'q2', signal()))?.permissionDecision).toBe('deny');
   });
 });

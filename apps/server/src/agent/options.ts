@@ -7,7 +7,7 @@ import { IS_WINDOWS, OS_NAME } from '../platform.ts';
 import { ENABLED_TOOLS } from '../safety/classify.ts';
 import type { SafetyGate } from '../safety/gate.ts';
 import { WORKSPACE } from '../safety/paths.ts';
-import { workDir } from '../settings.ts';
+import { loadSettings, workDir } from '../settings.ts';
 import type { ChatStore } from '../store/chats.ts';
 import { harvServer, recentChatsContext, type Delegate, type ProjectTools } from './chatTools.ts';
 import { memoryContext } from './memory.ts';
@@ -63,6 +63,13 @@ function otherChats(chat: ChatContext): string {
   ].join('\n\n');
 }
 
+/** The safety note while "Ask before risky actions" is off (the user's choice, 2026-10-27). */
+const NO_CARDS =
+  "- Harv's safety gate checks every action, but it doesn't ask the user first: everything runs right away (the user's choice, Settings › Safety › Ask before risky actions). Files a command names are backed up before they change or go, and every action is logged with Undo. Formatting drives, " +
+  (IS_WINDOWS ? 'the Windows folder' : "the system's own folders (/usr, /etc…)") +
+  ", turning off antivirus or the firewall, and reading stored credentials stay blocked. So you're trusted: before something hard to undo (deleting the user's files, installing or uninstalling, stopping programs, system or registry changes, sending messages or data, force pushes), say in a sentence what you're about to do, and pick the least risky way to do it. If something is blocked, don't retry it or work around it; tell the user." +
+  (IS_WINDOWS ? '' : " sudo can't type a password here, so leave anything that needs it to the user.");
+
 /**
  * What a project chat adds on top of Claude Code's own system prompt: Harv's persona,
  * the dev rules, Harv's memory about the user and the other chats.
@@ -78,7 +85,9 @@ function projectPrompt(chat: ChatContext, project: Project): string {
       `- This chat works on the project "${project.name}" in ${project.path}. You have Claude Code's full instructions and tools: follow them for all the engineering work, exactly as Claude Code would. The user's own Claude Code setup is loaded too: their skills (docx, pdf, pptx, xlsx, deep-research, skill-creator and the rest; use them for documents and research) and their claude.ai connectors (Claude Docs for docs they asked for). You're still Harv (the persona above), running in Harv's dashboard on the user's ${OS_NAME}, and replies render as Markdown.`,
       "- The project's CLAUDE.md (loaded above when there is one) is the source of truth for this project. Keep it and the project's docs up to date.",
       "- Your project memory is Claude Code's auto-memory for this folder (see above). The user's Claude Code sessions on this folder share it, so keep it current: where things stand, decisions, the user's rules. What Harv knows about the user in general is below; change that with remember/forget.",
-      "- Harv's safety gate checks every action, and in a project chat it asks only for the risky kinds. Editing files and dev commands (npm, tests, builds, scripts, heredoc scripts like `python3 - <<'EOF'`, git add/commit and a normal git push) run without asking, in the project folder and in the temp folder (your scratch space); git is the undo, and deletes are backed up. Work that touches files elsewhere also runs, logged, with the small files it names backed up first; downloads without uploading run too. It asks the user (an approval card) for deleting outside the project or with targets it can't see (variables, substitutions), force-pushing or deleting remote branches, throwing away uncommitted work, installing software for the whole PC, sudo, stopping programs, system or registry changes, sending data (uploads, POST requests), piping a download into a shell, and changing a connected Android device. Blocked things stay blocked. If something is denied, don't work around it.",
+      loadSettings().askRisky
+        ? "- Harv's safety gate checks every action, and in a project chat it asks only for the risky kinds. Editing files and dev commands (npm, tests, builds, scripts, heredoc scripts like `python3 - <<'EOF'`, git add/commit and a normal git push) run without asking, in the project folder and in the temp folder (your scratch space); git is the undo, and deletes are backed up. Work that touches files elsewhere also runs, logged, with the small files it names backed up first; downloads without uploading run too. It asks the user (an approval card) for deleting outside the project or with targets it can't see (variables, substitutions), force-pushing or deleting remote branches, throwing away uncommitted work, installing software for the whole PC, sudo, stopping programs, system or registry changes, sending data (uploads, POST requests), piping a download into a shell, and changing a connected Android device. Blocked things stay blocked. If something is denied, don't work around it."
+        : NO_CARDS,
       '- Background agents you start show in a strip above the prompt, where the user can stop each one; use ListAgents to check on them, and SendMessage to talk to one.',
       `- The user's home folder is ${homedir()}. Today is ${today}.`,
     ].join('\n'),
@@ -92,6 +101,7 @@ function projectPrompt(chat: ChatContext, project: Project): string {
 
 /** Built fresh for each new session, so persona edits and new memories apply to the next chat. */
 function systemPrompt(chat?: ChatContext): string {
+  const asks = loadSettings().askRisky;
   const persona = existsSync(PERSONA_PATH) ? readFileSync(PERSONA_PATH, 'utf8').trim() : 'You are Harv, a personal assistant.';
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   return [
@@ -100,14 +110,22 @@ function systemPrompt(chat?: ChatContext): string {
     [
       `- You're running inside Harv's dashboard on the user's ${OS_NAME}. Replies render as Markdown in a log-style chat, so keep formatting light.`,
       `- Your tools: read and search files, search and fetch the web, create and edit files, ${IS_WINDOWS ? 'run PowerShell and Bash commands (prefer PowerShell for Windows tasks)' : 'run Bash commands'}, remember/forget for your memory, list_chats/read_chat for your other chats, and hand_off to give a task to another chat tab.`,
-      `- Harv's safety gate checks every action. Reading is free, and so is creating files in your workspace (${WORKSPACE}). Editing or creating the user's files is backed up first and they can Undo it. Riskier things (deleting, installing, stopping programs, scripts, ${IS_WINDOWS ? 'the registry, ' : 'sudo, '}system settings, sending data, git push) show the user an approval card with the exact command, and you wait for their answer. Formatting drives, touching ${IS_WINDOWS ? 'the Windows folder' : "the system's own folders (/usr, /etc…)"}, turning off antivirus or the firewall, and reading stored credentials are always blocked.${IS_WINDOWS ? '' : " sudo can't type a password here, so leave anything that needs it to the user."}`,
+      ...(asks
+        ? [
+            `- Harv's safety gate checks every action. Reading is free, and so is creating files in your workspace (${WORKSPACE}). Editing or creating the user's files is backed up first and they can Undo it. Riskier things (deleting, installing, stopping programs, scripts, ${IS_WINDOWS ? 'the registry, ' : 'sudo, '}system settings, sending data, git push) show the user an approval card with the exact command, and you wait for their answer. Formatting drives, touching ${IS_WINDOWS ? 'the Windows folder' : "the system's own folders (/usr, /etc…)"}, turning off antivirus or the firewall, and reading stored credentials are always blocked.${IS_WINDOWS ? '' : " sudo can't type a password here, so leave anything that needs it to the user."}`,
+          ]
+        : [NO_CARDS]),
       "- When the user starts a new project, use start_project (never make the folder yourself): ask first whether its GitHub repo should be private or public, and wait for the answer. It makes the folder, git, a starter CLAUDE.md and the repo, so the user's other devices get the project too.",
       '- The user\'s projects (list_projects) are trusted: commands that start with `cd` into a project folder, and edits to its files, run without asking, git push included (except force pushes, installs for the whole PC and the like). When the user wants to work on one of them ("let\'s continue on Harv", "work on X"), call open_project first, before anything else, so the chat becomes a project chat with Claude Code\'s full tools and the project\'s rules.',
-      "- So: pick the least risky way to do what's asked, say in a sentence what you're about to do before a risky step, and keep commands simple and readable (the user approves exactly what they see). If something is denied or blocked, don't retry it or work around it; ask what they'd like instead.",
-      '- One plain command per step. Simple commands pass without bothering the user, but anything with variables, if/else, loops or several steps chained together always needs their approval. ' +
-        (IS_WINDOWS
-          ? "For example, check with `Test-Path '<path>'` first, then create a folder with just `New-Item -ItemType Directory -Path '<full path>'` (new folders don't need approval), and open a file with `Start-Process '<path>'`."
-          : "For example, check with `ls '<path>'` first, then create a folder with just `mkdir '<full path>'` (new folders don't need approval), and open a file with `xdg-open '<path>'`."),
+      ...(asks
+        ? [
+            "- So: pick the least risky way to do what's asked, say in a sentence what you're about to do before a risky step, and keep commands simple and readable (the user approves exactly what they see). If something is denied or blocked, don't retry it or work around it; ask what they'd like instead.",
+            '- One plain command per step. Simple commands pass without bothering the user, but anything with variables, if/else, loops or several steps chained together always needs their approval. ' +
+              (IS_WINDOWS
+                ? "For example, check with `Test-Path '<path>'` first, then create a folder with just `New-Item -ItemType Directory -Path '<full path>'` (new folders don't need approval), and open a file with `Start-Process '<path>'`."
+                : "For example, check with `ls '<path>'` first, then create a folder with just `mkdir '<full path>'` (new folders don't need approval), and open a file with `xdg-open '<path>'`."),
+          ]
+        : []),
       `- The user's home folder is ${homedir()} (Downloads, Documents and Desktop are usually inside it; check if a path isn't there). You can read and open files anywhere on the ${IS_WINDOWS ? 'PC' : 'computer'}.`,
       ...(workDir()
         ? [

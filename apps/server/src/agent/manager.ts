@@ -830,6 +830,8 @@ export class ChatManager {
       else this.store.delete(tabId);
       this.publishHistory();
     }
+    // Every window drops the tab, not only the one that closed it (the app and a browser tab side by side).
+    this.broadcast({ type: 'chat.removed', tabId });
     this.onStatus(this.status);
   }
 
@@ -1003,7 +1005,6 @@ export class ChatManager {
     for (const c of this.store.openChats()) {
       if (wanted.has(c.id) || this.busy(c.id)) continue;
       this.close(c.id);
-      this.broadcast({ type: 'chat.removed', tabId: c.id });
     }
     this.publishHistory();
   }

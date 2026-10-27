@@ -1,13 +1,21 @@
-import type { CSSProperties } from 'react';
+import { useEffect, type CSSProperties } from 'react';
 import { dragWindow, Header } from './components/Header.tsx';
 import { HistorySidebar } from './components/HistorySidebar.tsx';
 import { ChatPanel } from './components/ChatPanel.tsx';
 import { StatsPanel } from './components/StatsPanel.tsx';
 import { Toasts } from './components/Toasts.tsx';
+import { desktop, inApp } from './lib/desktop.ts';
 import { useBackground, useSettings } from './lib/useHarvSocket.ts';
 
 export function App() {
-  const { accent, motion, backgroundBlur, scrim, glass, uiScale, density } = useSettings();
+  const { accent, motion, backgroundBlur, scrim, glass, uiScale, density, seeThrough } = useSettings();
+  // See-through (the app only): the window shows the desktop behind it; the darkness layer still tints it.
+  const clear = inApp && seeThrough;
+  useEffect(() => {
+    if (!inApp) return;
+    document.documentElement.classList.toggle('see-through', clear);
+    desktop.seeThrough(clear);
+  }, [clear]);
   const { version } = useBackground();
   // Before the server says, try the photo anyway; after a removal, show the plain ground colour.
   const photo = version === null ? undefined : `url(/api/background${version ? `?v=${version}` : ''})`;
@@ -27,11 +35,13 @@ export function App() {
       }
     >
       {/* Blurred personal background from ~/.harv, falling back to the ground color. */}
-      <div
-        aria-hidden="true"
-        className="absolute -inset-12 scale-105 bg-cover bg-center saturate-[1.1]"
-        style={{ backgroundImage: photo, filter: backgroundBlur ? `blur(${backgroundBlur}px)` : undefined }}
-      />
+      {!clear && (
+        <div
+          aria-hidden="true"
+          className="absolute -inset-12 scale-105 bg-cover bg-center saturate-[1.1]"
+          style={{ backgroundImage: photo, filter: backgroundBlur ? `blur(${backgroundBlur}px)` : undefined }}
+        />
+      )}
       <div aria-hidden="true" className="absolute inset-0" style={{ background: `rgb(10 16 24 / ${scrim / 100})` }} />
 
       <div

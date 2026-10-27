@@ -11,6 +11,7 @@ mod prefs;
 mod tray;
 mod update;
 
+use tauri::window::Color;
 use tauri::{AppHandle, Manager, WebviewWindow, WindowEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
 use tauri_plugin_window_state::StateFlags;
@@ -80,6 +81,21 @@ fn set_status(app: AppHandle, status: &str) {
         ))
     });
     tray::set_status(&app, status);
+}
+
+/// The dashboard's ground colour, behind the page while it loads (and whenever see-through is off).
+const GROUND: Color = Color(10, 16, 24, 255);
+
+/// Settings › Look › See-through window: the desktop shows behind the dashboard (frosted on
+/// Windows; plain transparency on Linux, where Tauri has no blur), or the solid window again.
+#[tauri::command]
+fn set_see_through(window: WebviewWindow, on: bool) {
+    let _ = window.set_background_color(Some(if on { Color(0, 0, 0, 0) } else { GROUND }));
+    #[cfg(windows)]
+    {
+        use tauri::window::{Effect, EffectsBuilder};
+        let _ = window.set_effects(on.then(|| EffectsBuilder::new().effect(Effect::Acrylic).build()));
+    }
 }
 
 #[tauri::command]
@@ -157,7 +173,8 @@ fn main() {
             set_app_settings,
             check_updates,
             apply_update,
-            pick_paths
+            pick_paths,
+            set_see_through
         ])
         .setup(move |app| {
             let handle = app.handle();

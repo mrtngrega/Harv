@@ -232,6 +232,14 @@ describe('chat names', () => {
     chats.close('talk');
     expect(store.exists('talk')).toBe(true);
   });
+
+  it('tells every window a closed tab is gone, not only the one that closed it', () => {
+    const { chats, store, sent } = setup();
+    store.ensureChat('talk', 'Weather');
+    store.addLine('talk', { kind: 'you', text: 'rain?' });
+    chats.close('talk');
+    expect(sent.filter((m) => m.type === 'chat.removed' && m.tabId === 'talk')).toHaveLength(1);
+  });
 });
 
 describe('hand-off between chats', () => {

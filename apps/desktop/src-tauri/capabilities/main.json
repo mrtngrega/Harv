@@ -17,6 +17,7 @@
     "allow-set-app-settings",
     "allow-check-updates",
     "allow-apply-update",
-    "allow-pick-paths"
+    "allow-pick-paths",
+    "allow-set-see-through"
   ]
 }

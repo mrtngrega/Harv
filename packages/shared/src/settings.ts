@@ -12,6 +12,12 @@ export const WARN_CHOICES = { session: [50, 75, 90, 95], weekly: [50, 75, 90] } 
 export interface HarvSettings {
   /** Folders Harv may read but never change (the user's read-only list). */
   protectedPaths: string[];
+  /**
+   * Ask before risky (red) actions: deleting, installing, stopping programs, system changes,
+   * sending data. Off (the user's choice, 2026-10-27): they run without a card, still backed up
+   * and logged with Undo; blocked things stay blocked.
+   */
+  askRisky: boolean;
   /** Ask before yellow actions too (editing, moving or creating the user's files), not only red ones. */
   confirmYellow: boolean;
   /** "Don't ask again" rules from approval cards: commands like "npm install" or "remove-item" that run without a card (backed up, with Undo). */
@@ -28,6 +34,8 @@ export interface HarvSettings {
   scrim: number;
   /** How solid the glass panels are, in % (20–95). */
   glass: number;
+  /** In the app: the window shows what's behind it (Acrylic blur on Windows) instead of the photo. Per device. */
+  seeThrough: boolean;
   /** Size of everything, in % (80–130). */
   uiScale: number;
   /** Space between chat lines. */
@@ -86,6 +94,7 @@ export interface HarvSettings {
 
 export const DEFAULT_SETTINGS: HarvSettings = {
   protectedPaths: [],
+  askRisky: false,
   confirmYellow: false,
   allowRules: [],
   motion: true,
@@ -93,6 +102,7 @@ export const DEFAULT_SETTINGS: HarvSettings = {
   backgroundBlur: 9,
   scrim: 55,
   glass: 50,
+  seeThrough: false,
   uiScale: 100,
   density: 'comfy',
   showTimes: true,
@@ -122,6 +132,7 @@ export const DEFAULT_SETTINGS: HarvSettings = {
  * stay per device: folders and read-only paths (they differ per OS), size, startup, sensors, watchdog, sync.
  */
 export const SHARED_SETTINGS = [
+  'askRisky',
   'confirmYellow',
   'allowRules',
   'motion',

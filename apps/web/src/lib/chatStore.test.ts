@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { answerStart, applyChatEvent, chat, getChatState, startQuestions, syncLayout } from './chatStore.ts';
+import { answerStart, applyChatEvent, askOnStart, chat, getChatState, startQuestions, syncLayout } from './chatStore.ts';
 import { getDrafts, getDraftTexts } from './drafts.ts';
 
 vi.mock('./socket.ts', () => ({ onServerMessage: () => {}, sendMessage: () => true }));
@@ -148,6 +148,20 @@ describe('blank tabs', () => {
 });
 
 describe('start question (continue or new session)', () => {
+  it('asks only chats Harv answered in: one with just /report notes has no session to continue', () => {
+    const line = (kind: 'you' | 'harv' | 'notice', text: string) => ({ kind, text, at: 0 });
+    askOnStart(
+      [
+        { id: 'talk', title: 'Weather', lines: [line('you', 'rain?'), line('harv', 'No.')] },
+        { id: 'notes', title: '/report x', lines: [line('you', '/report x'), line('notice', 'Noted in harv_report.md.')] },
+        { id: 'empty', title: 'New chat', lines: [] },
+      ],
+      1234,
+    );
+    expect(startQuestions.get()).toEqual(['talk']);
+    startQuestions.set([]);
+  });
+
   it('asks each chat on its own; "new" swaps just that tab for a blank chat in the same place', () => {
     const [a, b, c] = [openTab(), openTab(), openTab()];
     startQuestions.set([a, b]);

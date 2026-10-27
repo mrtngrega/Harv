@@ -829,3 +829,24 @@ describe('Don’t ask again rules', () => {
     }
   });
 });
+
+describe('reasons name what a command does, not a flag (logged 2026-10-26: `java -cp` "copied files")', () => {
+  it.each([
+    ['"SPSEKE`nKom 44`n0" | java -cp \'C:/Users/me/.harv/workspace/out\' Main', /copies|Deletes/],
+    ['docker run --rm hello-world', /Deletes/],
+    ["reg export 'HKCU/Software/Microsoft/Windows/CurrentVersion/Run' 'C:/Users/me/backup.reg'", /registry/],
+    ['npx concurrently --kill-others "a" "b"', /Stops/],
+  ])('%s', (command, wrong) => {
+    expect(classifyCommand(command).reason).not.toMatch(wrong);
+  });
+
+  it.each([
+    ["Remove-Item -LiteralPath 'C:/Users/me/Downloads/big.iso'", /Deletes/],
+    ['cp a.txt b.txt', /copies/],
+    ["Remove-ItemProperty -Path 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Run' -Name 'Steam'", /registry/],
+    ['reg delete HKCU/Software/X /f', /registry/],
+    ['taskkill /IM notepad.exe', /Stops/],
+  ])('still: %s', (command, right) => {
+    expect(classifyCommand(command).reason).toMatch(right);
+  });
+});
