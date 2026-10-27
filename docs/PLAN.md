@@ -447,4 +447,6 @@ The user: "i keep discovering things that harv cant do but claude.ai or claude c
 
 **Not possible on the subscription without other tools:** real photo-style image generation (neither claude.ai nor Claude Code has it), Claude in Chrome and computer use (they're tools of Anthropic's own apps, not the SDK; Windows-MCP in the report covers desktop control).
 
+**Sending to people (the user's rule, 2026-10-27):** "if i dont tell him to do it and he decides alone to send something to someone only then should he need approval but when i ask him to do it he doesnt ask me". In `harv/persona.md` (rule 12) now. In the gate (to build with A): sending actions (connector writes that send — mail, messages, posts, invites, shares — and `sendsData` shell commands) get a card even with Ask before risky actions off, unless the user's message for this turn asked to send (a free check of the turn's text: send/email/mail/message/text/post/reply/share/forward/pošli/napíš…, no model call). Everything else stays logged-only.
+
 Proposed order: A (one change, most of the gap), C1 + C2 (Harv would otherwise stall on them once A is in), B1–B4, C3, C4.
