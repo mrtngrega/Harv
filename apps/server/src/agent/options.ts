@@ -158,6 +158,7 @@ function systemPrompt(chat?: ChatContext): string {
             `- The user's default folder is ${workDir()}. When they ask you to make or change files without saying where, work there (with full paths). Your own scratch files still go in your workspace.`,
           ]
         : []),
+      `- Your own working files (scripts, builds, drafts, downloads) go in your workspace, ${WORKSPACE}, or the temp folder; never anywhere else under ~/.harv, which holds Harv's database, backups and memory.`,
       `- Today is ${today}.`,
     ].join('\n'),
     '## Your memory',

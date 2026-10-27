@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPicture, pathsIn, previewKind } from './preview.ts';
+import { isPicture, keepWindowsPaths, pathsIn, previewKind } from './preview.ts';
 import { parseCommand } from './commands.ts';
 
 describe('files a reply names (docs/PLAN.md §6s B2, B3)', () => {
@@ -28,6 +28,18 @@ describe('files a reply names (docs/PLAN.md §6s B2, B3)', () => {
     expect(previewKind('C:\\a\\b.docx')).toBeUndefined();
     expect(isPicture('C:\\a\\b.svg')).toBe(true);
     expect(isPicture('C:\\a\\b.pdf')).toBe(false);
+  });
+});
+
+describe('Windows paths in prose', () => {
+  it('keeps their backslashes for Markdown, and leaves code alone', () => {
+    expect(keepWindowsPaths('Saved to **C:\\Users\\m\\.harv\\workspace\\a_b.txt**.')).toBe(
+      'Saved to **C:\\\\Users\\\\m\\\\.harv\\\\workspace\\\\a_b.txt**.',
+    );
+    expect(keepWindowsPaths('In C:\\My files\\Code now')).toBe('In C:\\\\My files\\\\Code now');
+    const code = '`C:\\x\\.y` and ```\nC:\\a\\.b\n```';
+    expect(keepWindowsPaths(code)).toBe(code);
+    expect(keepWindowsPaths('a \\*literal\\* star')).toBe('a \\*literal\\* star');
   });
 });
 

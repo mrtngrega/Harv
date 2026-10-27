@@ -97,6 +97,17 @@ describe('reading', () => {
     expect(tier('SendUserFile', {})).toBe('blocked');
   });
 
+  it('lets code write into the workspace with escaped backslashes, and still guards the rest of .harv (found 2026-10-27)', () => {
+    const ws = join(home, 'workspace').replace(/\\/g, '\\\\');
+    const script = (target: string) =>
+      `mkdir -p "${join(home, 'workspace', 'build').replace(/\\/g, '/')}" && cat > "${join(home, 'workspace', 'build', 'make.js').replace(/\\/g, '/')}" <<'EOF'\nrequire('fs').writeFileSync('${target}', 'x');\nEOF\nnode make.js`;
+    expect(classify('Bash', { command: script(`${ws}\\\\out.docx`) }).tier).not.toBe('blocked');
+    // As code writes them: every backslash doubled.
+    expect(classify('Bash', { command: script('C:\\\\Users\\\\m\\\\.harv\\\\workspace\\\\out.docx') }).tier).not.toBe('blocked');
+    expect(classify('Bash', { command: script('C:\\\\Users\\\\m\\\\.harv\\\\harv.db') }).tier).toBe('blocked');
+    expect(classify('Bash', { command: script('C:\\\\Users\\\\m\\\\.harv\\\\workspace-old\\\\x') }).tier).toBe('blocked');
+  });
+
   it("gives every chat Claude Code's agent tools (the user's wish, 2026-10-27)", () => {
     for (const tool of ['Agent', 'Task', 'TodoWrite', 'Skill', 'ListAgents', 'EnterPlanMode', 'AskUserQuestion']) {
       expect(tier(tool, {}), tool).toBe('green');

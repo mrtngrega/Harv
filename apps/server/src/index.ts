@@ -518,7 +518,7 @@ app.get('/ws', { websocket: true }, (socket) => {
         break;
       }
       case 'ui.save':
-        saveUi(msg.state);
+        saveUi(chats.keepRemoteTabs(msg.state));
         live.soon();
         break;
       case 'term.attach': {

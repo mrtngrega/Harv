@@ -1112,7 +1112,8 @@ function classifyCommandAsIs(command: string, description: string, ctx: Classify
     return verdict('blocked', `Blocked: Harv never changes ${SYSTEM_FOLDER}.`, summary);
   }
   // Reading Harv's logs or settings is fine; anything that could change them is blocked.
-  if ((changing || writesFile(shell) || bodies.length > 0) && mentions(isHarvData, /\.harv[\\/](?!workspace)/i)) {
+  // Separators can come doubled: code writes Windows paths with escaped backslashes ("C:\\Users\\…\\.harv\\workspace").
+  if ((changing || writesFile(shell) || bodies.length > 0) && mentions(isHarvData, /\.harv[\\/]+(?![\\/])(?!workspace([\\/"'\s]|$))/i)) {
     return verdict('blocked', "Blocked: Harv's database, backups and memory are only changed by Harv itself.", summary);
   }
   if (ctx.project) {

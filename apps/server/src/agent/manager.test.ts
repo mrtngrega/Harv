@@ -712,6 +712,23 @@ describe('sync of tabs and project work (docs/PLAN.md §6m)', () => {
     FakeSession.all.get('busy')!.finish();
   });
 
+  it("doesn't close a tab used here a moment ago, and a racing dashboard save keeps the tabs it just got (2026-10-27)", async () => {
+    const { chats, store } = setup();
+    for (const id of ['mine', 'theirs', 'old']) {
+      store.ensureChat(id, id);
+      store.addLine(id, { kind: 'you', text: 'hi' });
+    }
+    await chats.send('mine', 'just now', 'sonnet', 'medium');
+    FakeSession.all.get('mine')!.finish();
+    await settle();
+    chats.applyRemoteUi({ order: ['theirs'], blanks: [], drafts: {}, attachments: {} });
+    const open = store.openChats().map((c) => c.id);
+    expect(open).toEqual(expect.arrayContaining(['mine', 'theirs']));
+    expect(open).not.toContain('old');
+    // The dashboard's save from before it saw "theirs" doesn't drop it.
+    expect(chats.keepRemoteTabs({ order: ['mine'] }).order).toEqual(['mine', 'theirs']);
+  });
+
   it('says once that a project has unpushed work on the other device', () => {
     const { chats, sent } = setup();
     const said = () => sent.filter((m) => (m as { type: string }).type === 'project.notice').length;
@@ -752,6 +769,17 @@ describe('rewind and plan mode (docs/PLAN.md §6s C2, C3)', () => {
     const next = FakeSession.all.get('rw')!;
     expect(next).not.toBe(old);
     expect(next.start).toMatchObject({ resume: 'session-rw', resumeAt: 'rw-msg-1-reply' });
+  });
+
+  it('says so when the message came from the other device', async () => {
+    const { chats, store } = setup();
+    store.ensureChat('rr', 'Remote');
+    store.applyLine(
+      { t: 'line', chat: 'rr', uid: 'u-remote-1', prev: null, kind: 'you', text: 'from the notebook', at: Date.now() },
+      'notebook',
+    );
+    await chats.rewind('rr', 0);
+    expect(store.snapshot('rr')!.lines.at(-1)!.text).toMatch(/sent on your other device/);
   });
 
   it("rewinding to the session's first message starts a new session", async () => {

@@ -73,6 +73,11 @@ const CONTINUE_PROMPT =
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
+/** A chat used here this recently isn't closed by the other device's layout. */
+const RECENT_USE_MS = 10 * 60 * 1000;
+/** How long after applying the other device's layout a dashboard save can't drop its tabs. */
+const REMOTE_UI_GRACE_MS = 5000;
+
 /** How long a waiting hand-off waits for the other chat before giving up on getting the answer back. */
 const HANDOFF_WAIT_MS = 15 * 60 * 1000;
 /** The longest answer a hand-off brings back into the waiting chat. */
@@ -126,6 +131,10 @@ export class ChatManager {
   private followUps = new Map<string, FollowUp[]>();
   /** Each running session's slash commands (otherwise the catalog's). */
   private commands = new Map<string, SlashCommandInfo[]>();
+  /** When each chat was last used on this device (a message, opened from history): the other device's layout doesn't close it soon after. */
+  private usedHere = new Map<string, number>();
+  /** The other device's layout applied last, and when: a dashboard save racing it can't drop its tabs. */
+  private remoteUi: { wanted: string[]; at: number } | null = null;
   /** Chats just rewound: their next session resumes the conversation cut back to this entry. */
   private forkAt = new Map<string, string>();
   catalog: Catalog | null = null;
@@ -414,6 +423,7 @@ export class ChatManager {
   }
 
   async send(tabId: string, message: string, choice: ModelChoice, effort: EffortLevel, sent: Attachment[] = []): Promise<void> {
+    this.usedHere.set(tabId, Date.now());
     // Files and folders on the PC are checked here (the dashboard only names them).
     const files = cleanAttachments(sent);
     const isNew = !this.store.exists(tabId);
@@ -879,9 +889,12 @@ export class ChatManager {
       this.dropSession(tabId);
       this.store.setSession(tabId, null);
       this.store.markStale(tabId);
-      files = target.uuid
-        ? 'Only the chat went back: that message was in an earlier Claude session (before a /fresh or a project switch), so the files Harv changed since then stay as they are (each change still has its own Undo).'
-        : 'Only the chat went back: that message is from before rewind existed, so the files Harv changed since then stay as they are (each change still has its own Undo).';
+      files =
+        target.session === 'remote'
+          ? 'Only the chat went back: that message was sent on your other device, so its file changes are there, not on this one.'
+          : target.uuid
+            ? 'Only the chat went back: that message was in an earlier Claude session (before a /fresh or a project switch), so the files Harv changed since then stay as they are (each change still has its own Undo).'
+            : 'Only the chat went back: that message is from before rewind existed, so the files Harv changed since then stay as they are (each change still has its own Undo).';
     }
     this.store.rewindFrom(tabId, target.line, target.uid);
     this.router.forget(tabId);
@@ -930,6 +943,7 @@ export class ChatManager {
   open(tabId: string): void {
     const chat = this.store.snapshot(tabId);
     if (!chat) return;
+    this.usedHere.set(tabId, Date.now());
     this.store.setOpen(tabId, true);
     this.broadcast({ type: 'chat.opened', chat });
     this.publishHistory();
@@ -1117,6 +1131,7 @@ export class ChatManager {
    */
   applyRemoteUi(ui: SharedUi): void {
     const wanted = new Set(ui.order.filter((id) => !ui.blanks.includes(id)));
+    this.remoteUi = { wanted: [...wanted], at: Date.now() };
     for (const id of wanted) {
       if (this.store.exists(id) && !this.store.openChats().some((c) => c.id === id)) {
         this.store.setOpen(id, true);
@@ -1125,10 +1140,25 @@ export class ChatManager {
       }
     }
     for (const c of this.store.openChats()) {
-      if (wanted.has(c.id) || this.busy(c.id)) continue;
+      // A tab used here in the last few minutes stays: closing it under the user's hands was a
+      // sync echo once (2026-10-27), and a real close on the other device comes again next sync.
+      if (wanted.has(c.id) || this.busy(c.id) || Date.now() - (this.usedHere.get(c.id) ?? 0) < RECENT_USE_MS) continue;
       this.close(c.id);
     }
     this.publishHistory();
+  }
+
+  /**
+   * A dashboard's layout save. Right after the other device's layout was applied, a save the
+   * dashboard sent before it saw the new tabs would drop them (and travel back as the newest
+   * layout, closing them there too): those tabs stay in it.
+   */
+  keepRemoteTabs<T extends { order: string[] }>(state: T): T {
+    const remote = this.remoteUi;
+    if (!remote || Date.now() - remote.at > REMOTE_UI_GRACE_MS) return state;
+    const open = new Set(this.store.openChats().map((c) => c.id));
+    const missing = remote.wanted.filter((id) => open.has(id) && !state.order.includes(id));
+    return missing.length ? { ...state, order: [...state.order, ...missing] } : state;
   }
 
   private projectNotice(message: string) {

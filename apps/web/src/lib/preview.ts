@@ -118,3 +118,17 @@ export function pathsIn(text: string): string[] {
   for (const m of bare.matchAll(/(?<![a-z0-9])(?:[a-z]:[\\/]|(?<![\w.:/])\/(?:home|tmp|mnt|media|opt|srv)\/)[^\s"'`<>|*?]+/gi)) add(m[0]);
   return found;
 }
+
+/** A Windows path in prose: a drive letter, then parts, spaces allowed where another part follows ("C:\My files\Code"). */
+const PROSE_PATH = /(?<![\w\\])[A-Za-z]:\\[^\s`<>|"*]*(?: [^\s`<>|"*\\]+\\[^\s`<>|"*]*)*/g;
+
+/**
+ * Windows paths in a reply's prose keep their backslashes: Markdown reads `\.` or `\_` as an
+ * escape, so "C:\Users\m\.harv" showed as "m.harv" (found 2026-10-27). Code is left as it is.
+ */
+export function keepWindowsPaths(text: string): string {
+  return text
+    .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/)
+    .map((part, i) => (i % 2 ? part : part.replace(PROSE_PATH, (p) => p.replace(/\\/g, '\\\\'))))
+    .join('');
+}

@@ -15,7 +15,10 @@ import {
   type ClassifyContext,
   type Verdict,
 } from './classify.ts';
-import { fullPath, isInside, loadSettings, PLANS_DIR } from './paths.ts';
+import { fullPath, isInside, loadSettings, PLANS_DIR, WORKSPACE } from './paths.ts';
+
+/** How Harv's own folder is named to the model in a block message. */
+const HARV_HOME_HINT = 'the .harv folder';
 
 /** Harv's own tools that only look or note things: fine in plan mode. */
 const PLAN_SAFE_HARV = ['remember', 'forget', 'list_chats', 'read_chat', 'list_projects', 'list_scheduled'].map((t) => `mcp__harv__${t}`);
@@ -233,6 +236,11 @@ export class SafetyGate {
 
     if (verdict.tier === 'blocked') {
       this.publish(id);
+      // Harv's own data is off-limits, but the work itself isn't: it belongs in the workspace.
+      if (/only changed by Harv itself/.test(verdict.reason))
+        return deny(
+          `${verdict.reason} Only ${HARV_HOME_HINT} outside the workspace is off-limits: do the same work in your workspace (${WORKSPACE}) or the temp folder instead. That's allowed, and not a way around this block; your workspace was never blocked.`,
+        );
       return deny(`${verdict.reason} Tell the user it was blocked and why; don't try another way around it.`);
     }
     if (verdict.tier === 'green') return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } };

@@ -2,7 +2,7 @@ import { createContext, memo, useContext, useEffect, useState, type ReactNode } 
 import Markdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getChatState } from '../../lib/chatStore.ts';
-import { LOCAL_PATH, openPreview, rawUrl, type PreviewKind } from '../../lib/preview.ts';
+import { keepWindowsPaths, LOCAL_PATH, openPreview, rawUrl, type PreviewKind } from '../../lib/preview.ts';
 import { MermaidView } from './Mermaid.tsx';
 
 /** The reply is still streaming in. */
@@ -167,7 +167,7 @@ export const RichText = memo(function RichText({ text, streaming = false }: { te
         components={COMPONENTS}
         urlTransform={urlTransform}
       >
-        {text}
+        {keepWindowsPaths(text)}
       </Markdown>
     </Streaming.Provider>
   );

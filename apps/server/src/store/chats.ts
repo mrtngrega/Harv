@@ -566,6 +566,8 @@ export class ChatStore {
     }
     const line = toLine(e);
     this.insertLine(chat, e.uid, line, e.at);
+    // Sent on the other device: a rewind here can't put its files back (and says so).
+    this.db.prepare("UPDATE lines SET msg_session = 'remote' WHERE uid = ?").run(e.uid);
     // This device's Claude session didn't see that line: the next message here starts fresh with the chat so far.
     this.db.prepare('UPDATE chats SET session_id = NULL, stale = 1 WHERE id = ?').run(chat);
     return { chat, line: { ...line, at: e.at }, ...(forked ? { forked } : {}) };
