@@ -31,7 +31,9 @@ export function StatusLine({ tab }: { tab: Tab | undefined }) {
   const { motion } = useSettings();
   const { approvals } = useSafety();
   const { tabs } = useChat();
-  const waiting = approvals.some((a) => a.tabId === tab?.id);
+  const card = approvals.find((a) => a.tabId === tab?.id);
+  const waiting = !!card;
+  const ask = card?.kind === 'question' ? 'answer above' : card?.kind === 'plan' ? 'approve the plan above' : 'approve or deny above';
   // An approval card in another chat is invisible from here: say so, with a way there.
   const elsewhere = tabs.find((t) => t.id !== tab?.id && approvals.some((a) => a.tabId === t.id));
   const busy = Boolean(tab?.busy);
@@ -62,7 +64,7 @@ export function StatusLine({ tab }: { tab: Tab | undefined }) {
   } else if (busy && tab) {
     glyph = motion ? SPIN[frame % SPIN.length]! : '✻';
     color = waiting ? COLOR.warn : tab.activity ? COLOR.warn : COLOR.accent;
-    label = waiting ? 'needs you · approve or deny above' : tab.activity ? `working · ${tab.activity}` : 'thinking…';
+    label = waiting ? `needs you · ${ask}` : tab.activity ? `working · ${tab.activity}` : 'thinking…';
     const parts = [tab.startedAt ? formatElapsed(now - tab.startedAt) : '', tab.outTokens ? `↓ ${tokens(tab.outTokens)} tokens` : ''];
     extra = `(${[...parts.filter(Boolean), 'esc to stop'].join(' · ')})`;
   } else {

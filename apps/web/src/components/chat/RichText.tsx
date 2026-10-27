@@ -1,9 +1,12 @@
-import { memo, useEffect, useState, type ReactNode } from 'react';
+import { createContext, memo, useContext, useEffect, useState, type ReactNode } from 'react';
 import Markdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getChatState } from '../../lib/chatStore.ts';
 import { LOCAL_PATH, openPreview, rawUrl, type PreviewKind } from '../../lib/preview.ts';
 import { MermaidView } from './Mermaid.tsx';
+
+/** The reply is still streaming in. */
+const Streaming = createContext(false);
 
 type Hast = { type: string; value?: string; children?: Hast[]; properties?: Record<string, unknown> };
 
@@ -49,7 +52,9 @@ function CodeBlock({ node, children }: { node?: Hast; children?: ReactNode }) {
   const text = textOf(code).replace(/\n$/, '');
   const kind = PREVIEWABLE[lang === 'xml' && !/<svg[\s>]/i.test(text) ? '' : lang];
   const [showCode, setShowCode] = useState(false);
-  const diagram = lang === 'mermaid';
+  // A diagram still being written isn't drawn yet (half a diagram is a syntax error).
+  const streaming = useContext(Streaming);
+  const diagram = lang === 'mermaid' && !streaming;
   return (
     <div className="harv-code my-2 overflow-hidden rounded-[10px] border border-line bg-black/30">
       <div className="flex items-center gap-1 border-b border-line px-2 py-0.5 text-[11px] text-faint">
@@ -152,16 +157,18 @@ function usePlugins(text: string): Plugins {
  * highlighted code with Copy, Mermaid diagrams, pictures from the PC, and HTML/SVG previews.
  * Single $ stays a dollar sign: prices are more common in chat than inline math.
  */
-export const RichText = memo(function RichText({ text }: { text: string }) {
+export const RichText = memo(function RichText({ text, streaming = false }: { text: string; streaming?: boolean }) {
   const plugins = usePlugins(text);
   return (
-    <Markdown
-      remarkPlugins={plugins.remark as never}
-      rehypePlugins={plugins.rehype as never}
-      components={COMPONENTS}
-      urlTransform={urlTransform}
-    >
-      {text}
-    </Markdown>
+    <Streaming.Provider value={streaming}>
+      <Markdown
+        remarkPlugins={plugins.remark as never}
+        rehypePlugins={plugins.rehype as never}
+        components={COMPONENTS}
+        urlTransform={urlTransform}
+      >
+        {text}
+      </Markdown>
+    </Streaming.Provider>
   );
 });

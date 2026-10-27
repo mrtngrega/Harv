@@ -171,7 +171,7 @@ function ChatLineView({ line, onHarder }: { line: Line; onHarder?: () => void })
           </div>
           {line.text && (
             <div className="harv-md mt-1">
-              <RichText text={line.text} />
+              <RichText text={line.text} streaming={line.streaming} />
             </div>
           )}
           {line.text && !line.streaming && <FileCards text={line.text} />}
@@ -264,7 +264,9 @@ function useWide(): boolean {
 }
 
 export function ChatPanel() {
-  const { tabs, activeId, settingsOpen, views } = useChat();
+  const { tabs: allTabs, activeId, settingsOpen, views, hydrated } = useChat();
+  // Nothing until the saved chats are here: the starter tab only flashed "New chat" before them.
+  const tabs = hydrated ? allTabs : [];
   const inSettings = activeId === SETTINGS_TAB;
   const { approvals } = useSafety();
   const usage = useUsage();
@@ -628,7 +630,7 @@ export function ChatPanel() {
         <div className="flex-1" />
         {view === 'chat' && active?.context && (
           <div
-            className="hidden px-2 pb-2.5 text-[11px] whitespace-nowrap text-muted xl:block"
+            className="mb-1.5 hidden min-h-7 items-center px-2 text-[11px] whitespace-nowrap text-muted xl:flex"
             title="The conversation's size: what Harv sent with its latest message, plus what it wrote"
           >
             context · {tokens(active.context)} tokens
@@ -678,7 +680,7 @@ export function ChatPanel() {
               ref={logRef}
               className={`flex min-w-0 flex-1 flex-col overflow-y-auto px-5 ${preview ? 'max-lg:max-h-[45%] lg:max-w-[50%]' : ''} ${density === 'compact' ? 'gap-1.5 py-3 leading-normal' : 'gap-3.5 py-4 leading-relaxed'}`}
             >
-              {!active || active.lines.length === 0 ? (
+              {!hydrated ? null : !active || active.lines.length === 0 ? (
                 <p className="m-auto text-center text-muted">
                   {active ? 'New chat. Ask Harv anything.' : 'No chat open. Press + to start one.'}
                 </p>

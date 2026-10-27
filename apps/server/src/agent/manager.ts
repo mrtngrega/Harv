@@ -967,7 +967,12 @@ export class ChatManager {
     }
     if (!known) this.publishHistory();
     const when = late ? ', late: it was due while Harv was off' : '';
-    await this.send(tabId, `[Scheduled task "${task.title}"${when}] ${task.prompt}`, 'auto', 'high');
+    const message = `[Scheduled task "${task.title}"${when}] ${task.prompt}`;
+    // Busy: it waits its turn like a typed message (and shows when it runs).
+    if (this.busy(tabId) || this.followUps.get(tabId)?.length) return this.send(tabId, message, 'auto', 'high');
+    // No dashboard typed it, so the line goes out to them too.
+    this.addLine(tabId, { kind: 'you', text: message });
+    await this.begin(tabId, message, 'auto', 'high', [], false);
   }
 
   /**

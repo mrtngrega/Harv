@@ -37,6 +37,19 @@ export async function launch({ width = 1500, height = 900, port = 9333 } = {}) {
     ],
     { stdio: 'ignore' },
   );
+  return connect(port, { width, height, onClose: () => chrome.kill() });
+}
+
+/**
+ * Drives the Harv app itself (the user only uses the app, 2026-10-27): start it with
+ * WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=<port> (Windows; never 9333),
+ * then attach here. The window keeps its own size; close() only lets go of it.
+ */
+export function attach({ port = 9444 } = {}) {
+  return connect(port, { app: true });
+}
+
+async function connect(port, { width = 1500, height = 900, app = false, onClose = () => {} }) {
   let targets;
   for (let i = 0; i < 50; i++) {
     try {
@@ -47,7 +60,7 @@ export async function launch({ width = 1500, height = 900, port = 9333 } = {}) {
     }
     await sleep(200);
   }
-  const page = targets.find((t) => t.type === 'page');
+  const page = targets.find((t) => t.type === 'page' && (!app || t.url.startsWith('http://127.0.0.1:5173')));
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((r) => ws.once('open', r));
   let id = 0;
@@ -72,7 +85,7 @@ export async function launch({ width = 1500, height = 900, port = 9333 } = {}) {
     });
   await send('Runtime.enable');
   await send('Page.enable');
-  await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  if (!app) await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
 
   const api = {
     send,
@@ -117,13 +130,15 @@ export async function launch({ width = 1500, height = 900, port = 9333 } = {}) {
       return file;
     },
     async close() {
-      try {
-        await send('Browser.close');
-      } catch {
-        // Already closed.
+      if (!app) {
+        try {
+          await send('Browser.close');
+        } catch {
+          // Already closed.
+        }
       }
       ws.close();
-      chrome.kill();
+      onClose();
     },
   };
   return api;

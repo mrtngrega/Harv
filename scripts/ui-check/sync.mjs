@@ -15,7 +15,8 @@ const print = (s) => {
   const when = (ms) => (ms ? new Date(ms).toLocaleTimeString('en-GB') : 'never');
   console.log(`${s.device.name} (${s.device.id}): ${s.enabled ? 'on' : 'off'}${s.busy ? ', syncing' : ''}`);
   console.log(`last sync ${when(s.lastSync)}, ${s.pending} changes to send${s.needsKey ? ', NEEDS THE KEY' : ''}`);
-  for (const p of s.peers) console.log(`peer ${p.name} (${p.id}), last change ${when(p.lastChange)}`);
+  for (const p of s.peers)
+    console.log(`peer ${p.name} (${p.id}), last change ${when(p.lastChange)}${p.live ? `, live ${when(p.live)}` : ''}`);
   if (s.error) console.log(`error: ${s.error}`);
 };
 let acted = false;
@@ -26,7 +27,9 @@ ws.on('message', (raw) => {
     const repo = arg('--on');
     if (repo !== undefined) {
       const name = arg('--name');
-      ws.send(JSON.stringify({ type: 'settings.update', patch: { syncEnabled: true, syncRepo: repo, ...(name ? { deviceName: name } : {}) } }));
+      ws.send(
+        JSON.stringify({ type: 'settings.update', patch: { syncEnabled: true, syncRepo: repo, ...(name ? { deviceName: name } : {}) } }),
+      );
       acted = true;
     } else if (args.includes('--off')) {
       ws.send(JSON.stringify({ type: 'settings.update', patch: { syncEnabled: false } }));

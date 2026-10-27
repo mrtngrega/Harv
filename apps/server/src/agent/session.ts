@@ -137,8 +137,12 @@ export class ChatSession {
   }
 
   /** Puts the files Claude changed back as they were before this message (file checkpoints). */
-  rewindFiles(uuid: string) {
-    return this.q.rewindFiles(uuid);
+  async rewindFiles(uuid: string) {
+    // A real rewind doesn't say which files it changed; a dry run first does.
+    const preview = await this.q.rewindFiles(uuid, { dryRun: true });
+    if (!preview.canRewind) return preview;
+    const result = await this.q.rewindFiles(uuid);
+    return { ...result, filesChanged: result.filesChanged?.length ? result.filesChanged : preview.filesChanged };
   }
 
   /**

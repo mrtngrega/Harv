@@ -85,6 +85,11 @@ export interface ChatState {
   tools: Record<string, ToolKind[]>;
   model: ModelChoice;
   effort: EffortLevel;
+  /**
+   * The server's first hello has come: until then the tabs are only the starter blank tab,
+   * which flashed "New chat" before the saved chats replaced it (the user's report, 2026-10-27).
+   */
+  hydrated: boolean;
 }
 
 const newId = () => crypto.randomUUID();
@@ -120,6 +125,7 @@ const store = createStore<ChatState>({
   settingsOpen: false,
   views: {},
   tools: {},
+  hydrated: false,
   ...loadSelection(),
 });
 
@@ -197,7 +203,7 @@ function hydrate(chats: ChatSnapshot[], ui?: UiState) {
     const activeId = valid(wanted) ? wanted : valid(s.activeId) ? s.activeId : tabs.at(-1)!.id;
     const views = onlyTabs(ui ? { ...ui.views, ...s.views } : s.views, tabs);
     const tools = onlyTabs(ui ? { ...ui.tools, ...s.tools } : s.tools, tabs);
-    return { ...s, tabs, activeId, settingsOpen, views, tools };
+    return { ...s, tabs, activeId, settingsOpen, views, tools, hydrated: true };
   });
 }
 
