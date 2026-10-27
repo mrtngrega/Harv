@@ -11,11 +11,12 @@ export function App() {
   const { accent, motion, backgroundBlur, scrim, glass, uiScale, density, seeThrough } = useSettings();
   // See-through (the app only): the window shows the desktop behind it; the darkness layer still tints it.
   const clear = inApp && seeThrough;
+  const frosted = backgroundBlur > 0;
   useEffect(() => {
     if (!inApp) return;
     document.documentElement.classList.toggle('see-through', clear);
-    desktop.seeThrough(clear);
-  }, [clear]);
+    desktop.seeThrough(clear, frosted);
+  }, [clear, frosted]);
   const { version } = useBackground();
   // Before the server says, try the photo anyway; after a removal, show the plain ground colour.
   const photo = version === null ? undefined : `url(/api/background${version ? `?v=${version}` : ''})`;

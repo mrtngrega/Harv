@@ -622,7 +622,7 @@ export function ChatPanel() {
           </div>
         )}
         {inSettings ? (
-          <div className="flex flex-1 flex-col overflow-y-auto px-5 py-4">
+          <div className="@container flex flex-1 flex-col overflow-y-auto px-5 py-4">
             <SettingsView />
           </div>
         ) : active && view === 'terminal' ? (

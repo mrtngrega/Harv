@@ -35,9 +35,9 @@ export const desktop = {
   applyUpdate: () => invoke<UpdateInfo>('apply_update'),
   /** The system's own picker (one picker can't take files and folders at once). */
   pickPaths: (folders: boolean) => invoke<{ path: string; folder: boolean }[]>('pick_paths', { folders }),
-  /** A see-through window (Acrylic on Windows, plain transparency on Linux), or the solid one. */
-  seeThrough(on: boolean) {
-    void invoke('set_see_through', { on }).catch(() => {});
+  /** A see-through window, frosted (Acrylic, Windows only) when `blur`; or the solid one. */
+  seeThrough(on: boolean, blur: boolean) {
+    void invoke('set_see_through', { on, blur }).catch(() => {});
   },
 };
 

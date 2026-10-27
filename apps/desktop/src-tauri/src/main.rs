@@ -86,16 +86,21 @@ fn set_status(app: AppHandle, status: &str) {
 /// The dashboard's ground colour, behind the page while it loads (and whenever see-through is off).
 const GROUND: Color = Color(10, 16, 24, 255);
 
-/// Settings › Look › See-through window: the desktop shows behind the dashboard (frosted on
-/// Windows; plain transparency on Linux, where Tauri has no blur), or the solid window again.
+/// Settings › Look › See-through window: the desktop shows behind the dashboard, or the solid
+/// window again. `blur` (the Blur slider above 0) frosts it with Acrylic on Windows, which has one
+/// strength only; Linux gets plain transparency (Tauri can't ask KWin for blur).
 #[tauri::command]
-fn set_see_through(window: WebviewWindow, on: bool) {
+fn set_see_through(window: WebviewWindow, on: bool, blur: Option<bool>) {
     let _ = window.set_background_color(Some(if on { Color(0, 0, 0, 0) } else { GROUND }));
     #[cfg(windows)]
     {
         use tauri::window::{Effect, EffectsBuilder};
-        let _ = window.set_effects(on.then(|| EffectsBuilder::new().effect(Effect::Acrylic).build()));
+        let frosted = on && blur.unwrap_or(true);
+        let _ = window
+            .set_effects(frosted.then(|| EffectsBuilder::new().effect(Effect::Acrylic).build()));
     }
+    #[cfg(not(windows))]
+    let _ = blur;
 }
 
 #[tauri::command]

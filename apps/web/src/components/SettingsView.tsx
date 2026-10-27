@@ -27,7 +27,7 @@ function useExample(windows: string, linux: string): string {
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-2 rounded-xl bg-black/20 px-3 py-2.5">
+    <section className="mb-2.5 flex break-inside-avoid flex-col gap-2 rounded-xl bg-black/20 px-3 py-2.5">
       <h3 className="m-0 text-[13px] font-semibold">{title}</h3>
       {children}
     </section>
@@ -689,8 +689,10 @@ export function SettingsView() {
   const resetLook = () => updateSettings(Object.fromEntries(LOOK_KEYS.map((k) => [k, DEFAULT_SETTINGS[k]])) as Partial<HarvSettings>);
 
   return (
-    <div className="animate-fade-in mx-auto grid w-full max-w-[920px] grid-cols-1 content-start gap-2.5 md:grid-cols-2">
-      <p className="m-0 px-1 text-xs text-muted md:col-span-2">
+    // Flowing columns (not a grid): each section is as tall as its content, so short ones don't leave blank space
+    // beside tall ones (the user's wish, 2026-10-27). Two columns in a normal window, three in a wide one.
+    <div className="animate-fade-in mx-auto w-full max-w-[1240px] columns-1 gap-2.5 @2xl:columns-2 @6xl:columns-3">
+      <p className="m-0 mb-2.5 px-1 text-xs text-muted [column-span:all]">
         Saved in ~/.harv/settings.json and applied at once in every Harv window. With Sync on, the look, chat and safety settings follow you
         to your other devices; folders, size and startup stay on this one.
       </p>
@@ -768,7 +770,7 @@ export function SettingsView() {
         )}
       </Section>
 
-      <div className="flex flex-col gap-2.5">
+      <div className="break-inside-avoid">
         <BackgroundPicker />
         <Section title="Background effect">
           <Slider
@@ -779,6 +781,13 @@ export function SettingsView() {
             unit="px"
             onChange={(backgroundBlur) => updateSettings({ backgroundBlur })}
           />
+          {inApp && settings.seeThrough && (
+            <p className="m-0 text-[11px] text-faint">
+              {onWindows
+                ? 'See-through: 0 is clear glass, anything above frosts what’s behind (Windows has one blur strength).'
+                : 'See-through: KDE can’t blur behind the app yet, so Blur only applies to the photo.'}
+            </p>
+          )}
           <Slider
             label="Darkness"
             value={settings.scrim}
@@ -792,7 +801,7 @@ export function SettingsView() {
             <Toggle
               on={settings.seeThrough}
               label="See-through window"
-              hint={`The app shows what's behind it${navigator.userAgent.includes('Windows') ? ', frosted' : ''} instead of the photo. Darkness still tints it. Only on this device.`}
+              hint="The app shows what's behind it instead of the photo. Darkness still tints it. Only on this device."
               onChange={(seeThrough) => updateSettings({ seeThrough })}
             />
           )}
@@ -886,10 +895,6 @@ export function SettingsView() {
         />
       </Section>
 
-      <WorkFolder />
-
-      <Projects />
-
       <Section title="Safety">
         <Toggle
           on={settings.askRisky}
@@ -903,33 +908,42 @@ export function SettingsView() {
           hint="Normally Harv backs up and changes your files right away (you can Undo). On, it shows an approval card first, like for deleting."
           onChange={(confirmYellow) => updateSettings({ confirmYellow })}
         />
-        <div className="flex flex-col gap-1">
-          <span className="text-xs">Don’t ask again for</span>
-          {settings.allowRules.length === 0 ? (
-            <p className="m-0 text-[11px] text-faint">
-              Nothing yet. “Don’t ask again” on an approval card adds the kind of command here (it then runs without a card, backed up
-              first, with Undo). Blocked things always stay blocked.
-            </p>
-          ) : (
-            <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs">
-              {settings.allowRules.map((rule) => (
-                <li key={rule} className="flex items-center gap-2">
-                  <code className="min-w-0 flex-1 truncate">{rule} …</code>
-                  <button
-                    type="button"
-                    aria-label={`Ask again for ${rule}`}
-                    title="Ask again for these"
-                    onClick={() => updateSettings({ allowRules: settings.allowRules.filter((x) => x !== rule) })}
-                    className="size-7 flex-none cursor-pointer rounded text-muted hover:bg-white/10"
-                  >
-                    ×
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        {/* The rules only matter while cards are on. */}
+        {settings.askRisky && (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs">Don’t ask again for</span>
+            {settings.allowRules.length === 0 ? (
+              <p className="m-0 text-[11px] text-faint">
+                Nothing yet. “Don’t ask again” on an approval card adds the kind of command here (it then runs without a card, backed up
+                first, with Undo). Blocked things always stay blocked.
+              </p>
+            ) : (
+              <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs">
+                {settings.allowRules.map((rule) => (
+                  <li key={rule} className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 truncate">{rule} …</code>
+                    <button
+                      type="button"
+                      aria-label={`Ask again for ${rule}`}
+                      title="Ask again for these"
+                      onClick={() => updateSettings({ allowRules: settings.allowRules.filter((x) => x !== rule) })}
+                      className="size-7 flex-none cursor-pointer rounded text-muted hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </Section>
+
+      <ProtectedFolders />
+
+      <WorkFolder />
+
+      <Projects />
 
       <Watchdog />
 
@@ -954,8 +968,6 @@ export function SettingsView() {
       </Section>
 
       <Sync />
-
-      <ProtectedFolders />
     </div>
   );
 }
