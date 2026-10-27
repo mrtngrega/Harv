@@ -61,6 +61,9 @@ export function Toasts() {
           setToasts((list) => addToast(list, { key: `watchdog:${msg.alert.id}`, kind: 'watchdog', alert: msg.alert }));
         } else if (msg.type === 'project.notice') {
           setToasts((list) => addToast(list, { key: `project:${msg.message}`, kind: 'project', text: msg.message }));
+        } else if (msg.type === 'schedule.ran') {
+          const text = `⏰ Running “${msg.task.title}”${msg.late ? ' (late: it was due while Harv was off)' : ''} in its chat.`;
+          setToasts((list) => addToast(list, { key: `schedule:${msg.task.id}`, kind: 'project', text }));
         }
       }),
     [],

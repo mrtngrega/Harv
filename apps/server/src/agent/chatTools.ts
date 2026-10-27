@@ -2,6 +2,7 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import type { HistoryItem, Project, StoredLine } from '@harv/shared';
 import { z } from 'zod';
 import type { ChatStore } from '../store/chats.ts';
+import type { ScheduleInput } from '../schedule/schedule.ts';
 import { memoryTools, text } from './memory.ts';
 
 // Every chat tab is its own Claude session, but they share one history. These
@@ -84,8 +85,15 @@ export interface ProjectTools {
   open(tabId: string, nameOrPath: string): Promise<string>;
 }
 
-/** Harv's own MCP server for one chat tab: memory tools, tools to look at the other chats, handing work to them, and projects. */
-export function harvServer(store: ChatStore, tabId: string, delegate?: Delegate, projects?: ProjectTools) {
+/** Harv's scheduler, as the chat tools see it (schedule/scheduler.ts). */
+export interface ScheduleTools {
+  add(tabId: string, title: string, prompt: string, input: ScheduleInput): string;
+  describe(): string;
+  cancel(id: string): boolean;
+}
+
+/** Harv's own MCP server for one chat tab: memory tools, the other chats, handing work to them, projects and scheduled tasks. */
+export function harvServer(store: ChatStore, tabId: string, delegate?: Delegate, projects?: ProjectTools, schedules?: ScheduleTools) {
   return createSdkMcpServer({
     name: 'harv',
     version: '1.0.0',
@@ -166,6 +174,38 @@ export function harvServer(store: ChatStore, tabId: string, delegate?: Delegate,
               `Turn this chat into a project chat for an existing project, ONLY when the user explicitly asks to work on it or switch to it ("let's work on X", "switch to X"): give the project's name (see list_projects) or a folder path (it gets added). From the next message you work as Claude Code in that folder. Never call it just to look at something from a project (a mockup, a file, a picture): read or open that file directly from this chat instead, since project folders are readable from any chat.`,
               { project: z.string().min(1).describe('Project name or full folder path') },
               async ({ project }) => text(await projects.open(tabId, project)),
+            ),
+          ]
+        : []),
+      ...(schedules
+        ? [
+            tool(
+              'schedule_task',
+              `Schedule something to run later or on a repeat, when the user asks ("every morning at 8 tell me…", "check X in an hour", "remind me on Friday…"): each run is a new turn in THIS chat, with the prompt as the request, run by Harv's server on this device while Harv is on (a run missed while it's off happens once when it starts). Each run uses the user's plan, so never repeat faster than the user needs. Give exactly one of at, in_minutes, every_minutes, daily_at. Now is ${new Date().toLocaleString('en-GB')} (local time) when this chat started; for "in an hour" use in_minutes.`,
+              {
+                title: z.string().describe('A short name for the list, like "Morning news"'),
+                prompt: z
+                  .string()
+                  .min(1)
+                  .describe(
+                    "The full request for each run, written as the user's ask (the run doesn't see this conversation's later turns)",
+                  ),
+                at: z.string().optional().describe('One run at this local date and time, like 2026-10-28T08:00'),
+                in_minutes: z.number().optional().describe('One run this many minutes from now'),
+                every_minutes: z.number().optional().describe('Repeat every N minutes (at least 5)'),
+                daily_at: z.string().optional().describe('Repeat every day at HH:MM (24-hour, local)'),
+                weekdays: z.array(z.string()).optional().describe('With daily_at: only on these days (mon, tue, wed, thu, fri, sat, sun)'),
+              },
+              async ({ title, prompt, ...when }) => text(schedules.add(tabId, title, prompt, when)),
+            ),
+            tool('list_scheduled', "List Harv's scheduled tasks on this device (id, name, when, next run, chat).", {}, async () =>
+              text(schedules.describe()),
+            ),
+            tool(
+              'cancel_scheduled',
+              'Cancel a scheduled task by its id (from list_scheduled), when the user asks to stop it.',
+              { id: z.string().min(1) },
+              async ({ id }) => text(schedules.cancel(id) ? `Cancelled ${id}.` : `No scheduled task with id ${id}.`),
             ),
           ]
         : []),

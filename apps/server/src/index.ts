@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { basename, join } from 'node:path';
 import Fastify from 'fastify';
@@ -46,6 +47,7 @@ import { moveOldReportFile, SyncEngine } from './sync/engine.ts';
 import { claudeMemoryDir } from './sync/files.ts';
 import { WORKSPACE } from './safety/paths.ts';
 import { SyncStore } from './sync/store.ts';
+import { Scheduler } from './schedule/scheduler.ts';
 
 /** The file API's answer for passwords, keys and logins: the same rule as Harv's own tools. */
 const SENSITIVE = 'Harv never opens or sends files with passwords, keys or logins (the same rule its own tools follow).';
@@ -200,6 +202,13 @@ const sync = new SyncEngine(
   },
 );
 chats.onProjectStates = (states) => sync.noteProjectStates(states);
+// Scheduled tasks (docs/PLAN.md §6s C4): run by this server, on this device.
+const scheduler = new Scheduler(
+  join(HARV_HOME, 'harv.db'),
+  { run: (task, late) => chats.runScheduled(task, late), broadcast },
+  loadSettings().deviceName || hostname(),
+);
+chats.schedules = scheduler;
 // "Reopen tabs" off: Harv starts with no tabs (the chats stay in history).
 if (!loadSettings().restoreTabs) {
   for (const c of store.openChats()) store.setOpen(c.id, false);
@@ -422,6 +431,7 @@ app.get('/ws', { websocket: true }, (socket) => {
     battery: onBattery,
     startedAt: STARTED_AT,
     sync: sync.status(),
+    schedules: scheduler.list(),
   });
 
   const unsubscribe = metrics.onSnapshot((snapshot) => send({ type: 'metrics.tick', metrics: snapshot }));
@@ -472,6 +482,9 @@ app.get('/ws', { websocket: true }, (socket) => {
         break;
       case 'chat.rename':
         chats.rename(msg.tabId, msg.title);
+        break;
+      case 'schedule.cancel':
+        scheduler.cancel(String(msg.id));
         break;
       case 'chat.plan':
         chats.setPlanning(msg.tabId, msg.on === true);
@@ -539,6 +552,7 @@ app.addHook('onClose', async () => {
   metrics.stop();
   meter.stop();
   sync.stop();
+  scheduler.stop();
   terminals.closeAll();
   chats.closeAll();
   store.close();
@@ -558,6 +572,8 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK'] as const) {
 // Localhost only: Harv controls this PC, so it must never be reachable from the network.
 await app.listen({ host: '127.0.0.1', port: SERVER_PORT });
 await metrics.start();
+// After the catalog had a moment: a run missed while Harv was off happens now, once.
+setTimeout(() => scheduler.start(), 5000).unref();
 
 // LibreHardwareMonitor starts with Harv (Settings › Startup, or HARV_START_LHM=0, turns that off).
 if (process.env.HARV_START_LHM !== '0' && loadSettings().startSensors) {

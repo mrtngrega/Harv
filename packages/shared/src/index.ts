@@ -18,6 +18,7 @@ export type * from './safety.ts';
 export type * from './usage.ts';
 export * from './settings.ts';
 export * from './tools.ts';
+export type * from './schedule.ts';
 export type * from './projects.ts';
 export type * from './watchdog.ts';
 export type * from './sync.ts';
@@ -30,6 +31,7 @@ import type { Project, ProjectClientMessage, ProjectServerMessage } from './proj
 import type { Catalog, ChatClientMessage, ChatServerMessage, ChatSnapshot, HistoryItem } from './chat.ts';
 import type { WatchdogServerMessage } from './watchdog.ts';
 import type { SyncClientMessage, SyncServerMessage, SyncStatus } from './sync.ts';
+import type { ScheduleClientMessage, ScheduledTask, ScheduleServerMessage } from './schedule.ts';
 
 /** Messages the server pushes to the dashboard over /ws. */
 export type ServerMessage =
@@ -62,6 +64,8 @@ export type ServerMessage =
       startedAt: number;
       /** Sync with the user's other devices. */
       sync: SyncStatus;
+      /** Harv's scheduled tasks on this device. */
+      schedules: ScheduledTask[];
     }
   /** `detail` names the running tool while working. */
   | { type: 'harv.status'; status: HarvStatus; detail?: string }
@@ -74,7 +78,8 @@ export type ServerMessage =
   | ToolServerMessage
   | ProjectServerMessage
   | WatchdogServerMessage
-  | SyncServerMessage;
+  | SyncServerMessage
+  | ScheduleServerMessage;
 
 /** Messages the dashboard sends to the server over /ws. */
 export type ClientMessage =
@@ -84,4 +89,5 @@ export type ClientMessage =
   | SettingsClientMessage
   | ToolClientMessage
   | ProjectClientMessage
-  | SyncClientMessage;
+  | SyncClientMessage
+  | ScheduleClientMessage;

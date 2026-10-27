@@ -26,7 +26,7 @@ import type { UsageMeter } from '../usage/meter.ts';
 import { buildContent, cleanAttachments, deleteAttachments } from './attachments.ts';
 import { sideQuestion } from './btw.ts';
 import { commandName, hiddenReason } from './commands.ts';
-import { formatTranscript, type HandOff, type ProjectTools } from './chatTools.ts';
+import { formatTranscript, type HandOff, type ProjectTools, type ScheduleTools } from './chatTools.ts';
 import { osPath, pathKey } from '../platform.ts';
 import { loadSettings, projectsDir } from '../settings.ts';
 import type { ProjectServerMessage, SharedUi } from '@harv/shared';
@@ -129,6 +129,8 @@ export class ChatManager {
   /** Chats just rewound: their next session resumes the conversation cut back to this entry. */
   private forkAt = new Map<string, string>();
   catalog: Catalog | null = null;
+  /** Harv's scheduler (set by the server once it exists). */
+  schedules?: ScheduleTools & { dropChat(tabId: string): void };
 
   constructor(
     private store: ChatStore,
@@ -405,7 +407,7 @@ export class ChatManager {
       this.gate,
       { resume, resumeAt: resume ? resumeAt : undefined, chainEnd: this.store.chainEnd(tabId), planning: this.gate.isPlanning(tabId) },
       (req, signal) => this.delegate(tabId, req, signal),
-      { project: this.store.projectOf(tabId), projects: this.projectTools },
+      { project: this.store.projectOf(tabId), projects: this.projectTools, schedules: this.schedules },
     );
     this.sessions.set(tabId, session);
     return session;
@@ -944,9 +946,28 @@ export class ChatManager {
     this.router.forget(tabId);
     this.lastRun.delete(tabId);
     deleteAttachments(tabId);
+    this.schedules?.dropChat(tabId);
     this.broadcast({ type: 'chat.removed', tabId });
     this.publishHistory();
     this.onStatus(this.status);
+  }
+
+  /**
+   * A scheduled task is due (docs/PLAN.md §6s C4): a turn in the chat that made it, reopened
+   * if it was closed (a new one if it's gone), on AUTO. Queued like any message if the chat is busy.
+   */
+  async runScheduled(task: { tabId: string; title: string; prompt: string }, late: boolean): Promise<void> {
+    const { tabId } = task;
+    const known = this.store.exists(tabId);
+    if (!known) this.store.ensureChat(tabId, task.title);
+    if (!this.store.openChats().some((c) => c.id === tabId)) {
+      this.store.setOpen(tabId, true);
+      const chat = this.store.snapshot(tabId);
+      if (chat) this.broadcast({ type: 'chat.opened', chat, focus: false });
+    }
+    if (!known) this.publishHistory();
+    const when = late ? ', late: it was due while Harv was off' : '';
+    await this.send(tabId, `[Scheduled task "${task.title}"${when}] ${task.prompt}`, 'auto', 'high');
   }
 
   /**

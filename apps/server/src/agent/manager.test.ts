@@ -784,3 +784,24 @@ describe('rewind and plan mode (docs/PLAN.md §6s C2, C3)', () => {
     expect(chats.openChats().find((c) => c.id === 'pl')?.planning).toBe(true);
   });
 });
+
+describe('scheduled tasks (docs/PLAN.md §6s C4)', () => {
+  it('runs in the chat that made it, reopened if it was closed, on AUTO', async () => {
+    const { chats, store, sent } = setup();
+    await chats.send('sch', 'remind me later', 'sonnet', 'medium');
+    FakeSession.all.get('sch')!.finish();
+    await settle();
+    chats.close('sch');
+    await chats.runScheduled({ tabId: 'sch', title: 'Morning news', prompt: 'Tell me the news' }, true);
+    expect(sent.some((m) => m.type === 'chat.opened' && m.chat.id === 'sch' && m.focus === false)).toBe(true);
+    const last = store.snapshot('sch')!.lines.filter((l) => l.kind === 'you').at(-1)!;
+    expect(last.text).toBe('[Scheduled task "Morning news", late: it was due while Harv was off] Tell me the news');
+  });
+
+  it('makes a new chat when the old one is gone', async () => {
+    const { chats, store } = setup();
+    await chats.runScheduled({ tabId: 'gone', title: 'Check build', prompt: 'Is it green?' }, false);
+    expect(store.title('gone')).toBe('Check build');
+    expect(store.openChats().some((c) => c.id === 'gone')).toBe(true);
+  });
+});

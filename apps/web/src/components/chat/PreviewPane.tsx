@@ -39,7 +39,7 @@ function useSource(preview: Preview, modified: number): { text: string | null; e
     };
   }, [preview.path, needsText, modified]);
   if (!needsText) return { text: preview.source ?? null, error: null };
-  return loaded?.path === preview.path ? loaded : { text: null, error: null };
+  return loaded && loaded.path === preview.path ? loaded : { text: null, error: null };
 }
 
 function Body({ preview, modified, reload }: { preview: Preview; modified: number; reload: number }) {

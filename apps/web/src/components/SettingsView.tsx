@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { cancelSchedule, useSchedules, whenText } from '../lib/scheduleStore.ts';
+import { useChat } from '../lib/chatStore.ts';
 import { ACCENTS, COMPACT_ROWS, DEFAULT_SETTINGS, WARN_CHOICES, type CompactRow, type HarvSettings } from '@harv/shared';
 import { comboOf, desktop, inApp, type AppSettings, type UpdateInfo } from '../lib/desktop.ts';
 import { ago } from '../lib/format.ts';
@@ -545,6 +547,48 @@ function Projects() {
   );
 }
 
+/** Harv's scheduled tasks on this device: what runs when, in which chat, and Cancel. */
+function ScheduledTasks() {
+  const tasks = useSchedules();
+  const { tabs } = useChat();
+  const time = (ms: number) =>
+    new Date(ms).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return (
+    <Sub title="Scheduled tasks">
+      <Note>
+        Ask Harv in any chat (“every morning at 8 tell me the weather”, “check the build in an hour”). Each run is a turn in that chat, on
+        this device while Harv is on; one missed while it was off runs once when it starts. Each run uses your plan.
+      </Note>
+      {tasks.length === 0 ? (
+        <Note>Nothing scheduled.</Note>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {tasks.map((t) => (
+            <li key={t.id} className="flex min-w-0 items-center gap-2 rounded-lg border border-line bg-white/[0.03] px-2.5 py-1.5 text-xs">
+              <span className="text-accent">⏰</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-ink" title={t.prompt}>
+                  {t.title}
+                </span>
+                <span className="block truncate text-[11px] text-faint">
+                  {whenText(t)} · next {t.nextAt ? time(t.nextAt) : '—'} · in “{tabs.find((x) => x.id === t.tabId)?.title ?? 'its chat'}”
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => cancelSchedule(t.id)}
+                className="flex-none cursor-pointer rounded border border-line px-2 py-0.5 text-[11px] text-muted hover:bg-white/10 hover:text-warn"
+              >
+                cancel
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Sub>
+  );
+}
+
 /** The photo: preview, choose, remove. */
 function PhotoPicker() {
   const { version } = useBackground();
@@ -975,6 +1019,7 @@ export function SettingsView() {
           )}
           <RestartButton />
         </Sub>
+        <ScheduledTasks />
         <Watchdog />
         {inApp && <AppSection />}
       </Group>
