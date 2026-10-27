@@ -5,6 +5,8 @@ export interface SyncPeer {
   name: string;
   /** When its newest change was written there (epoch ms). */
   lastChange?: number;
+  /** The last live exchange with it over Tailscale (epoch ms; M10c). */
+  live?: number;
 }
 
 export interface SyncStatus {

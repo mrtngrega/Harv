@@ -20,6 +20,40 @@ const INTERVAL_MS = 2 * 60 * 1000;
 const SOON_MS = 10 * 1000;
 /** Events per chunk file. */
 const CHUNK_EVENTS = 2000;
+/** Live sync (M10c): events and file bytes per exchange, and how old a batch may be. */
+const LIVE_EVENTS = 500;
+const LIVE_BYTES = 24 * 1024 * 1024;
+const LIVE_MAX_AGE_MS = 10 * 60 * 1000;
+/** A file that travels with sync (larger ones stay home). */
+const MAX_BLOB_BYTES = 10 * 1024 * 1024;
+
+/** What one live exchange carries: events after the peer's cursor, with the bytes of the files among them. */
+interface LiveBatch {
+  v: 1;
+  device: { id: string; name: string };
+  events: { seq: number; e: SyncEvent }[];
+  blobs: Record<string, string>;
+  at: number;
+}
+
+/** Where a device listens for live sync on the tailnet (sealed in its folder of the repo). */
+export interface LiveAddress {
+  name: string;
+  ip: string;
+  port: number;
+}
+
+const emptyChanges = (): Applied => ({
+  lines: new Map(),
+  forks: new Set(),
+  renamed: new Map(),
+  moved: new Set(),
+  cleared: new Set(),
+  rewound: new Set(),
+  deleted: new Set(),
+  projects: [],
+  history: false,
+});
 const CHUNK = /^(\d{12})-(\d{12})\.hrv$/;
 
 const hash = (s: string | null) => (s === null ? null : createHash('sha256').update(s).digest('hex').slice(0, 16));
@@ -147,6 +181,14 @@ export class SyncEngine {
   private lastError?: string;
   private needsKey = false;
   private unsubscribe?: () => void;
+  /** Syncs over git and live exchanges never run at the same time (both move the cursors). */
+  private lock: Promise<unknown> = Promise.resolve();
+  /** This device's live sync address, once it listens on the tailnet. */
+  private liveAddr: { ip: string; port: number } | null = null;
+  /** File bytes that came with a live batch, by hash, while it's applied. */
+  private liveBlobs: Record<string, string> | null = null;
+  /** A local change was recorded: live sync sends it soon (set by LiveLink). */
+  onLocalChange?: () => void;
 
   constructor(
     home: string,
@@ -177,7 +219,12 @@ export class SyncEngine {
 
   status(): SyncStatus {
     const pushed = this.db.get('pushed', 0);
-    const peers = [...this.db.withPrefix<Omit<SyncPeer, 'id'>>('peer:')].map(([id, p]) => ({ id, ...p }));
+    // `live` only while live exchanges are recent: an older one means the peer went quiet.
+    const peers = [...this.db.withPrefix<Omit<SyncPeer, 'id'>>('peer:')].map(([id, { live, ...p }]) => ({
+      id,
+      ...p,
+      ...(live && Date.now() - live < 2 * 60_000 ? { live } : {}),
+    }));
     const lastSync = this.db.get<number | null>('lastSync', null);
     return {
       enabled: this.enabled,
@@ -227,6 +274,7 @@ export class SyncEngine {
     const add = (e: SyncEvent) => {
       this.db.add(e);
       if (e.t === 'delete') this.db.set(`deleted:${e.chat}`, e.at);
+      this.onLocalChange?.();
     };
     this.chats.onEvent = on ? add : undefined;
     this.routes.onEvent = on ? add : undefined;
@@ -248,6 +296,7 @@ export class SyncEngine {
         if (JSON.stringify(before[key]) === JSON.stringify(after[key])) continue;
         this.db.set(`setAt:${key}`, now);
         this.db.add({ t: 'setting', key, value: after[key], at: now });
+        this.onLocalChange?.();
       }
     }
     if (before.deviceName !== after.deviceName || was !== is) this.publish();
@@ -275,7 +324,17 @@ export class SyncEngine {
     return this.running;
   }
 
-  private async run(): Promise<void> {
+  private exclusive<T>(fn: () => T | Promise<T>): Promise<T> {
+    const next = this.lock.then(fn, fn);
+    this.lock = next.catch(() => {});
+    return next;
+  }
+
+  private run(): Promise<void> {
+    return this.exclusive(() => this.runNow());
+  }
+
+  private async runNow(): Promise<void> {
     this.busy = true;
     this.publish();
     try {
@@ -295,6 +354,7 @@ export class SyncEngine {
       this.diffUi();
       this.applyPeers(key);
       this.writeChunks(key);
+      this.writeLiveAddress(key);
       await this.repo.commit(`${this.name}: changes up to ${this.db.get('written', 0)}`);
       if ((await this.repo.ahead()) > 0) await this.repo.push();
       const written = this.db.get('written', 0);
@@ -452,17 +512,7 @@ export class SyncEngine {
 
   /** Applies what the other devices wrote since their cursors. */
   private applyPeers(key: Buffer) {
-    const changes: Applied = {
-      lines: new Map(),
-      forks: new Set(),
-      renamed: new Map(),
-      moved: new Set(),
-      cleared: new Set(),
-      rewound: new Set(),
-      deleted: new Set(),
-      projects: [],
-      history: false,
-    };
+    const changes = emptyChanges();
     let settings: HarvSettings | undefined;
     // Shared files arrived before this version: once, read the chunks already seen again for them.
     const replay = !this.db.get('filesReplayed', false);
@@ -490,9 +540,16 @@ export class SyncEngine {
         }
         cursor = Math.max(cursor, c.to);
         this.db.set(`cursor:${peer}`, cursor);
-        this.db.set(`peer:${peer}`, { name: chunk.device.name, lastChange: last || undefined });
+        const known = this.db.get<Omit<SyncPeer, 'id'> | null>(`peer:${peer}`, null);
+        this.db.set(`peer:${peer}`, { ...known, name: chunk.device.name, lastChange: last || undefined });
       }
     }
+    this.emitChanges(changes, settings);
+    this.db.set('filesReplayed', true);
+  }
+
+  /** Tells the dashboards and the chats what a sync (git or live) changed. */
+  private emitChanges(changes: Applied, settings: HarvSettings | undefined) {
     if (
       changes.lines.size ||
       changes.renamed.size ||
@@ -507,7 +564,145 @@ export class SyncEngine {
     }
     if (settings) this.hooks.settings(settings);
     if (changes.ui) this.hooks.ui?.(changes.ui);
-    this.db.set('filesReplayed', true);
+  }
+
+  // ── Live sync over Tailscale (M10c, docs/PLAN.md §6m): the same events, seconds after they happen ──
+
+  /** Where this device listens on the tailnet; it goes into the repo with the next sync. */
+  setLiveAddress(ip: string, port: number): void {
+    this.liveAddr = { ip, port };
+    this.soon();
+  }
+
+  private writeLiveAddress(key: Buffer) {
+    if (!this.liveAddr) return;
+    const file = join(this.repo.dir, this.id, 'live.hrv');
+    const want: LiveAddress = { name: this.name, ...this.liveAddr };
+    try {
+      const now = open<LiveAddress>(key, `${this.id}/live.hrv`, readFileSync(file));
+      if (now.ip === want.ip && now.port === want.port && now.name === want.name) return;
+    } catch {
+      // not there yet, or from another key: written below
+    }
+    mkdirSync(join(this.repo.dir, this.id), { recursive: true });
+    writeFileSync(file, seal(key, `${this.id}/live.hrv`, want));
+  }
+
+  /** The other devices' live addresses, from the repo. */
+  livePeers(): (LiveAddress & { id: string })[] {
+    if (!this.enabled) return [];
+    const key = loadKey(this.keyPath);
+    if (!key) return [];
+    return this.peerIds().flatMap((id) => {
+      const file = join(this.repo.dir, id, 'live.hrv');
+      if (!existsSync(file)) return [];
+      try {
+        return [{ id, ...open<LiveAddress>(key, `${id}/live.hrv`, readFileSync(file)) }];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  /** A file's bytes for a live batch, when it's still the version the event names. */
+  private blobBytes(root: string, rel: string, fileHash: string): Buffer | null {
+    const folder = this.extra.folders?.[root];
+    const src = folder && join(folder.dir, ...rel.split('/'));
+    if (!src || !existsSync(src) || statSync(src).size > MAX_BLOB_BYTES) return null;
+    const data = readFileSync(src);
+    return hashBytes(data) === fileHash ? data : null;
+  }
+
+  /**
+   * What to send a peer now: the events it hasn't confirmed yet (none for the first exchange,
+   * which only asks where its cursor is), or null when there's nothing new.
+   */
+  liveOutgoing(peer: string): Promise<Buffer | null> {
+    return this.exclusive(() => {
+      const key = this.enabled ? loadKey(this.keyPath) : null;
+      if (!key || !this.db.get('snapshot', false)) return null;
+      // Local edits a sync would notice (memory notes, shared files, tabs and drafts), noticed now.
+      this.diffMemory();
+      this.diffFiles();
+      this.diffProjectMemory();
+      this.diffUi();
+      const ack = this.db.get<number | null>(`liveAck:${peer}`, null);
+      const events: LiveBatch['events'] = [];
+      const blobs: Record<string, string> = {};
+      let bytes = 0;
+      for (const ev of ack === null ? [] : this.db.after(ack, LIVE_EVENTS)) {
+        if (ev.e.t === 'blob' && ev.e.hash) {
+          // A file that can't come along (too big, changed again) stops the batch: from there on, git carries it.
+          const data = this.blobBytes(ev.e.root, ev.e.path, ev.e.hash);
+          if (!data || bytes + data.length > LIVE_BYTES) break;
+          blobs[ev.e.hash] = data.toString('base64');
+          bytes += data.length;
+        }
+        events.push(ev);
+      }
+      if (ack !== null && !events.length) return null;
+      const batch: LiveBatch = { v: 1, device: { id: this.id, name: this.name }, events, blobs, at: Date.now() };
+      return Buffer.concat([Buffer.from(`${this.id}\n`), seal(key, `live/${this.id}/${peer}`, batch)]);
+    });
+  }
+
+  /** The peer's answer: where its cursor for this device is now. Returns whether more is waiting for it. */
+  liveAcked(peer: string, answer: Buffer): boolean {
+    const key = loadKey(this.keyPath);
+    if (!key) return false;
+    const { cursor } = open<{ cursor: number }>(key, `live-ack/${peer}/${this.id}`, answer);
+    this.db.set(`liveAck:${peer}`, cursor);
+    const known = this.db.get<Omit<SyncPeer, 'id'> | null>(`peer:${peer}`, null);
+    if (known) this.db.set(`peer:${peer}`, { ...known, live: Date.now() });
+    this.publish();
+    return this.db.count(cursor) > 0;
+  }
+
+  /** A peer can't be reached live any more: the next exchange asks for its cursor again. */
+  liveLost(peer: string): void {
+    this.db.set(`liveAck:${peer}`, null);
+  }
+
+  /**
+   * A live batch from a peer: applied like a chunk, from right after this device's cursor for
+   * it. A gap (it was pruned after going out through git) waits for a git sync to fill it.
+   */
+  receiveLive(body: Buffer): Promise<Buffer> {
+    return this.exclusive(() => {
+      const nl = body.indexOf(10);
+      const from = nl > 0 ? body.subarray(0, nl).toString('utf8') : '';
+      if (!/^[a-f0-9]{16}$/.test(from) || from === this.id) throw new Error('Not a Harv device');
+      const key = this.enabled ? loadKey(this.keyPath) : null;
+      if (!key) throw new Error('Sync is off here');
+      const batch = open<LiveBatch>(key, `live/${from}/${this.id}`, body.subarray(nl + 1));
+      if (Math.abs(Date.now() - batch.at) > LIVE_MAX_AGE_MS) throw new Error('Too old');
+      let cursor = this.db.get(`cursor:${from}`, 0);
+      const fresh = batch.events.filter((ev) => ev.seq > cursor);
+      if (fresh.length && fresh[0]!.seq > cursor + 1) {
+        this.soon();
+      } else if (fresh.length) {
+        const changes = emptyChanges();
+        let settings: HarvSettings | undefined;
+        const known = this.db.get<Omit<SyncPeer, 'id'> | null>(`peer:${from}`, null);
+        let last = known?.lastChange ?? 0;
+        this.liveBlobs = batch.blobs;
+        try {
+          for (const { seq, e } of fresh) {
+            const changed = this.apply(e, batch.device.name, changes, key, from);
+            if (changed) settings = changed;
+            last = Math.max(last, e.t === 'route' ? e.row.at : e.at);
+            cursor = seq;
+            this.db.set(`cursor:${from}`, cursor);
+          }
+        } finally {
+          this.liveBlobs = null;
+        }
+        this.db.set(`peer:${from}`, { ...known, name: batch.device.name, lastChange: last || undefined, live: Date.now() });
+        this.emitChanges(changes, settings);
+        this.publish();
+      }
+      return seal(key, `live-ack/${this.id}/${from}`, { cursor });
+    });
   }
 
   /** Deleted on either device: later changes to it are ignored. */
@@ -812,11 +1007,13 @@ export class SyncEngine {
       return remember();
     }
     const blob = join(this.repo.dir, peer, 'blobs', `${e.hash}.hrv`);
-    if (!existsSync(blob)) {
+    const live = this.liveBlobs?.[e.hash];
+    if (!live && !existsSync(blob)) {
       this.hooks.log('Sync: a file from the other device came without its contents', { path: e.path });
       return;
     }
-    const data = openBytes(key, `blobs/${e.hash}`, readFileSync(blob));
+    const data = live ? Buffer.from(live, 'base64') : openBytes(key, `blobs/${e.hash}`, readFileSync(blob));
+    if (live && hashBytes(data) !== e.hash) return;
     folder.beforeWrite?.(e.path);
     mkdirSync(join(path, '..'), { recursive: true });
     writeFileSync(path, data);

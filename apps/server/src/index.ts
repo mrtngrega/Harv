@@ -47,6 +47,7 @@ import { moveOldReportFile, SyncEngine } from './sync/engine.ts';
 import { claudeMemoryDir } from './sync/files.ts';
 import { WORKSPACE } from './safety/paths.ts';
 import { SyncStore } from './sync/store.ts';
+import { LiveLink } from './sync/live.ts';
 import { Scheduler } from './schedule/scheduler.ts';
 
 /** The file API's answer for passwords, keys and logins: the same rule as Harv's own tools. */
@@ -202,6 +203,8 @@ const sync = new SyncEngine(
   },
 );
 chats.onProjectStates = (states) => sync.noteProjectStates(states);
+// Live sync over Tailscale (M10c): changes reach the other device in seconds when both are on.
+const live = new LiveLink(sync, (message, data) => app.log.warn(data ?? {}, message));
 // Scheduled tasks (docs/PLAN.md §6s C4): run by this server, on this device.
 const scheduler = new Scheduler(
   join(HARV_HOME, 'harv.db'),
@@ -516,6 +519,7 @@ app.get('/ws', { websocket: true }, (socket) => {
       }
       case 'ui.save':
         saveUi(msg.state);
+        live.soon();
         break;
       case 'term.attach': {
         try {
@@ -552,6 +556,7 @@ app.addHook('onClose', async () => {
   metrics.stop();
   meter.stop();
   sync.stop();
+  live.stop();
   scheduler.stop();
   terminals.closeAll();
   chats.closeAll();
@@ -605,3 +610,4 @@ meter.start();
 // Sync with the user's other devices (Settings › Sync): pull and push now and every 2 minutes.
 // Projects with a GitHub repo go along (docs/PLAN.md §6n): note the remotes of ones added before, then sync.
 void chats.noteRemotes().finally(() => sync.start());
+if (process.env.HARV_LIVE !== '0' && loadSettings().syncEnabled) void live.start();

@@ -503,7 +503,10 @@ function Sync() {
               <span>{line}</span>
               {peers.length > 0 && (
                 <span className="basis-full">
-                  Other devices: {peers.map((p) => `${p.name}${p.lastChange ? ` (last change ${ago(p.lastChange)})` : ''}`).join(', ')}
+                  Other devices:{' '}
+                  {peers
+                    .map((p) => `${p.name}${p.live ? ' (live over Tailscale)' : p.lastChange ? ` (last change ${ago(p.lastChange)})` : ''}`)
+                    .join(', ')}
                 </span>
               )}
             </div>
