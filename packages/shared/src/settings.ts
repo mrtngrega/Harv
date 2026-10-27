@@ -8,6 +8,9 @@ export type CompactRow = (typeof COMPACT_ROWS)[number];
 /** Warning thresholds the Settings tab offers. */
 export const WARN_CHOICES = { session: [50, 75, 90, 95], weekly: [50, 75, 90] } as const;
 
+export const BACKDROPS = ['photo', 'seeThrough', 'plain'] as const;
+export type Backdrop = (typeof BACKDROPS)[number];
+
 /** ~/.harv/settings.json: shared by every dashboard window, the server and the safety gate. */
 export interface HarvSettings {
   /** Folders Harv may read but never change (the user's read-only list). */
@@ -34,8 +37,15 @@ export interface HarvSettings {
   scrim: number;
   /** How solid the glass panels are, in % (20–95). */
   glass: number;
-  /** In the app: the window shows what's behind it (Acrylic blur on Windows) instead of the photo. Per device. */
-  seeThrough: boolean;
+  /** How much the glass panels blur what's behind them, in px (0–40). */
+  glassBlur: number;
+  /**
+   * What's behind the panels: the photo, the desktop (the app's see-through window; a browser
+   * shows the photo instead), or the plain ground colour. Per device.
+   */
+  backdrop: Backdrop;
+  /** See-through on Windows: frost what's behind the window (Acrylic; Windows has one strength). Per device. */
+  frost: boolean;
   /** Size of everything, in % (80–130). */
   uiScale: number;
   /** Space between chat lines. */
@@ -102,7 +112,9 @@ export const DEFAULT_SETTINGS: HarvSettings = {
   backgroundBlur: 9,
   scrim: 55,
   glass: 50,
-  seeThrough: false,
+  glassBlur: 22,
+  backdrop: 'photo',
+  frost: true,
   uiScale: 100,
   density: 'comfy',
   showTimes: true,
@@ -140,6 +152,7 @@ export const SHARED_SETTINGS = [
   'backgroundBlur',
   'scrim',
   'glass',
+  'glassBlur',
   'density',
   'showTimes',
   'showTags',

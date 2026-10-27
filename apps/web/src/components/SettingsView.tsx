@@ -25,14 +25,42 @@ function useExample(windows: string, linux: string): string {
   return useConnection().platform === 'windows' ? windows : linux;
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+/** The width of every row's label, so controls line up down a section. */
+const LABEL = 'flex-none text-muted @md:w-28';
+/** A label and its control side by side; stacked in a narrow window so text boxes keep their room. */
+const ROW = 'flex flex-col items-stretch gap-1.5 text-xs @md:flex-row @md:items-center @md:gap-3';
+const BUTTON =
+  'min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 text-xs hover:bg-white/10 disabled:cursor-default disabled:opacity-40';
+const INPUT =
+  'min-h-9 min-w-0 flex-1 rounded-lg border border-line bg-black/20 px-2.5 text-xs text-ink outline-none placeholder:text-faint focus:border-accent/60';
+
+/** A big section (Appearance, Safety…): its own glass card, clearly apart from the next. Subsections flow in 1–2 columns inside. */
+function Group({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
-    <section className="mb-2.5 flex break-inside-avoid flex-col gap-2 rounded-xl bg-black/20 px-3 py-2.5">
-      <h3 className="m-0 text-[13px] font-semibold">{title}</h3>
-      {children}
+    <section className="flex flex-col gap-3 rounded-2xl border border-line bg-black/25 p-4">
+      <header className="flex flex-col gap-0.5 border-b border-line pb-2.5">
+        <h2 className="m-0 text-sm font-semibold tracking-wide text-accent">{title}</h2>
+        {hint && <p className="m-0 text-[11px] text-faint">{hint}</p>}
+      </header>
+      <div className="columns-1 gap-3 @3xl:columns-2">{children}</div>
     </section>
   );
 }
+
+/** A subsection inside a big section. */
+function Sub({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="mb-3 flex break-inside-avoid flex-col gap-2.5 rounded-xl bg-white/[0.035] px-3 py-3">
+      <h3 className="m-0 text-[12px] font-semibold text-ink">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+/** A small grey note under a setting. */
+const Note = ({ children, warn }: { children: ReactNode; warn?: boolean }) => (
+  <p className={`m-0 text-[11px] leading-snug ${warn ? 'text-warn' : 'text-faint'}`}>{children}</p>
+);
 
 function Toggle({ on, label, hint, onChange }: { on: boolean; label: string; hint?: string; onChange: (on: boolean) => void }) {
   return (
@@ -80,7 +108,7 @@ function Slider({
   };
   return (
     <label className="flex items-center gap-3 text-xs">
-      <span className="w-24 flex-none text-muted">{label}</span>
+      <span className="w-20 flex-none text-muted @md:w-28">{label}</span>
       <input
         type="range"
         min={min}
@@ -114,22 +142,24 @@ function Choice<T extends string | number>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="flex flex-wrap items-center gap-1.5 text-xs">
-      <span className="w-24 flex-none text-muted">{label}</span>
-      {options.map((o) => (
-        <button
-          key={String(o.value)}
-          type="button"
-          role="radio"
-          aria-checked={value === o.value}
-          onClick={() => onChange(o.value)}
-          className={`min-h-8 cursor-pointer rounded-lg border px-2.5 ${
-            value === o.value ? 'border-accent/60 bg-accent/15 text-ink' : 'border-line text-muted hover:bg-white/5'
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
+    <div role="radiogroup" aria-label={label} className={ROW}>
+      <span className={LABEL}>{label}</span>
+      <div className="flex flex-1 flex-wrap gap-1.5">
+        {options.map((o) => (
+          <button
+            key={String(o.value)}
+            type="button"
+            role="radio"
+            aria-checked={value === o.value}
+            onClick={() => onChange(o.value)}
+            className={`min-h-8 cursor-pointer rounded-lg border px-2.5 ${
+              value === o.value ? 'border-accent/60 bg-accent/15 text-ink' : 'border-line text-muted hover:bg-white/5'
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -147,31 +177,42 @@ function Chips<T extends string | number>({
   onChange: (v: T[]) => void;
 }) {
   return (
-    <div role="group" aria-label={label} className="flex flex-wrap items-center gap-1.5 text-xs">
-      <span className="w-24 flex-none text-muted">{label}</span>
-      {options.map((o) => {
-        const on = values.includes(o.value);
-        return (
-          <button
-            key={String(o.value)}
-            type="button"
-            aria-pressed={on}
-            onClick={() =>
-              onChange(
-                on ? values.filter((v) => v !== o.value) : options.map((x) => x.value).filter((v) => v === o.value || values.includes(v)),
-              )
-            }
-            className={`min-h-8 cursor-pointer rounded-lg border px-2.5 ${on ? 'border-accent/60 bg-accent/15 text-ink' : 'border-line text-faint hover:bg-white/5'}`}
-          >
-            {o.label}
-          </button>
-        );
-      })}
+    <div role="group" aria-label={label} className={ROW}>
+      <span className={LABEL}>{label}</span>
+      <div className="flex flex-1 flex-wrap gap-1.5">
+        {options.map((o) => {
+          const on = values.includes(o.value);
+          return (
+            <button
+              key={String(o.value)}
+              type="button"
+              aria-pressed={on}
+              onClick={() =>
+                onChange(
+                  on ? values.filter((v) => v !== o.value) : options.map((x) => x.value).filter((v) => v === o.value || values.includes(v)),
+                )
+              }
+              className={`min-h-8 cursor-pointer rounded-lg border px-2.5 ${on ? 'border-accent/60 bg-accent/15 text-ink' : 'border-line text-faint hover:bg-white/5'}`}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-const LOOK_KEYS = ['motion', 'accent', 'backgroundBlur', 'scrim', 'glass', 'uiScale', 'density'] as const satisfies (keyof HarvSettings)[];
+const LOOK_KEYS = [
+  'motion',
+  'accent',
+  'backgroundBlur',
+  'scrim',
+  'glass',
+  'glassBlur',
+  'uiScale',
+  'density',
+] as const satisfies (keyof HarvSettings)[];
 const ROW_NAMES: Record<CompactRow, string> = {
   cpu: 'CPU',
   gpu: 'GPU',
@@ -182,48 +223,132 @@ const ROW_NAMES: Record<CompactRow, string> = {
   weekly: 'Weekly',
 };
 
-function WorkFolder() {
-  const example = useExample('C:\\Users\\you\\Projects', '/home/you/Projects');
-  const { workDir } = useSettings();
+/** A one-line text setting with a Save button (Enter saves too); Save lights up only when something changed. */
+function TextSetting({
+  id,
+  label,
+  value,
+  placeholder,
+  onSave,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  placeholder: string;
+  onSave: (value: string) => void;
+}) {
   const [draft, setDraft] = useState<string | null>(null);
-  const value = draft ?? workDir;
+  const shown = draft ?? value;
+  const changed = draft !== null && draft.trim() !== value;
   const save = (e: FormEvent) => {
     e.preventDefault();
-    updateSettings({ workDir: value.trim() });
+    if (changed) onSave(shown.trim());
     setDraft(null);
   };
   return (
-    <Section title="Default folder">
-      <p className="m-0 text-[11px] text-faint">
-        Where new terminals and the file explorer open, and where Harv works on files when you don't say where. Harv's own scratch files
-        stay in ~/.harv/workspace. Empty = your home folder.
-      </p>
-      <form onSubmit={save} className="flex gap-2">
-        <label htmlFor="harv-workdir" className="sr-only">
-          Default folder
-        </label>
+    <form onSubmit={save} className={ROW}>
+      <label htmlFor={id} className={LABEL}>
+        {label}
+      </label>
+      <div className="flex min-w-0 flex-1 gap-2">
         <input
-          id="harv-workdir"
-          value={value}
+          id={id}
+          value={shown}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder={example}
-          className="min-h-9 min-w-0 flex-1 rounded-lg border border-line bg-black/20 px-2.5 text-xs text-ink outline-none placeholder:text-faint focus:border-accent/60"
+          placeholder={placeholder}
+          spellCheck={false}
+          className={INPUT}
         />
-        <button type="submit" className="min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 text-xs hover:bg-white/10">
+        <button type="submit" disabled={!changed} className={BUTTON}>
           Save
         </button>
-      </form>
-      {draft !== null && draft.trim() !== workDir && <p className="m-0 text-[11px] text-faint">Not saved yet: press Save.</p>}
-    </Section>
+      </div>
+    </form>
+  );
+}
+
+/** A list of paths (projects, read-only folders) with an × on each. */
+function PathList({
+  items,
+  onRemove,
+}: {
+  items: { key: string; title?: string; path: string; label: string }[];
+  onRemove: (key: string) => void;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs">
+      {items.map((p) => (
+        <li key={p.key} className="flex items-center gap-2 rounded-lg bg-black/15 py-1 pr-1 pl-2.5">
+          <span className="flex min-w-0 flex-1 flex-col">
+            {p.title && <span className="truncate">{p.title}</span>}
+            <span className={`truncate ${p.title ? 'text-[11px] text-faint' : ''}`} title={p.path}>
+              {p.path}
+            </span>
+          </span>
+          <button
+            type="button"
+            aria-label={p.label}
+            title={p.label}
+            onClick={() => onRemove(p.key)}
+            className="size-7 flex-none cursor-pointer rounded text-muted hover:bg-white/10"
+          >
+            ×
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** A path box with an Add button (projects, read-only folders). */
+function AddPath({ id, label, placeholder, onAdd }: { id: string; label: string; placeholder: string; onAdd: (path: string) => void }) {
+  const [draft, setDraft] = useState('');
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!draft.trim()) return;
+        onAdd(draft.trim());
+        setDraft('');
+      }}
+      className="flex gap-2"
+    >
+      <label htmlFor={id} className="sr-only">
+        {label}
+      </label>
+      <input
+        id={id}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder={placeholder}
+        spellCheck={false}
+        className={INPUT}
+      />
+      <button type="submit" disabled={!draft.trim()} className={BUTTON}>
+        Add
+      </button>
+    </form>
+  );
+}
+
+function WorkFolder() {
+  const example = useExample('C:\\Users\\you\\Projects', '/home/you/Projects');
+  const { workDir } = useSettings();
+  return (
+    <Sub title="Default folder">
+      <Note>Where new terminals and the file explorer open, and where Harv works when you don’t say where. Empty = your home folder.</Note>
+      <TextSetting id="harv-workdir" label="Folder" value={workDir} placeholder={example} onSave={(v) => updateSettings({ workDir: v })} />
+    </Sub>
   );
 }
 
 /** Restarts the Harv server (to load changes to its own code); the page reconnects by itself. */
 function RestartButton() {
   const [state, setState] = useState<'idle' | 'asking' | 'restarting'>('idle');
-  if (state === 'restarting') return <p className="m-0 text-[11px] text-accent">Restarting… the page reconnects in a few seconds.</p>;
+  if (state === 'restarting') return <Note>Restarting… the page reconnects in a few seconds.</Note>;
   return (
-    <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+    <div className="flex flex-wrap items-center gap-2 text-xs">
       <button
         type="button"
         onClick={() => {
@@ -231,16 +356,12 @@ function RestartButton() {
           setState('restarting');
           void fetch('/api/restart', { method: 'POST' }).catch(() => {});
         }}
-        className="min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 hover:bg-white/10"
+        className={`${BUTTON} ${state === 'asking' ? 'border-warn/60 text-warn' : ''}`}
       >
         {state === 'asking' ? 'Yes, restart now' : 'Restart Harv'}
       </button>
       <span className="text-[11px] text-faint">
-        {state === 'asking'
-          ? 'Any reply in progress stops. Tabs, drafts and terminals come back.'
-          : inApp
-            ? 'Loads changes to Harv’s own server code. Quit Harv from the tray icon.'
-            : 'Loads changes to Harv’s own server code. Stop and start from the desktop shortcuts.'}
+        {state === 'asking' ? 'A reply in progress stops; tabs, drafts and terminals come back.' : 'Loads changes to Harv’s own code.'}
       </span>
     </div>
   );
@@ -278,102 +399,58 @@ function AppSection() {
       .finally(() => setUpdating(null));
   };
 
-  if (!app) return null;
-  const button =
-    'min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 hover:bg-white/10 disabled:cursor-default disabled:opacity-50';
   return (
-    <Section title="App">
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="w-24 flex-none text-muted">Hotkey</span>
-        {app.hotkeyWorks ? (
-          <button
-            type="button"
-            onClick={() => setRecording(true)}
-            onKeyDown={recording ? onKey : undefined}
-            onBlur={() => setRecording(false)}
-            className={`${button} ${recording ? 'border-accent text-accent' : ''}`}
-          >
-            {recording ? 'Press the keys…' : app.hotkey}
-          </button>
-        ) : (
-          <span className="text-faint">
-            {app.hotkey}, set in KDE’s System Settings › Shortcuts (Wayland doesn’t let apps take a hotkey).
-          </span>
-        )}
-      </div>
-      {app.hotkeyWorks && <p className="m-0 text-[11px] text-faint">Brings Harv up from anywhere, ready to type; again hides it.</p>}
-      <Toggle
-        on={app.autostart}
-        label="Open Harv when I log in"
-        hint="Starts Harv in the tray, ready for the hotkey."
-        onChange={(autostart) => change({ autostart })}
-      />
-      <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
-        {update && update.behind > 0 ? (
-          <button type="button" disabled={!!updating || update.dirty} onClick={() => run('updating')} className={button}>
-            {updating === 'updating' ? 'Updating…' : `Update (${update.behind} new)`}
-          </button>
-        ) : (
-          <button type="button" disabled={!!updating} onClick={() => run('checking')} className={button}>
-            {updating === 'checking' ? 'Checking…' : 'Check for updates'}
-          </button>
-        )}
-        <span className="text-[11px] text-faint">
-          {update?.error ??
-            (update?.dirty && update.behind > 0
-              ? 'Harv’s folder has uncommitted changes; the update waits for them.'
-              : update && update.behind === 0
-                ? 'Up to date.'
-                : `App ${app.version}. Updates pull Harv’s repo and restart it; never by themselves.`)}
-        </span>
-      </div>
-      {error && <p className="m-0 text-[11px] text-warn">{error}</p>}
-    </Section>
-  );
-}
-
-/** A one-line text setting with a Save button (Enter saves too). */
-function TextSetting({
-  id,
-  label,
-  value,
-  placeholder,
-  onSave,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  placeholder: string;
-  onSave: (value: string) => void;
-}) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const shown = draft ?? value;
-  const save = (e: FormEvent) => {
-    e.preventDefault();
-    onSave(shown.trim());
-    setDraft(null);
-  };
-  return (
-    <form onSubmit={save} className="flex items-center gap-2 text-xs">
-      <label htmlFor={id} className="w-24 flex-none text-muted">
-        {label}
-      </label>
-      <input
-        id={id}
-        value={shown}
-        onChange={(e) => setDraft(e.target.value)}
-        placeholder={placeholder}
-        spellCheck={false}
-        className="min-h-9 min-w-0 flex-1 rounded-lg border border-line bg-black/20 px-2.5 text-xs text-ink outline-none placeholder:text-faint focus:border-accent/60"
-      />
-      <button
-        type="submit"
-        disabled={draft === null || draft.trim() === value}
-        className="min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 text-xs hover:bg-white/10 disabled:cursor-default disabled:opacity-40"
-      >
-        Save
-      </button>
-    </form>
+    <Sub title="App">
+      {!app ? (
+        <Note>Reading the app’s settings…</Note>
+      ) : (
+        <>
+          <div className={ROW}>
+            <span className={LABEL}>Hotkey</span>
+            {app.hotkeyWorks ? (
+              <button
+                type="button"
+                title="Brings Harv up from anywhere, ready to type; again hides it"
+                onClick={() => setRecording(true)}
+                onKeyDown={recording ? onKey : undefined}
+                onBlur={() => setRecording(false)}
+                className={`${BUTTON} ${recording ? 'border-accent text-accent' : ''}`}
+              >
+                {recording ? 'Press the keys…' : app.hotkey}
+              </button>
+            ) : (
+              <span className="text-faint">{app.hotkey}, set in KDE’s System Settings › Shortcuts.</span>
+            )}
+          </div>
+          <Toggle
+            on={app.autostart}
+            label="Open Harv when I log in"
+            hint="Starts in the tray, ready for the hotkey."
+            onChange={(autostart) => change({ autostart })}
+          />
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            {update && update.behind > 0 ? (
+              <button type="button" disabled={!!updating || update.dirty} onClick={() => run('updating')} className={BUTTON}>
+                {updating === 'updating' ? 'Updating…' : `Update (${update.behind} new)`}
+              </button>
+            ) : (
+              <button type="button" disabled={!!updating} onClick={() => run('checking')} className={BUTTON}>
+                {updating === 'checking' ? 'Checking…' : 'Check for updates'}
+              </button>
+            )}
+            <span className="text-[11px] text-faint">
+              {update?.error ??
+                (update?.dirty && update.behind > 0
+                  ? 'Harv’s folder has uncommitted changes; the update waits for them.'
+                  : update && update.behind === 0
+                    ? 'Up to date.'
+                    : `App ${app.version}. Never updates by itself.`)}
+            </span>
+          </div>
+          {error && <Note warn>{error}</Note>}
+        </>
+      )}
+    </Sub>
   );
 }
 
@@ -388,61 +465,56 @@ function Sync() {
       ? `Last synced ${ago(status.lastSync)}${status.pending ? `, ${status.pending} changes still to send` : ''}.`
       : 'Not synced yet.';
   return (
-    <Section title="Sync">
-      <Toggle
-        on={settings.syncEnabled}
-        label="Sync with my other devices"
-        hint="Chats, Harv's memory and shared settings (look, chat, safety rules) go through your private Git repo, encrypted with a key only your devices have. Folders, sensors, terminals and the tab layout stay on each device. Every 2 minutes and after each reply."
-        onChange={(syncEnabled) => updateSettings({ syncEnabled })}
-      />
-      <TextSetting
-        id="harv-sync-repo"
-        label="Private repo"
-        value={settings.syncRepo}
-        placeholder="https://github.com/you/harv-sync.git"
-        onSave={(syncRepo) => updateSettings({ syncRepo })}
-      />
-      <TextSetting
-        id="harv-device-name"
-        label="This device"
-        value={settings.deviceName}
-        placeholder={status?.device.name ?? 'This computer'}
-        onSave={(deviceName) => updateSettings({ deviceName })}
-      />
-      {settings.syncEnabled && (
-        <div className="flex flex-col gap-1.5 text-[11px] text-faint">
-          {!settings.syncRepo ? (
-            <p className="m-0">Add the repo’s address to start. Use a private repo: never the public Harv one.</p>
+    <>
+      <Sub title="Connection">
+        <Toggle
+          on={settings.syncEnabled}
+          label="Sync with my other devices"
+          hint="Chats, memory, projects and shared settings, encrypted, through your private Git repo. Every 2 minutes and after each reply."
+          onChange={(syncEnabled) => updateSettings({ syncEnabled })}
+        />
+        <TextSetting
+          id="harv-sync-repo"
+          label="Private repo"
+          value={settings.syncRepo}
+          placeholder="https://github.com/you/harv-sync.git"
+          onSave={(syncRepo) => updateSettings({ syncRepo })}
+        />
+        <TextSetting
+          id="harv-device-name"
+          label="This device"
+          value={settings.deviceName}
+          placeholder={status?.device.name ?? 'This computer'}
+          onSave={(deviceName) => updateSettings({ deviceName })}
+        />
+      </Sub>
+      <Sub title="Status">
+        {!settings.syncEnabled && <Note>Sync is off: everything stays on this device.</Note>}
+        {settings.syncEnabled &&
+          (!settings.syncRepo ? (
+            <Note>Add the repo’s address to start. Use a private repo, never the public Harv one.</Note>
           ) : (
-            <>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={syncNow}
-                  disabled={status?.busy}
-                  className="min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 text-xs text-ink hover:bg-white/10 disabled:cursor-default disabled:opacity-40"
-                >
-                  Sync now
-                </button>
-                <span>{line}</span>
-              </div>
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-faint">
+              <button type="button" onClick={syncNow} disabled={status?.busy} className={BUTTON}>
+                Sync now
+              </button>
+              <span>{line}</span>
               {peers.length > 0 && (
-                <p className="m-0">
+                <span className="basis-full">
                   Other devices: {peers.map((p) => `${p.name}${p.lastChange ? ` (last change ${ago(p.lastChange)})` : ''}`).join(', ')}
-                </p>
+                </span>
               )}
-            </>
-          )}
-          {status?.error && <p className="m-0 leading-snug text-warn">{status.error}</p>}
-          {status?.needsKey && (
-            <p className="m-0 leading-snug">
-              The key is the file ~/.harv/sync.key on the device that synced first. Copy it to the same place here (it never goes through
-              the repo), then press Sync now.
-            </p>
-          )}
-        </div>
-      )}
-    </Section>
+            </div>
+          ))}
+        {settings.syncEnabled && status?.error && <Note warn>{status.error}</Note>}
+        {settings.syncEnabled && status?.needsKey && (
+          <Note>
+            The key is ~/.harv/sync.key on the device that synced first. Copy it to the same place here (it never goes through the repo),
+            then press Sync now.
+          </Note>
+        )}
+      </Sub>
+    </>
   );
 }
 
@@ -451,84 +523,30 @@ function Projects() {
   const defaultRoot = useExample('your home\\Projects', 'your home/Projects');
   const { list, error } = useProjects();
   const { projectsDir } = useSettings();
-  const [path, setPath] = useState('');
-  const [root, setRoot] = useState<string | null>(null);
-  const add = (e: FormEvent) => {
-    e.preventDefault();
-    if (!path.trim()) return;
-    projectActions.add(path.trim());
-    setPath('');
-  };
-  const input =
-    'min-h-9 min-w-0 flex-1 rounded-lg border border-line bg-black/20 px-2.5 text-xs text-ink outline-none placeholder:text-faint focus:border-accent/60';
-  const button = 'min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 text-xs hover:bg-white/10';
   return (
-    <Section title="Projects">
-      <p className="m-0 text-[11px] text-faint">
-        In a project chat Harv works like Claude Code in that folder, with its CLAUDE.md and memory. Tell Harv "we're starting a new
-        project" or "let's work on …", or pick a project in a chat's ≡ menu.
-      </p>
-      {list.length > 0 && (
-        <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs">
-          {list.map((p) => (
-            <li key={p.id} className="flex items-center gap-2">
-              <span className="text-accent">▣</span>
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate">{p.name}</span>
-                <span className="truncate text-[11px] text-faint" title={p.path}>
-                  {p.path}
-                </span>
-              </span>
-              <button
-                type="button"
-                aria-label={`Forget ${p.name}`}
-                title="Forget this project (the folder and chats stay)"
-                onClick={() => projectActions.remove(p.id)}
-                className="size-7 flex-none cursor-pointer rounded text-muted hover:bg-white/10"
-              >
-                ×
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <form onSubmit={add} className="flex gap-2">
-        <label htmlFor="harv-project-path" className="sr-only">
-          Project folder to add
-        </label>
-        <input id="harv-project-path" value={path} onChange={(e) => setPath(e.target.value)} placeholder={example} className={input} />
-        <button type="submit" className={button}>
-          Add
-        </button>
-      </form>
-      {error && <p className="m-0 text-[11px] text-warn">{error}</p>}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (root !== null) updateSettings({ projectsDir: root.trim() });
-          setRoot(null);
-        }}
-        className="flex items-center gap-2 pt-1 text-xs"
-      >
-        <label htmlFor="harv-projects-dir" className="w-24 flex-none text-muted">
-          New projects in
-        </label>
-        <input
-          id="harv-projects-dir"
-          value={root ?? projectsDir}
-          onChange={(e) => setRoot(e.target.value)}
-          placeholder={defaultRoot}
-          className={input}
-        />
-        <button type="submit" className={button}>
-          Save
-        </button>
-      </form>
-    </Section>
+    <Sub title="Projects">
+      <Note>
+        In a project chat Harv works like Claude Code in that folder. Say “let’s work on …”, or pick a project in a chat’s ≡ menu.
+      </Note>
+      <PathList
+        items={list.map((p) => ({ key: p.id, title: `▣ ${p.name}`, path: p.path, label: `Forget ${p.name} (the folder and chats stay)` }))}
+        onRemove={(id) => projectActions.remove(id)}
+      />
+      <AddPath id="harv-project-path" label="Project folder to add" placeholder={example} onAdd={(path) => projectActions.add(path)} />
+      {error && <Note warn>{error}</Note>}
+      <TextSetting
+        id="harv-projects-dir"
+        label="New ones in"
+        value={projectsDir}
+        placeholder={defaultRoot}
+        onSave={(v) => updateSettings({ projectsDir: v })}
+      />
+    </Sub>
   );
 }
 
-function BackgroundPicker() {
+/** The photo: preview, choose, remove. */
+function PhotoPicker() {
   const { version } = useBackground();
   const input = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -545,7 +563,7 @@ function BackgroundPicker() {
   };
 
   return (
-    <Section title="Background">
+    <>
       <div className="flex items-center gap-3">
         <div
           aria-hidden="true"
@@ -553,12 +571,8 @@ function BackgroundPicker() {
           style={{ backgroundImage: version ? `url(/api/background?v=${version})` : undefined }}
         />
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => input.current?.click()}
-            className="min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 text-xs hover:bg-white/10"
-          >
-            Choose photo…
+          <button type="button" onClick={() => input.current?.click()} className={BUTTON}>
+            {version ? 'Change photo…' : 'Choose photo…'}
           </button>
           {version && (
             <button
@@ -582,10 +596,67 @@ function BackgroundPicker() {
           e.target.value = '';
         }}
       />
-      <p className="m-0 text-[11px] text-faint">
-        {status ?? 'JPEG, PNG or WebP up to 20 MB. It stays on this computer (in ~/.harv), blurred behind the dashboard.'}
-      </p>
-    </Section>
+      <Note>{status ?? 'JPEG, PNG or WebP up to 20 MB. It stays on your devices.'}</Note>
+    </>
+  );
+}
+
+/** Settings › Appearance › Background: photo, see-through (the app) or plain, and what each one takes. */
+function Background() {
+  const settings = useSettings();
+  const onWindows = useConnection().platform === 'windows';
+  // In a browser see-through can't work, so the photo shows: say so instead of hiding the choice.
+  const shown = settings.backdrop === 'seeThrough' && !inApp ? 'photo' : settings.backdrop;
+  return (
+    <Sub title="Background">
+      <Choice
+        label="Show"
+        value={settings.backdrop}
+        options={[
+          { value: 'photo', label: 'Photo' },
+          { value: 'seeThrough', label: 'See-through' },
+          { value: 'plain', label: 'Plain' },
+        ]}
+        onChange={(backdrop) => updateSettings({ backdrop })}
+      />
+      {settings.backdrop === 'seeThrough' && !inApp && <Note>See-through works in the Harv app; this browser window shows the photo.</Note>}
+      {shown === 'photo' && (
+        <>
+          <PhotoPicker />
+          <Slider
+            label="Photo blur"
+            value={settings.backgroundBlur}
+            min={0}
+            max={30}
+            unit="px"
+            onChange={(backgroundBlur) => updateSettings({ backgroundBlur })}
+          />
+        </>
+      )}
+      {shown === 'seeThrough' &&
+        (onWindows ? (
+          <Toggle
+            on={settings.frost}
+            label="Frost what’s behind"
+            hint="Off is clear glass. Windows has one frost strength."
+            onChange={(frost) => updateSettings({ frost })}
+          />
+        ) : (
+          <Note>Your desktop shows behind Harv. KDE can’t frost it for an app yet.</Note>
+        ))}
+      {shown !== 'plain' && (
+        <Slider
+          label="Darkness"
+          value={settings.scrim}
+          min={0}
+          max={90}
+          step={5}
+          unit="%"
+          onChange={(scrim) => updateSettings({ scrim })}
+        />
+      )}
+      <Note>Only on this device{shown === 'photo' ? '; the photo itself syncs' : ''}.</Note>
+    </Sub>
   );
 }
 
@@ -594,90 +665,58 @@ function Watchdog() {
   const { watchdog, watchdogIgnored } = useSettings();
   const onWindows = useConnection().platform === 'windows';
   return (
-    <Section title="Watchdog">
+    <Sub title="Watchdog">
       <Toggle
         on={watchdog}
         label="Watch my PC"
         hint={
           onWindows
-            ? 'Warns when something overheats for minutes, a program without a window hogs the CPU or GPU for 5+ minutes, Windows Defender finds a threat or is off, or a known miner or remote-control tool runs. Quiet by design: no Claude usage, at most one ordinary warning per 10 minutes.'
-            : 'Warns when something overheats for minutes, a known miner or remote-control tool runs, or a program from /tmp keeps working. Quiet by design: no Claude usage, at most one ordinary warning per 10 minutes.'
+            ? 'Warns about overheating, hidden programs hogging the CPU or GPU, Windows Defender threats, miners and remote-control tools. No Claude usage.'
+            : 'Warns about overheating, miners, remote-control tools and programs from /tmp that keep working. No Claude usage.'
         }
         onChange={(on) => updateSettings({ watchdog: on })}
       />
       {watchdogIgnored.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 text-xs">
-          <span className="text-faint">Never warns about</span>
-          {watchdogIgnored.map((app) => (
-            <span key={app} className="inline-flex items-center gap-1 rounded-md border border-line bg-white/5 py-0.5 pr-0.5 pl-2">
-              {app}
-              <button
-                type="button"
-                aria-label={`Warn about ${app} again`}
-                onClick={() => updateSettings({ watchdogIgnored: watchdogIgnored.filter((x) => x !== app) })}
-                className="size-5 cursor-pointer rounded text-muted hover:bg-white/10"
-              >
-                ×
-              </button>
-            </span>
-          ))}
+        <div className={ROW}>
+          <span className={LABEL}>Never warns about</span>
+          <div className="flex flex-1 flex-wrap gap-1.5">
+            {watchdogIgnored.map((app) => (
+              <span key={app} className="inline-flex items-center gap-1 rounded-md border border-line bg-white/5 py-0.5 pr-0.5 pl-2">
+                {app}
+                <button
+                  type="button"
+                  aria-label={`Warn about ${app} again`}
+                  onClick={() => updateSettings({ watchdogIgnored: watchdogIgnored.filter((x) => x !== app) })}
+                  className="size-5 cursor-pointer rounded text-muted hover:bg-white/10"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
         </div>
       )}
-    </Section>
+    </Sub>
   );
 }
 
 function ProtectedFolders() {
   const example = useExample('C:\\Users\\you\\Documents\\Taxes', '/home/you/Documents/Taxes');
   const { protectedPaths } = useSettings();
-  const [draft, setDraft] = useState('');
-
-  const add = (e: FormEvent) => {
-    e.preventDefault();
-    const path = draft.trim();
-    if (!path) return;
-    updateSettings({ protectedPaths: [...protectedPaths, path] });
-    setDraft('');
-  };
-
   return (
-    <Section title="Read-only folders">
-      <p className="m-0 text-[11px] text-faint">Harv can read these but never change, move or delete anything inside them.</p>
-      {protectedPaths.length > 0 && (
-        <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs">
-          {protectedPaths.map((p) => (
-            <li key={p} className="flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate" title={p}>
-                {p}
-              </span>
-              <button
-                type="button"
-                aria-label={`Remove ${p}`}
-                onClick={() => updateSettings({ protectedPaths: protectedPaths.filter((x) => x !== p) })}
-                className="size-7 flex-none cursor-pointer rounded text-muted hover:bg-white/10"
-              >
-                ×
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <form onSubmit={add} className="flex gap-2">
-        <label htmlFor="harv-protect" className="sr-only">
-          Folder to protect
-        </label>
-        <input
-          id="harv-protect"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={example}
-          className="min-h-9 min-w-0 flex-1 rounded-lg border border-line bg-black/20 px-2.5 text-xs text-ink outline-none placeholder:text-faint focus:border-accent/60"
-        />
-        <button type="submit" className="min-h-9 cursor-pointer rounded-lg border border-line bg-white/5 px-3 text-xs hover:bg-white/10">
-          Add
-        </button>
-      </form>
-    </Section>
+    <Sub title="Read-only folders">
+      <Note>Harv can read these but never change, move or delete anything inside them.</Note>
+      <PathList
+        items={protectedPaths.map((p) => ({ key: p, path: p, label: `Remove ${p}` }))}
+        onRemove={(p) => updateSettings({ protectedPaths: protectedPaths.filter((x) => x !== p) })}
+      />
+      <AddPath
+        id="harv-protect"
+        label="Folder to protect"
+        placeholder={example}
+        onAdd={(path) => updateSettings({ protectedPaths: [...protectedPaths, path] })}
+      />
+    </Sub>
   );
 }
 
@@ -689,285 +728,260 @@ export function SettingsView() {
   const resetLook = () => updateSettings(Object.fromEntries(LOOK_KEYS.map((k) => [k, DEFAULT_SETTINGS[k]])) as Partial<HarvSettings>);
 
   return (
-    // Flowing columns (not a grid): each section is as tall as its content, so short ones don't leave blank space
-    // beside tall ones (the user's wish, 2026-10-27). Two columns in a normal window, three in a wide one.
-    <div className="animate-fade-in mx-auto w-full max-w-[1240px] columns-1 gap-2.5 @2xl:columns-2 @6xl:columns-3">
-      <p className="m-0 mb-2.5 px-1 text-xs text-muted [column-span:all]">
-        Saved in ~/.harv/settings.json and applied at once in every Harv window. With Sync on, the look, chat and safety settings follow you
-        to your other devices; folders, size and startup stay on this one.
+    // Big sections, one under the other; their subsections flow in two columns when there's room (the user's wish, 2026-10-27).
+    <div className="animate-fade-in mx-auto flex w-full max-w-[1000px] flex-col gap-4">
+      <p className="m-0 px-1 text-xs text-muted">
+        Changes apply at once in every Harv window. With Sync on, most of them follow you to your other devices; folders, size, background
+        and startup stay on this one.
       </p>
 
-      <Section title="Look">
-        <div role="radiogroup" aria-label="Accent colour" className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="w-24 flex-none text-muted">Accent</span>
-          {ACCENTS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              role="radio"
-              aria-checked={settings.accent === c}
-              aria-label={ACCENT_NAMES[c]}
-              title={ACCENT_NAMES[c]}
-              onClick={() => updateSettings({ accent: c })}
-              className={`size-7 cursor-pointer rounded-full border-2 ${settings.accent === c ? 'border-ink' : 'border-transparent'}`}
-              style={{ background: c }}
-            />
-          ))}
-          <label
-            title="Any colour"
-            className={`relative size-7 cursor-pointer overflow-hidden rounded-full border-2 ${
-              (ACCENTS as readonly string[]).includes(settings.accent) ? 'border-dashed border-line' : 'border-ink'
-            }`}
-            style={{ background: (ACCENTS as readonly string[]).includes(settings.accent) ? undefined : settings.accent }}
-          >
-            <span className="sr-only">Custom accent colour</span>
-            {(ACCENTS as readonly string[]).includes(settings.accent) && (
-              <span aria-hidden="true" className="absolute inset-0 flex items-center justify-center text-muted">
-                +
-              </span>
-            )}
-            <input
-              type="color"
-              value={settings.accent.toLowerCase()}
-              onChange={(e) => updateSettings({ accent: e.target.value.toUpperCase() })}
-              className="absolute inset-0 cursor-pointer opacity-0"
-            />
-          </label>
-        </div>
-        <Slider
-          label="Size"
-          value={settings.uiScale}
-          min={80}
-          max={130}
-          step={5}
-          unit="%"
-          onChange={(uiScale) => updateSettings({ uiScale })}
-        />
-        <Slider label="Glass" value={settings.glass} min={20} max={95} step={5} unit="%" onChange={(glass) => updateSettings({ glass })} />
-        <Choice
-          label="Chat spacing"
-          value={settings.density}
-          options={[
-            { value: 'comfy', label: 'Comfy' },
-            { value: 'compact', label: 'Compact' },
-          ]}
-          onChange={(density) => updateSettings({ density })}
-        />
-        <Toggle
-          on={settings.motion}
-          label="Animations"
-          hint="Subtle fades, pulses and bars. Off keeps everything still."
-          onChange={(motion) => updateSettings({ motion })}
-        />
-        {lookChanged && (
-          <button
-            type="button"
-            onClick={resetLook}
-            className="cursor-pointer self-start rounded px-1 text-[11px] text-muted hover:text-accent"
-          >
-            Reset the look to default
-          </button>
-        )}
-      </Section>
-
-      <div className="break-inside-avoid">
-        <BackgroundPicker />
-        <Section title="Background effect">
+      <Group title="Appearance">
+        <Sub title="Theme">
+          <div role="radiogroup" aria-label="Accent colour" className={ROW}>
+            <span className={LABEL}>Accent</span>
+            <div className="flex flex-1 flex-wrap items-center gap-2">
+              {ACCENTS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  role="radio"
+                  aria-checked={settings.accent === c}
+                  aria-label={ACCENT_NAMES[c]}
+                  title={ACCENT_NAMES[c]}
+                  onClick={() => updateSettings({ accent: c })}
+                  className={`size-7 cursor-pointer rounded-full border-2 ${settings.accent === c ? 'border-ink' : 'border-transparent'}`}
+                  style={{ background: c }}
+                />
+              ))}
+              <label
+                title="Any colour"
+                className={`relative size-7 cursor-pointer overflow-hidden rounded-full border-2 ${
+                  (ACCENTS as readonly string[]).includes(settings.accent) ? 'border-dashed border-line' : 'border-ink'
+                }`}
+                style={{ background: (ACCENTS as readonly string[]).includes(settings.accent) ? undefined : settings.accent }}
+              >
+                <span className="sr-only">Custom accent colour</span>
+                {(ACCENTS as readonly string[]).includes(settings.accent) && (
+                  <span aria-hidden="true" className="absolute inset-0 flex items-center justify-center text-muted">
+                    +
+                  </span>
+                )}
+                <input
+                  type="color"
+                  value={settings.accent.toLowerCase()}
+                  onChange={(e) => updateSettings({ accent: e.target.value.toUpperCase() })}
+                  className="absolute inset-0 cursor-pointer opacity-0"
+                />
+              </label>
+            </div>
+          </div>
           <Slider
-            label="Blur"
-            value={settings.backgroundBlur}
-            min={0}
-            max={30}
-            unit="px"
-            onChange={(backgroundBlur) => updateSettings({ backgroundBlur })}
-          />
-          {inApp && settings.seeThrough && (
-            <p className="m-0 text-[11px] text-faint">
-              {onWindows
-                ? 'See-through: 0 is clear glass, anything above frosts what’s behind (Windows has one blur strength).'
-                : 'See-through: KDE can’t blur behind the app yet, so Blur only applies to the photo.'}
-            </p>
-          )}
-          <Slider
-            label="Darkness"
-            value={settings.scrim}
-            min={0}
-            max={90}
+            label="Size"
+            value={settings.uiScale}
+            min={80}
+            max={130}
             step={5}
             unit="%"
-            onChange={(scrim) => updateSettings({ scrim })}
+            onChange={(uiScale) => updateSettings({ uiScale })}
           />
-          {inApp && (
+          <Choice
+            label="Chat spacing"
+            value={settings.density}
+            options={[
+              { value: 'comfy', label: 'Comfy' },
+              { value: 'compact', label: 'Compact' },
+            ]}
+            onChange={(density) => updateSettings({ density })}
+          />
+          <Toggle
+            on={settings.motion}
+            label="Animations"
+            hint="Subtle fades, pulses and bars. Off keeps everything still."
+            onChange={(motion) => updateSettings({ motion })}
+          />
+        </Sub>
+        <Sub title="Glass panels">
+          <Slider
+            label="Opacity"
+            value={settings.glass}
+            min={20}
+            max={95}
+            step={5}
+            unit="%"
+            onChange={(glass) => updateSettings({ glass })}
+          />
+          <Slider
+            label="Frost"
+            value={settings.glassBlur}
+            min={0}
+            max={40}
+            unit="px"
+            onChange={(glassBlur) => updateSettings({ glassBlur })}
+          />
+          <Note>How see-through the panels are, and how much they blur what’s behind them.</Note>
+          {lookChanged && (
+            <button
+              type="button"
+              onClick={resetLook}
+              className="cursor-pointer self-start rounded px-1 text-[11px] text-muted hover:text-accent"
+            >
+              Reset the whole look to default
+            </button>
+          )}
+        </Sub>
+        <Background />
+      </Group>
+
+      <Group title="Chat">
+        <Sub title="Messages">
+          <Toggle on={settings.showTimes} label="Times on chat lines" onChange={(showTimes) => updateSettings({ showTimes })} />
+          <Toggle
+            on={settings.showTags}
+            label="Model tag on replies"
+            hint="The [sonnet·medium] after harv ›. Hover it to see why AUTO picked it."
+            onChange={(showTags) => updateSettings({ showTags })}
+          />
+          <Choice
+            label="Send with"
+            value={settings.sendKey}
+            options={[
+              { value: 'enter', label: 'Enter' },
+              { value: 'ctrlEnter', label: 'Ctrl+Enter' },
+            ]}
+            onChange={(sendKey) => updateSettings({ sendKey })}
+          />
+          <Note>{settings.sendKey === 'enter' ? 'Shift+Enter makes a new line.' : 'Enter makes a new line.'}</Note>
+        </Sub>
+        <Sub title="AUTO">
+          <Choice
+            label="Start on"
+            value={settings.startModel}
+            options={[
+              { value: 'auto', label: 'AUTO' },
+              { value: 'last', label: 'Last model picked' },
+            ]}
+            onChange={(startModel) => updateSettings({ startModel })}
+          />
+          <Toggle
+            on={settings.allowFable}
+            label="Allow Fable 5.1"
+            hint="AUTO may use Fable for the hardest tasks and as the top of Try harder. You can always pick it by hand."
+            onChange={(allowFable) => updateSettings({ allowFable })}
+          />
+        </Sub>
+      </Group>
+
+      <Group title="Stats & usage">
+        <Sub title="Stats panel">
+          <Toggle on={settings.statsExpanded} label="Start expanded" onChange={(statsExpanded) => updateSettings({ statsExpanded })} />
+          <Chips
+            label="Narrow view"
+            values={settings.compactRows}
+            options={COMPACT_ROWS.map((r) => ({ value: r, label: ROW_NAMES[r] }))}
+            onChange={(compactRows) => updateSettings({ compactRows })}
+          />
+          <Choice
+            label="Temperature"
+            value={settings.tempUnit}
+            options={[
+              { value: 'C', label: '°C' },
+              { value: 'F', label: '°F' },
+            ]}
+            onChange={(tempUnit) => updateSettings({ tempUnit })}
+          />
+          <Choice
+            label="Update every"
+            value={settings.metricsMs}
+            options={[
+              { value: 1000, label: '1 s' },
+              { value: 2000, label: '2 s' },
+              { value: 5000, label: '5 s' },
+            ]}
+            onChange={(metricsMs) => updateSettings({ metricsMs })}
+          />
+        </Sub>
+        <Sub title="Usage warnings">
+          <Note>A note pops up when your Claude plan use crosses these marks. Turn them all off for no warnings.</Note>
+          <Chips
+            label="Session"
+            values={settings.warnSession}
+            options={WARN_CHOICES.session.map((v) => ({ value: v as number, label: `${v}%` }))}
+            onChange={(warnSession) => updateSettings({ warnSession })}
+          />
+          <Chips
+            label="Weekly"
+            values={settings.warnWeekly}
+            options={WARN_CHOICES.weekly.map((v) => ({ value: v as number, label: `${v}%` }))}
+            onChange={(warnWeekly) => updateSettings({ warnWeekly })}
+          />
+        </Sub>
+      </Group>
+
+      <Group
+        title="Safety"
+        hint="Blocked things (formatting drives, the system folders, turning off antivirus, stored passwords) always stay blocked."
+      >
+        <Sub title="Approvals">
+          <Toggle
+            on={settings.askRisky}
+            label="Ask before risky actions"
+            hint="Deleting, installing, stopping programs, system changes, sending data. Off: they run right away, backed up and logged with Undo."
+            onChange={(askRisky) => updateSettings({ askRisky })}
+          />
+          <Toggle
+            on={settings.confirmYellow}
+            label="Ask before changing my files too"
+            hint="Off: Harv backs up and changes your files right away, and you can Undo."
+            onChange={(confirmYellow) => updateSettings({ confirmYellow })}
+          />
+          {/* The rules only matter while cards are on. */}
+          {settings.askRisky && (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs">Don’t ask again for</span>
+              {settings.allowRules.length === 0 ? (
+                <Note>Nothing yet. “Don’t ask again” on an approval card adds the kind of command here.</Note>
+              ) : (
+                <PathList
+                  items={settings.allowRules.map((rule) => ({ key: rule, path: `${rule} …`, label: `Ask again for ${rule}` }))}
+                  onRemove={(rule) => updateSettings({ allowRules: settings.allowRules.filter((x) => x !== rule) })}
+                />
+              )}
+            </div>
+          )}
+        </Sub>
+        <ProtectedFolders />
+      </Group>
+
+      <Group title="Folders & projects">
+        <WorkFolder />
+        <Projects />
+      </Group>
+
+      <Group title="This computer" hint="These stay on this device.">
+        <Sub title="Startup">
+          <Toggle
+            on={settings.restoreTabs}
+            label="Reopen tabs"
+            hint="After a restart, bring back the tabs, their files and terminals, and unsent messages."
+            onChange={(restoreTabs) => updateSettings({ restoreTabs })}
+          />
+          {onWindows && (
             <Toggle
-              on={settings.seeThrough}
-              label="See-through window"
-              hint="The app shows what's behind it instead of the photo. Darkness still tints it. Only on this device."
-              onChange={(seeThrough) => updateSettings({ seeThrough })}
+              on={settings.startSensors}
+              label="Start the hardware sensors"
+              hint="Starts LibreHardwareMonitor with Harv (Windows asks first). Off: no temperatures or fans until you press Start sensors."
+              onChange={(startSensors) => updateSettings({ startSensors })}
             />
           )}
-        </Section>
-      </div>
+          <RestartButton />
+        </Sub>
+        <Watchdog />
+        {inApp && <AppSection />}
+      </Group>
 
-      <Section title="Chat">
-        <Toggle on={settings.showTimes} label="Times on chat lines" onChange={(showTimes) => updateSettings({ showTimes })} />
-        <Toggle
-          on={settings.showTags}
-          label="Model tag on replies"
-          hint="The [sonnet·medium] after harv ›. Hover it to see why AUTO picked it."
-          onChange={(showTags) => updateSettings({ showTags })}
-        />
-        <Choice
-          label="Send with"
-          value={settings.sendKey}
-          options={[
-            { value: 'enter', label: 'Enter' },
-            { value: 'ctrlEnter', label: 'Ctrl+Enter' },
-          ]}
-          onChange={(sendKey) => updateSettings({ sendKey })}
-        />
-        <p className="m-0 text-[11px] text-faint">
-          {settings.sendKey === 'enter' ? 'Shift+Enter makes a new line.' : 'Enter makes a new line, so long messages are easier to write.'}
-        </p>
-      </Section>
-
-      <Section title="AUTO">
-        <Choice
-          label="Start on"
-          value={settings.startModel}
-          options={[
-            { value: 'auto', label: 'AUTO' },
-            { value: 'last', label: 'Last model picked' },
-          ]}
-          onChange={(startModel) => updateSettings({ startModel })}
-        />
-        <Toggle
-          on={settings.allowFable}
-          label="Allow Fable 5.1"
-          hint="Lets AUTO use Fable for the hardest tasks and as the top of Try harder. It's always available as a manual pick."
-          onChange={(allowFable) => updateSettings({ allowFable })}
-        />
-      </Section>
-
-      <Section title="Stats panel">
-        <Toggle on={settings.statsExpanded} label="Start expanded" onChange={(statsExpanded) => updateSettings({ statsExpanded })} />
-        <Chips
-          label="Narrow view"
-          values={settings.compactRows}
-          options={COMPACT_ROWS.map((r) => ({ value: r, label: ROW_NAMES[r] }))}
-          onChange={(compactRows) => updateSettings({ compactRows })}
-        />
-        <Choice
-          label="Temperature"
-          value={settings.tempUnit}
-          options={[
-            { value: 'C', label: '°C' },
-            { value: 'F', label: '°F' },
-          ]}
-          onChange={(tempUnit) => updateSettings({ tempUnit })}
-        />
-        <Choice
-          label="Update every"
-          value={settings.metricsMs}
-          options={[
-            { value: 1000, label: '1 s' },
-            { value: 2000, label: '2 s' },
-            { value: 5000, label: '5 s' },
-          ]}
-          onChange={(metricsMs) => updateSettings({ metricsMs })}
-        />
-      </Section>
-
-      <Section title="Usage warnings">
-        <p className="m-0 text-[11px] text-faint">
-          A note pops up when your Claude plan use crosses these marks, once per window. Turn them all off for no warnings.
-        </p>
-        <Chips
-          label="Session"
-          values={settings.warnSession}
-          options={WARN_CHOICES.session.map((v) => ({ value: v as number, label: `${v}%` }))}
-          onChange={(warnSession) => updateSettings({ warnSession })}
-        />
-        <Chips
-          label="Weekly"
-          values={settings.warnWeekly}
-          options={WARN_CHOICES.weekly.map((v) => ({ value: v as number, label: `${v}%` }))}
-          onChange={(warnWeekly) => updateSettings({ warnWeekly })}
-        />
-      </Section>
-
-      <Section title="Safety">
-        <Toggle
-          on={settings.askRisky}
-          label="Ask before risky actions"
-          hint="Off: deleting, installing, stopping programs, system changes and sending data run right away, backed up first and logged with Undo. On: Harv shows an approval card first. Blocked things always stay blocked."
-          onChange={(askRisky) => updateSettings({ askRisky })}
-        />
-        <Toggle
-          on={settings.confirmYellow}
-          label="Ask before changing my files too"
-          hint="Normally Harv backs up and changes your files right away (you can Undo). On, it shows an approval card first, like for deleting."
-          onChange={(confirmYellow) => updateSettings({ confirmYellow })}
-        />
-        {/* The rules only matter while cards are on. */}
-        {settings.askRisky && (
-          <div className="flex flex-col gap-1">
-            <span className="text-xs">Don’t ask again for</span>
-            {settings.allowRules.length === 0 ? (
-              <p className="m-0 text-[11px] text-faint">
-                Nothing yet. “Don’t ask again” on an approval card adds the kind of command here (it then runs without a card, backed up
-                first, with Undo). Blocked things always stay blocked.
-              </p>
-            ) : (
-              <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs">
-                {settings.allowRules.map((rule) => (
-                  <li key={rule} className="flex items-center gap-2">
-                    <code className="min-w-0 flex-1 truncate">{rule} …</code>
-                    <button
-                      type="button"
-                      aria-label={`Ask again for ${rule}`}
-                      title="Ask again for these"
-                      onClick={() => updateSettings({ allowRules: settings.allowRules.filter((x) => x !== rule) })}
-                      className="size-7 flex-none cursor-pointer rounded text-muted hover:bg-white/10"
-                    >
-                      ×
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-      </Section>
-
-      <ProtectedFolders />
-
-      <WorkFolder />
-
-      <Projects />
-
-      <Watchdog />
-
-      {inApp && <AppSection />}
-
-      <Section title="Startup">
-        <Toggle
-          on={settings.restoreTabs}
-          label="Reopen tabs"
-          hint="After a restart, bring back the tabs, their files and terminals, and unsent messages, like Chrome."
-          onChange={(restoreTabs) => updateSettings({ restoreTabs })}
-        />
-        {onWindows && (
-          <Toggle
-            on={settings.startSensors}
-            label="Start the hardware sensors"
-            hint="Starts LibreHardwareMonitor with Harv (Windows asks for permission). Off, temperatures and fans stay hidden until you press Start sensors."
-            onChange={(startSensors) => updateSettings({ startSensors })}
-          />
-        )}
-        <RestartButton />
-      </Section>
-
-      <Sync />
+      <Group title="Sync">
+        <Sync />
+      </Group>
     </div>
   );
 }

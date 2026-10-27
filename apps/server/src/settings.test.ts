@@ -19,6 +19,16 @@ describe('settings', () => {
     });
   });
 
+  it('turns the one-day seeThrough switch into the backdrop choice, and checks the new look fields', () => {
+    expect(cleanSettings({ seeThrough: true })).toMatchObject({ backdrop: 'seeThrough' });
+    expect(cleanSettings({ seeThrough: true, backdrop: 'plain' })).toMatchObject({ backdrop: 'plain' });
+    expect(cleanSettings({ backdrop: 'video', glassBlur: 99, frost: 'no' })).toMatchObject({
+      backdrop: 'photo',
+      glassBlur: 40,
+      frost: true,
+    });
+  });
+
   it('clamps numbers, checks choices and keeps lists tidy', () => {
     const s = cleanSettings({
       accent: '#12ab9f',

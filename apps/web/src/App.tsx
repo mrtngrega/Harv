@@ -8,15 +8,15 @@ import { desktop, inApp } from './lib/desktop.ts';
 import { useBackground, useSettings } from './lib/useHarvSocket.ts';
 
 export function App() {
-  const { accent, motion, backgroundBlur, scrim, glass, uiScale, density, seeThrough } = useSettings();
-  // See-through (the app only): the window shows the desktop behind it; the darkness layer still tints it.
-  const clear = inApp && seeThrough;
-  const frosted = backgroundBlur > 0;
+  const { accent, motion, backgroundBlur, scrim, glass, glassBlur, uiScale, density, backdrop, frost } = useSettings();
+  // See-through (the app only; a browser shows the photo): the window shows the desktop behind it, the darkness layer tints it.
+  const clear = inApp && backdrop === 'seeThrough';
+  const plain = backdrop === 'plain';
   useEffect(() => {
     if (!inApp) return;
     document.documentElement.classList.toggle('see-through', clear);
-    desktop.seeThrough(clear, frosted);
-  }, [clear, frosted]);
+    desktop.seeThrough(clear, frost);
+  }, [clear, frost]);
   const { version } = useBackground();
   // Before the server says, try the photo anyway; after a removal, show the plain ground colour.
   const photo = version === null ? undefined : `url(/api/background${version ? `?v=${version}` : ''})`;
@@ -29,6 +29,7 @@ export function App() {
         {
           '--color-accent': accent,
           '--glass-alpha': glass / 100,
+          '--glass-blur': `${glassBlur}px`,
           // The page's height in zoomed pixels (Chrome scales 100vh by the zoom too).
           '--app-h': `calc(100vh / ${zoom})`,
           zoom,
@@ -36,14 +37,14 @@ export function App() {
       }
     >
       {/* Blurred personal background from ~/.harv, falling back to the ground color. */}
-      {!clear && (
+      {!clear && !plain && (
         <div
           aria-hidden="true"
           className="absolute -inset-12 scale-105 bg-cover bg-center saturate-[1.1]"
           style={{ backgroundImage: photo, filter: backgroundBlur ? `blur(${backgroundBlur}px)` : undefined }}
         />
       )}
-      <div aria-hidden="true" className="absolute inset-0" style={{ background: `rgb(10 16 24 / ${scrim / 100})` }} />
+      {!plain && <div aria-hidden="true" className="absolute inset-0" style={{ background: `rgb(10 16 24 / ${scrim / 100})` }} />}
 
       <div
         className="relative flex min-h-[var(--app-h)] flex-col gap-3.5 p-4"

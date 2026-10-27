@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { COMPACT_ROWS, DEFAULT_SETTINGS, type HarvSettings } from '@harv/shared';
+import { BACKDROPS, COMPACT_ROWS, DEFAULT_SETTINGS, type Backdrop, type HarvSettings } from '@harv/shared';
 import { HARV_HOME } from './paths.ts';
 import { osPath } from './platform.ts';
 
@@ -13,7 +13,8 @@ const SYNC_REPO = /^(https:\/\/[\w.-]+(:\d+)?\/[\w./-]+|git@[\w.-]+:[\w./-]+)$/;
 // eslint-disable-next-line no-control-regex -- control characters don't belong in a device name
 const CONTROL = /[\u0000-\u001f]/g;
 
-type Raw = Partial<Record<keyof HarvSettings, unknown>>;
+/** A settings file as read: anything may be wrong or missing (seeThrough: the old name of backdrop's see-through, one day old). */
+type Raw = Partial<Record<keyof HarvSettings | 'seeThrough', unknown>>;
 
 const bool = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fallback);
 const num = (v: unknown, min: number, max: number, fallback: number) =>
@@ -48,7 +49,14 @@ export function cleanSettings(raw: Raw, base: HarvSettings = DEFAULT_SETTINGS): 
     backgroundBlur: num(raw.backgroundBlur, 0, 30, base.backgroundBlur),
     scrim: num(raw.scrim, 0, 90, base.scrim),
     glass: num(raw.glass, 20, 95, base.glass),
-    seeThrough: bool(raw.seeThrough, base.seeThrough),
+    glassBlur: num(raw.glassBlur, 0, 40, base.glassBlur),
+    // seeThrough (a switch for one day, 2026-10-27) became backdrop.
+    backdrop: (BACKDROPS as readonly unknown[]).includes(raw.backdrop)
+      ? (raw.backdrop as Backdrop)
+      : raw.seeThrough === true
+        ? 'seeThrough'
+        : base.backdrop,
+    frost: bool(raw.frost, base.frost),
     uiScale: num(raw.uiScale, 80, 130, base.uiScale),
     density: oneOf(raw.density, ['comfy', 'compact'] as const, base.density),
     showTimes: bool(raw.showTimes, base.showTimes),
