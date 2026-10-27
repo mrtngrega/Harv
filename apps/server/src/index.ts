@@ -10,6 +10,7 @@ import { loadCatalog } from './agent/catalog.ts';
 import { ChatManager } from './agent/manager.ts';
 import { backgroundVersion, findBackground, MAX_BACKGROUND_BYTES, removeBackground, saveBackground } from './background.ts';
 import { MetricsCollector } from './metrics/collector.ts';
+import { hasBattery } from './metrics/system.ts';
 import { ensureLhmRunning } from './metrics/lhmLauncher.ts';
 import { stripBilledCredentials } from './env.ts';
 import { ensureHarvHome, HARV_HOME } from './paths.ts';
@@ -82,6 +83,9 @@ const clients = new Set<(msg: ServerMessage) => void>();
 const broadcast = (msg: ServerMessage) => clients.forEach((send) => send(msg));
 
 const metrics = new MetricsCollector(() => loadSettings().metricsMs);
+/** A laptop (asked once at start; false until known). */
+let onBattery = false;
+void hasBattery().then((b) => (onBattery = b));
 // The PC watchdog (Settings › Watchdog): overheating, background hogs, dangerous software.
 startWatchdog(metrics, (alert) => {
   app.log.info({ kind: alert.kind, title: alert.title }, 'Watchdog');
@@ -414,6 +418,7 @@ app.get('/ws', { websocket: true }, (socket) => {
     ui: loadUi(),
     projects: store.projects(),
     platform: PLATFORM,
+    battery: onBattery,
     startedAt: STARTED_AT,
     sync: sync.status(),
   });

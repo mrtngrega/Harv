@@ -5,12 +5,13 @@ import { ChatPanel } from './components/ChatPanel.tsx';
 import { StatsPanel } from './components/StatsPanel.tsx';
 import { Toasts } from './components/Toasts.tsx';
 import { desktop, inApp } from './lib/desktop.ts';
-import { useBackground, useSettings } from './lib/useHarvSocket.ts';
+import { useBackground, useConnection, useSettings } from './lib/useHarvSocket.ts';
 
 export function App() {
   const { accent, motion, backgroundBlur, scrim, glass, glassBlur, uiScale, density, backdrop, frost } = useSettings();
   // See-through (the app only; a browser shows the photo): the window shows the desktop behind it, the darkness layer tints it.
   const clear = inApp && backdrop === 'seeThrough';
+  const { battery } = useConnection();
   const plain = backdrop === 'plain';
   useEffect(() => {
     if (!inApp) return;
@@ -24,7 +25,7 @@ export function App() {
 
   return (
     <div
-      className={`relative min-h-full overflow-clip ${motion ? '' : 'still'} ${density === 'compact' ? 'compact' : ''}`}
+      className={`relative min-h-full overflow-clip ${motion ? '' : 'still'} ${density === 'compact' ? 'compact' : ''} ${battery ? 'battery' : ''}`}
       style={
         {
           '--color-accent': accent,

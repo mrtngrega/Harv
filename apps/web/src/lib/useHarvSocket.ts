@@ -20,11 +20,23 @@ export interface HarvConnection {
   version: string | null;
   /** The OS the server runs on (Windows until the first hello says otherwise). */
   platform: HarvPlatform;
+  /** The server's computer runs on a battery (a laptop). */
+  battery: boolean;
 }
 
 // Separate stores so the 1 s metrics ticks only re-render what reads metrics.
-const connection = createStore<HarvConnection>({ connected: false, status: 'idle', version: null, platform: 'windows' });
+const connection = createStore<HarvConnection>({ connected: false, status: 'idle', version: null, platform: 'windows', battery: false });
 const metrics = createStore<MetricsSnapshot | null>(null);
+/** The newest tick that arrived while the window was hidden. */
+let latestMetrics: MetricsSnapshot | null = null;
+const hidden = () => typeof document !== 'undefined' && document.hidden;
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || !latestMetrics) return;
+    metrics.set(latestMetrics);
+    latestMetrics = null;
+  });
+}
 const catalog = createStore<Catalog | null>(null);
 const usage = createStore<PlanUsage | null>(null);
 // Missing keys fall back to the defaults (a server older than the dashboard after a hot reload).
@@ -41,7 +53,13 @@ onConnectionChange((connected) => connection.set((c) => ({ ...c, connected })));
 onServerMessage((msg) => {
   switch (msg.type) {
     case 'hello':
-      connection.set({ connected: true, status: msg.status, version: msg.version, platform: msg.platform ?? 'windows' });
+      connection.set({
+        connected: true,
+        status: msg.status,
+        version: msg.version,
+        platform: msg.platform ?? 'windows',
+        battery: msg.battery === true,
+      });
       if (msg.metrics) metrics.set(msg.metrics);
       if (msg.catalog) catalog.set(msg.catalog);
       usage.set(msg.usage);
@@ -63,7 +81,10 @@ onServerMessage((msg) => {
       connection.set((c) => ({ ...c, status: msg.status, detail: msg.detail }));
       break;
     case 'metrics.tick':
-      metrics.set(msg.metrics);
+      // A hidden window (the app in the tray, a background browser tab) keeps the latest and draws nothing;
+      // it shows it the moment it's visible again. Saves the laptop's battery.
+      if (hidden()) latestMetrics = msg.metrics;
+      else metrics.set(msg.metrics);
       break;
     case 'catalog':
       catalog.set(msg.catalog);

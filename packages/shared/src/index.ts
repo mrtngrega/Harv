@@ -56,6 +56,8 @@ export type ServerMessage =
       projects: Project[];
       /** The OS the server runs on. */
       platform: HarvPlatform;
+      /** The computer runs on a battery: the dashboard keeps still what would keep the GPU busy. */
+      battery?: boolean;
       /** When this server started (ms): a new value tells the dashboard Harv was restarted. */
       startedAt: number;
       /** Sync with the user's other devices. */

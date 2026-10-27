@@ -3,13 +3,19 @@ import { WARN_AT } from '../../lib/format.ts';
 
 export const barColor = (value: number | undefined) => ((value ?? 0) >= WARN_AT ? 'var(--color-warn)' : 'var(--color-accent)');
 
+/**
+ * A bar that slides to each new value. It scales (a transform the compositor animates by itself)
+ * instead of changing its width: a width animation repaints every frame, and under the frosted
+ * glass that kept the laptop's GPU at ~50% while Harv sat idle (2026-10-27). On a battery even that
+ * cost ~30% of a core (WebKitGTK composites the whole window per frame), so there it jumps (`.battery`).
+ */
 export function Bar({ value, height = 3, color }: { value: number | undefined; height?: number; color?: string }) {
-  const width = Math.max(0, Math.min(100, value ?? 0));
+  const share = Math.max(0, Math.min(100, value ?? 0)) / 100;
   return (
-    <div className="rounded-full bg-white/10" style={{ height }}>
+    <div className="overflow-hidden rounded-full bg-white/10" style={{ height }}>
       <div
-        className="rounded-full transition-[width] duration-700 ease-out"
-        style={{ width: `${width}%`, height, background: color ?? barColor(value) }}
+        className="h-full origin-left rounded-full bar-slide will-change-transform"
+        style={{ transform: `scaleX(${share})`, background: color ?? barColor(value) }}
       />
     </div>
   );
@@ -70,8 +76,8 @@ export function ThreadBars({ loads }: { loads: number[] }) {
       {loads.map((load, i) => (
         <div
           key={i}
-          className="flex-1 rounded-[2px] transition-[height] duration-700 ease-out"
-          style={{ height: `${Math.max(4, load)}%`, background: barColor(load), opacity: 0.85 }}
+          className="h-full flex-1 origin-bottom rounded-[2px] bar-slide will-change-transform"
+          style={{ transform: `scaleY(${Math.max(4, load) / 100})`, background: barColor(load), opacity: 0.85 }}
         />
       ))}
     </div>

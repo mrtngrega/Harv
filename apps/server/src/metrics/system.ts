@@ -1,4 +1,4 @@
-import { readlinkSync } from 'node:fs';
+import { existsSync, readdirSync, readlinkSync } from 'node:fs';
 import { basename } from 'node:path';
 import si from 'systeminformation';
 import type { ProcessUsage, VolumeMetrics } from '@harv/shared';
@@ -125,4 +125,21 @@ export async function readCpuMemFallback() {
     memTotal: mem.total,
     tempC,
   };
+}
+
+/**
+ * Whether this computer runs on a battery (a laptop). The dashboard then skips animations that keep
+ * the GPU busy (2026-10-27: sliding stats bars cost the Fedora laptop ~45% of a core). Linux reads
+ * /sys; Windows asks systeminformation once.
+ */
+export async function hasBattery(): Promise<boolean> {
+  if (!IS_WINDOWS) {
+    const dir = '/sys/class/power_supply';
+    return existsSync(dir) && readdirSync(dir).some((name) => /^BAT/i.test(name));
+  }
+  try {
+    return (await si.battery()).hasBattery;
+  } catch {
+    return false;
+  }
 }

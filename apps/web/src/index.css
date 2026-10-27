@@ -79,6 +79,14 @@
   }
 }
 
+/* Stats bars slide to each new value, except on a battery (see Bar in components/stats/parts.tsx). */
+.bar-slide {
+  transition: transform 0.7s ease-out;
+}
+.battery .bar-slide {
+  transition: none;
+}
+
 /* The motion toggle in settings (off = still). */
 .still *,
 .still *::before,
