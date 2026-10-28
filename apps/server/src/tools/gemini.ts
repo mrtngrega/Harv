@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { HARV_HOME } from '../paths.ts';
 import { WORKSPACE } from '../safety/paths.ts';
@@ -56,8 +57,9 @@ const SIGNED_OUT = `!!document.querySelector('a[href*="ServiceLogin"], a[href*="
 const EDITOR = `document.querySelector('div.ql-editor[contenteditable="true"]')`;
 const BUSY = `!!document.querySelector('button[aria-label*="Stop" i]')`;
 const LAST_ANSWER = `[...document.querySelectorAll('model-response')].at(-1)`;
-/** The answer's big pictures (icons and avatars are small). */
-const ANSWER_IMAGES = `(() => { const r = ${LAST_ANSWER}; if (!r) return []; return [...r.querySelectorAll('img')].filter(i => i.complete && i.naturalWidth >= 256 && i.naturalHeight >= 256).map(i => i.src); })()`;
+/** The answer's big pictures (icons and avatars are small), and their addresses. */
+const ANSWER_IMAGE_ELEMENTS = `[...(${LAST_ANSWER}?.querySelectorAll('img') ?? [])].filter(i => i.complete && i.naturalWidth >= 256 && i.naturalHeight >= 256)`;
+const ANSWER_IMAGES = `${ANSWER_IMAGE_ELEMENTS}.map(i => i.src)`;
 
 /** Opens the "Upload & tools" menu by the prompt box (uploads, Create image). */
 const UPLOAD_MENU = `[...document.querySelectorAll('button')].find(b => /^Upload & tools/i.test(b.getAttribute('aria-label') || ''))?.click()`;
@@ -191,7 +193,8 @@ export class GeminiImages {
       const at = new Date();
       const paths: string[] = [];
       for (const [i, src] of srcs.entries()) {
-        const img = await this.bytes(page, src, images);
+        // Full quality from Gemini's own download (the page only shows a smaller preview); the preview if that fails.
+        const img = (await this.download(page, i)) ?? (await this.bytes(page, src, images));
         if (!img) continue;
         const ext = extOf(img);
         let name = imageFileName(prompt, at, ext, i);
@@ -236,6 +239,51 @@ export class GeminiImages {
     }
     if (!(await page.waitFor(`${ATTACHED} > ${before}`, 20_000))) throw changed();
     await sleep(1000);
+  }
+
+  /**
+   * The answer's picture number `i` in full size: Gemini's "Download full size image" button (it
+   * shows when the picture is hovered), saved by Chrome into a folder of its own. Null if it fails.
+   */
+  private async download(page: CdpPage, i: number): Promise<Buffer | null> {
+    const dir = mkdtempSync(join(tmpdir(), 'harv-gemini-'));
+    try {
+      await page.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: dir });
+      const box = await page.eval<{ x: number; y: number } | null>(
+        `(() => { const img = ${ANSWER_IMAGE_ELEMENTS}[${i}]; if (!img) return null; img.scrollIntoView({ block: 'center' }); const r = img.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+      );
+      if (!box) return null;
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y });
+      await sleep(600);
+      // The button by this picture (several pictures each have one), else the answer's n-th.
+      const clicked = await page.eval<boolean>(`(() => {
+        const img = ${ANSWER_IMAGE_ELEMENTS}[${i}];
+        const isDownload = (b) => /^Download full size/i.test(b.getAttribute('aria-label') || '');
+        const near = img.closest('generated-image, single-image, .image-container');
+        const b = (near && [...near.querySelectorAll('button')].find(isDownload)) || [...${LAST_ANSWER}.querySelectorAll('button')].filter(isDownload)[${i}];
+        if (!b) return false;
+        b.click();
+        return true;
+      })()`);
+      if (!clicked) return null;
+      const end = Date.now() + 60_000;
+      while (Date.now() < end) {
+        await sleep(500);
+        const done = readdirSync(dir).find((f) => !/\.(crdownload|tmp)$/i.test(f));
+        if (done) {
+          await sleep(300);
+          const data = readFileSync(join(dir, done));
+          // A picture, not an error page: JPEG, WebP, or a real PNG (extOf falls back to .png).
+          if (extOf(data) !== '.png' || data.subarray(1, 4).toString('latin1') === 'PNG') return data;
+          return null;
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 
   /** A picture's bytes: fetched by the page, else from Chrome's network log, else a screenshot of it. */
