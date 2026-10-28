@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ChatStore } from '../store/chats.ts';
-import { chatList, formatTranscript, recentChatsContext } from './chatTools.ts';
+import { chatList, findTab, formatTranscript, recentChatsContext } from './chatTools.ts';
 
 describe('chat tools', () => {
   it('lists chats with their state and marks this one', () => {
@@ -41,5 +41,33 @@ describe('chat tools', () => {
     expect(context).toContain('"Other one"');
     expect(context).not.toContain('"This one"');
     store.close();
+  });
+});
+
+describe("another chat's terminal (the user's wish: a terminal tab every chat can work in)", () => {
+  const tabs = [
+    { id: 'aaaaaaaa-1111', title: 'Skola Java', terminal: false },
+    { id: 'bbbbbbbb-2222', title: 'Server', terminal: true },
+    { id: 'cccccccc-3333', title: 'New chat', terminal: false },
+  ];
+  const id = (r: ReturnType<typeof findTab>) => (typeof r === 'string' ? r : r.id);
+
+  it('finds it by title, part of the title or id', () => {
+    expect(id(findTab('server', tabs, 'aaaaaaaa-1111'))).toBe('bbbbbbbb-2222');
+    expect(id(findTab('Skola', tabs, 'bbbbbbbb-2222'))).toBe('aaaaaaaa-1111');
+    expect(id(findTab('cccccccc', tabs, 'aaaaaaaa-1111'))).toBe('cccccccc-3333');
+  });
+
+  it('"the terminal tab" is the only other chat showing its terminal', () => {
+    expect(id(findTab('the terminal tab', tabs, 'aaaaaaaa-1111'))).toBe('bbbbbbbb-2222');
+    // From the chat that shows it, there's no other one.
+    expect(findTab('terminal', tabs, 'bbbbbbbb-2222')).toMatch(/No single open chat/);
+  });
+
+  it('asks instead of guessing when it is unclear', () => {
+    const two = [...tabs, { id: 'dddddddd-4444', title: 'Server logs', terminal: true }];
+    const r = findTab('serv', two, 'aaaaaaaa-1111');
+    expect(r).toMatch(/No single open chat matches "serv"/);
+    expect(r).toContain('"Server logs" (dddddddd-4444) · terminal open');
   });
 });

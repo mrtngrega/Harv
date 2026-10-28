@@ -92,11 +92,44 @@ export interface ScheduleTools {
   cancel(id: string): boolean;
 }
 
-/** The chat's visible terminal, as Harv's terminal tools see it (the server's TerminalManager). */
+/**
+ * The chat's visible terminal, as Harv's terminal tools see it (the server's TerminalManager).
+ * `chat` names another chat whose terminal to use (the user's wish: a terminal tab every chat can work in).
+ */
 export interface TerminalTools {
-  /** Shows the chat's terminal in the dashboard, types the command and returns what it printed. */
-  run(tabId: string, command: string, opts: { cwd?: string; interrupt?: boolean; waitMs?: number }): Promise<string>;
-  read(tabId: string, lines: number): string;
+  /** Shows the terminal in the dashboard, types the command and returns what it printed. */
+  run(tabId: string, command: string, opts: { cwd?: string; interrupt?: boolean; waitMs?: number; chat?: string }): Promise<string>;
+  read(tabId: string, lines: number, chat?: string): string;
+}
+
+/** An open chat tab, for finding another chat's terminal. */
+export interface OpenTab {
+  id: string;
+  title: string;
+  /** It shows its terminal right now. */
+  terminal: boolean;
+}
+
+/**
+ * The open chat the user means by `ref`: its id, its title (exact, else the only one containing
+ * it), or, for "terminal", the only other chat showing its terminal. An error naming the open
+ * chats when it's not clear.
+ */
+export function findTab(ref: string, tabs: OpenTab[], self: string): OpenTab | string {
+  const want = ref.trim().toLowerCase();
+  const others = tabs.filter((t) => t.id !== self);
+  const byId = tabs.find((t) => t.id === ref.trim()) ?? (want.length >= 6 ? tabs.filter((t) => t.id.startsWith(want)) : []).at(0);
+  if (byId) return byId;
+  const exact = tabs.filter((t) => t.title.toLowerCase() === want);
+  if (exact.length === 1) return exact[0]!;
+  const partial = tabs.filter((t) => t.title.toLowerCase().includes(want));
+  if (partial.length === 1) return partial[0]!;
+  const showing = others.filter((t) => t.terminal);
+  if (/terminal|shell|konzol|termin[aá]l/.test(want) && showing.length === 1) return showing[0]!;
+  const list = tabs
+    .map((t) => `- "${t.title}" (${t.id})${t.terminal ? ' · terminal open' : ''}${t.id === self ? ' · this chat' : ''}`)
+    .join('\n');
+  return `No single open chat matches "${ref}". Open chats:\n${list}\nAsk the user which one (a chat used only for its terminal can be renamed by double-clicking its tab).`;
 }
 
 /** Pictures made by Gemini (tools/gemini.ts): returns what to tell the model (saved paths, or what the user must do). */
@@ -241,15 +274,24 @@ export function harvServer(
                 cwd: z.string().optional().describe('Folder to cd into first'),
                 interrupt: z.boolean().optional().describe('Press Ctrl+C first, to stop what is running'),
                 wait_seconds: z.number().min(1).max(120).optional().describe('Longest to wait for output (default 15)'),
+                chat: z
+                  .string()
+                  .optional()
+                  .describe(
+                    'Another open chat whose terminal to use instead of this one\'s, when the user says so ("in the Terminal tab", "in the Server chat\'s terminal"): its title or id. The user watches it in that tab.',
+                  ),
               },
-              async ({ command, cwd, interrupt, wait_seconds }) =>
-                text(await terminal.run(tabId, command, { cwd, interrupt, waitMs: (wait_seconds ?? 15) * 1000 })),
+              async ({ command, cwd, interrupt, wait_seconds, chat }) =>
+                text(await terminal.run(tabId, command, { cwd, interrupt, waitMs: (wait_seconds ?? 15) * 1000, chat })),
             ),
             tool(
               'terminal_read',
-              "Read the latest lines on this chat's Terminal (what the user sees there), e.g. a program started with terminal_run that's still running, or something the user ran.",
-              { lines: z.number().int().min(1).max(500).optional().describe('How many of the last lines (default 60)') },
-              async ({ lines }) => text(terminal.read(tabId, lines ?? 60)),
+              "Read the latest lines on this chat's Terminal (what the user sees there), or another open chat's (chat), e.g. a program started with terminal_run that's still running, or something the user ran.",
+              {
+                lines: z.number().int().min(1).max(500).optional().describe('How many of the last lines (default 60)'),
+                chat: z.string().optional().describe("Another open chat's title or id, to read its terminal"),
+              },
+              async ({ lines, chat }) => text(terminal.read(tabId, lines ?? 60, chat)),
             ),
           ]
         : []),

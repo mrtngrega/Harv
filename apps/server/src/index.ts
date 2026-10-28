@@ -8,6 +8,7 @@ import websocket from '@fastify/websocket';
 import { HARV_VERSION, MAX_ATTACHMENT_BYTES, SERVER_PORT, terminalId, type ClientMessage, type ServerMessage } from '@harv/shared';
 import { isValidTab, saveAttachment } from './agent/attachments.ts';
 import { loadCatalog } from './agent/catalog.ts';
+import { findTab, type OpenTab } from './agent/chatTools.ts';
 import { ChatManager } from './agent/manager.ts';
 import { backgroundVersion, findBackground, MAX_BACKGROUND_BYTES, removeBackground, saveBackground } from './background.ts';
 import { MetricsCollector } from './metrics/collector.ts';
@@ -233,19 +234,37 @@ chats.images = {
     }
   },
 };
+/** The open chats (saved ones and blank tabs), for using another chat's terminal. */
+const openTabs = (): OpenTab[] => {
+  const ui = loadUi();
+  const tab = (id: string, title: string) => ({ id, title, terminal: ui.views[id] === 'terminal' });
+  return [...store.openChats().map((c) => tab(c.id, c.title)), ...ui.blanks.map((id) => tab(id, 'New chat'))];
+};
+/** The chat whose terminal a call means: this one, or the one `chat` names (an error text if unclear). */
+const terminalTab = (tabId: string, chat?: string): { id: string; note: string } | string => {
+  if (!chat) return { id: tabId, note: '' };
+  const found = findTab(chat, openTabs(), tabId);
+  return typeof found === 'string' ? found : { id: found.id, note: found.id === tabId ? '' : ` (in "${found.title}")` };
+};
 chats.terminal = {
   async run(tabId, command, opts) {
-    broadcast({ type: 'term.show', tabId });
+    const target = terminalTab(tabId, opts.chat);
+    if (typeof target === 'string') return target;
+    broadcast({ type: 'term.show', tabId: target.id });
     const cwd = opts.cwd ? (cleanPath(opts.cwd) ?? undefined) : undefined;
-    const r = await terminals.run(terminalId(tabId), command, { ...opts, cwd });
+    const r = await terminals.run(terminalId(target.id), command, { ...opts, cwd });
     const state = r.exited
       ? 'The shell has exited (a new one starts on the next terminal_run).'
       : r.running
         ? 'Still printing when the wait ended: it keeps running in the terminal; terminal_read shows more later.'
         : 'The output went quiet (finished, or waiting for input).';
-    return `${r.output || '(no output)'}\n\n[${state}]`;
+    return `${r.output || '(no output)'}\n\n[${state}${target.note}]`;
   },
-  read: (tabId, lines) => terminals.read(terminalId(tabId), lines) ?? "This chat's terminal isn't open; terminal_run starts it.",
+  read(tabId, lines, chat) {
+    const target = terminalTab(tabId, chat);
+    if (typeof target === 'string') return target;
+    return terminals.read(terminalId(target.id), lines) ?? "That chat's terminal isn't open; terminal_run starts it.";
+  },
 };
 // "Reopen tabs" off: Harv starts with no tabs (the chats stay in history).
 if (!loadSettings().restoreTabs) {
