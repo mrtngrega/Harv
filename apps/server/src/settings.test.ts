@@ -36,7 +36,7 @@ describe('settings', () => {
       scrim: -5,
       uiScale: 112.4,
       density: 'tiny',
-      metricsMs: 3000,
+      metricsMs: 4000,
       tempUnit: 'F',
       compactRows: ['net', 'cpu', 'bogus'],
       warnSession: [95, 75, 75, 150, 'x'],

@@ -942,6 +942,7 @@ export function SettingsView() {
             options={[
               { value: 1000, label: '1 s' },
               { value: 2000, label: '2 s' },
+              { value: 3000, label: '3 s' },
               { value: 5000, label: '5 s' },
             ]}
             onChange={(metricsMs) => updateSettings({ metricsMs })}

@@ -67,7 +67,7 @@ export interface HarvSettings {
   compactRows: CompactRow[];
   tempUnit: 'C' | 'F';
   /** How often the hardware stats update, in ms. */
-  metricsMs: 1000 | 2000 | 5000;
+  metricsMs: 1000 | 2000 | 3000 | 5000;
 
   // Usage
   /** Warn at these % of the session (5-hour) limit; empty = off. */

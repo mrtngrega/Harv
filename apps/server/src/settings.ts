@@ -67,7 +67,7 @@ export function cleanSettings(raw: Raw, base: HarvSettings = DEFAULT_SETTINGS): 
     statsExpanded: bool(raw.statsExpanded, base.statsExpanded),
     compactRows: rows,
     tempUnit: oneOf(raw.tempUnit, ['C', 'F'] as const, base.tempUnit),
-    metricsMs: oneOf(raw.metricsMs, [1000, 2000, 5000] as const, base.metricsMs),
+    metricsMs: oneOf(raw.metricsMs, [1000, 2000, 3000, 5000] as const, base.metricsMs),
     warnSession: percents(raw.warnSession, base.warnSession),
     warnWeekly: percents(raw.warnWeekly, base.warnWeekly),
     workDir: folder(raw.workDir, base.workDir),
