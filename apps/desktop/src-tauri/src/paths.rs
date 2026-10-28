@@ -26,7 +26,7 @@ fn picked(paths: Vec<PathBuf>) -> Vec<Picked> {
 
 pub fn pick(app: &AppHandle, folders: bool) -> Vec<Picked> {
     let mut dialog = app.dialog().file();
-    if let Some(window) = app.get_webview_window("main") {
+    if let Some(window) = app.get_window("main") {
         dialog = dialog.set_parent(&window);
     }
     let chosen = if folders {

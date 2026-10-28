@@ -20,6 +20,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-dialog = "2"
 
+# Linux: the browser's pages float over the dashboard in a GtkOverlay (src/browser.rs); Tauri
+# itself stacks a window's webviews in a vertical box there. Same gtk as Tauri's own.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
 [profile.release]
 codegen-units = 1
 lto = true

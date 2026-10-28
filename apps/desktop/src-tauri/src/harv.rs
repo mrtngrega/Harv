@@ -158,7 +158,7 @@ pub fn boot(app: AppHandle) {
                 let text = format!("Harv didn't start. See {}", harv_log.display())
                     .replace('\\', "\\\\")
                     .replace('\'', "\\'");
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = app.get_webview("main") {
                     let _ =
                         window.eval(format!("window.harvFailed && window.harvFailed('{text}')"));
                 }
@@ -167,7 +167,7 @@ pub fn boot(app: AppHandle) {
             }
             std::thread::sleep(Duration::from_millis(500));
         }
-        if let Some(window) = app.get_webview_window("main") {
+        if let Some(window) = app.get_webview("main") {
             log("showing the dashboard");
             let _ = window.navigate(Url::parse(DASHBOARD).expect("dashboard url"));
         }
@@ -183,7 +183,7 @@ pub fn restart() {
 
 /// Stops Harv cleanly, then closes the app.
 pub fn quit(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
+    if let Some(window) = app.get_window("main") {
         let _ = window.hide();
     }
     let app = app.clone();

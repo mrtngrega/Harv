@@ -1456,6 +1456,7 @@ dependencies = [
 name = "harv"
 version = "0.1.0"
 dependencies = [
+ "gtk",
  "serde",
  "serde_json",
  "tauri",

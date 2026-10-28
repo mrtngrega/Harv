@@ -121,8 +121,13 @@ fn layout(app: &AppHandle) {
         };
         match (Some(id) == active && visible, bounds) {
             (true, Some((x, y, w, h))) => {
-                let _ = view.set_position(LogicalPosition::new(x, y));
-                let _ = view.set_size(LogicalSize::new(w.max(1.0), h.max(1.0)));
+                #[cfg(target_os = "linux")]
+                overlay::place(&view, x, y, w.max(1.0), h.max(1.0));
+                #[cfg(not(target_os = "linux"))]
+                {
+                    let _ = view.set_position(LogicalPosition::new(x, y));
+                    let _ = view.set_size(LogicalSize::new(w.max(1.0), h.max(1.0)));
+                }
                 let _ = view.show();
             }
             _ => {
@@ -193,6 +198,8 @@ fn open(app: &AppHandle, url: Url) -> Result<u32, String> {
     let view = window
         .add_child(builder, LogicalPosition::new(x, y), LogicalSize::new(w, h))
         .map_err(|e| format!("Couldn't make a browser page: {e}"))?;
+    #[cfg(target_os = "linux")]
+    overlay::adopt(&view);
     let _ = view.hide();
     {
         let mut s = browser.inner.lock().unwrap();
@@ -339,6 +346,83 @@ pub async fn browser(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Linux: Tauri packs a window's webviews one under the other in its vertical box, so a page
+/// showed below the whole dashboard and ignored its place (the user's report, 2026-10-28).
+/// The first page moves the dashboard into a GtkOverlay in that box; every page floats over
+/// it at the place layout() gives. Runs on GTK's thread through with_webview.
+#[cfg(target_os = "linux")]
+mod overlay {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    use gtk::prelude::*;
+    use tauri::Webview;
+
+    thread_local! {
+        /// Each page's place in the overlay (logical px), by its widget name (the page's label).
+        static PLACES: RefCell<HashMap<String, (i32, i32, i32, i32)>> = RefCell::new(HashMap::new());
+    }
+
+    /// The overlay in the window's box, made around the dashboard the first time.
+    fn overlay_in(boxed: &gtk::Box, page: &gtk::Widget) -> gtk::Overlay {
+        let children = boxed.children();
+        if let Some(found) = children
+            .iter()
+            .find_map(|c| c.clone().downcast::<gtk::Overlay>().ok())
+        {
+            return found;
+        }
+        let overlay = gtk::Overlay::new();
+        // Exact places: an overlay child otherwise gets its own preferred size.
+        overlay.connect_get_child_position(|_, child| {
+            let name = child.widget_name().to_string();
+            PLACES.with(|p| {
+                p.borrow()
+                    .get(&name)
+                    .map(|&(x, y, w, h)| gtk::Allocation::new(x, y, w, h))
+            })
+        });
+        if let Some(dashboard) = children.iter().find(|c| *c != page) {
+            boxed.remove(dashboard);
+            overlay.add(dashboard);
+        }
+        boxed.pack_start(&overlay, true, true, 0);
+        overlay.show();
+        overlay
+    }
+
+    /// Moves a new page from the window's box into the overlay.
+    pub fn adopt(view: &Webview) {
+        let name = view.label().to_string();
+        let _ = view.with_webview(move |platform| {
+            let page: gtk::Widget = platform.inner().upcast();
+            page.set_widget_name(&name);
+            let Some(boxed) = page.parent().and_then(|p| p.downcast::<gtk::Box>().ok()) else {
+                return;
+            };
+            let overlay = overlay_in(&boxed, &page);
+            boxed.remove(&page);
+            overlay.add_overlay(&page);
+        });
+    }
+
+    /// Puts a page at its place over the dashboard.
+    pub fn place(view: &Webview, x: f64, y: f64, w: f64, h: f64) {
+        let name = view.label().to_string();
+        let place = (
+            x.round() as i32,
+            y.round() as i32,
+            w.round() as i32,
+            h.round() as i32,
+        );
+        let _ = view.with_webview(move |platform| {
+            PLACES.with(|p| p.borrow_mut().insert(name, place));
+            let page: gtk::Widget = platform.inner().upcast();
+            page.queue_resize();
+        });
+    }
 }
 
 /// The pages and the active one, for a dashboard that (re)loads.

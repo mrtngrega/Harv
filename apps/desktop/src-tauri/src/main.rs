@@ -15,7 +15,7 @@ mod update;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tauri::window::Color;
-use tauri::{AppHandle, Manager, WebviewWindow, WindowEvent};
+use tauri::{AppHandle, Manager, Webview, Window, WindowEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
@@ -36,12 +36,20 @@ fn save_window_soon(app: &AppHandle) {
 }
 
 /// Brings the window to the front with the cursor in the `harv>` line.
+///
+/// The window and the dashboard's webview are looked up apart, never as a `WebviewWindow`:
+/// once the browser adds its pages, Tauri no longer counts the window as one, and every
+/// `get_webview_window` came back empty (the window couldn't be shown, moved or closed;
+/// the user's report, 2026-10-28).
 pub fn show(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
+    if let Some(window) = app.get_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
-        let _ = window.eval("window.dispatchEvent(new Event('harv-focus'))");
+    }
+    if let Some(dashboard) = app.get_webview("main") {
+        let _ = dashboard.set_focus();
+        let _ = dashboard.eval("window.dispatchEvent(new Event('harv-focus'))");
     }
 }
 
@@ -63,7 +71,7 @@ fn flag_action(args: &[String]) -> &'static str {
 
 /// The hotkey: up if it's hidden or behind other windows, away if it's in front.
 fn toggle(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
+    if let Some(window) = app.get_window("main") {
         let front = window.is_visible().unwrap_or(false)
             && !window.is_minimized().unwrap_or(false)
             && window.is_focused().unwrap_or(false);
@@ -77,7 +85,7 @@ fn toggle(app: &AppHandle) {
 
 /// The dashboard's own title bar: drag, minimize, maximize, and × (which hides to the tray).
 #[tauri::command]
-fn window_action(window: WebviewWindow, action: &str) {
+fn window_action(window: Window, action: &str) {
     let _ = match action {
         "drag" => window.start_dragging(),
         "minimize" => window.minimize(),
@@ -109,8 +117,11 @@ const GROUND: Color = Color(10, 16, 24, 255);
 /// window again. `blur` (the Blur slider above 0) frosts it with Acrylic on Windows, which has one
 /// strength only; Linux gets plain transparency (Tauri can't ask KWin for blur).
 #[tauri::command]
-fn set_see_through(window: WebviewWindow, on: bool, blur: Option<bool>) {
-    let _ = window.set_background_color(Some(if on { Color(0, 0, 0, 0) } else { GROUND }));
+fn set_see_through(webview: Webview, on: bool, blur: Option<bool>) {
+    let color = Some(if on { Color(0, 0, 0, 0) } else { GROUND });
+    let window = webview.window();
+    let _ = window.set_background_color(color);
+    let _ = webview.set_background_color(color);
     #[cfg(windows)]
     {
         use tauri::window::{Effect, EffectsBuilder};
