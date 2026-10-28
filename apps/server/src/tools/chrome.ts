@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import WebSocket from 'ws';
@@ -30,6 +30,29 @@ export function findChrome(): string | null {
     }
   }
   return null;
+}
+
+/** The desktop session's variables a window needs on Linux. */
+const DESKTOP_VARS = ['DISPLAY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS'];
+
+/**
+ * Harv's environment, plus the desktop's display on Linux when Harv was started without one
+ * (over SSH, say): taken from the user's systemd session, which KDE fills in at login.
+ */
+export function desktopEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  if (IS_WINDOWS || env.DISPLAY || env.WAYLAND_DISPLAY) return env;
+  const r = spawnSync('systemctl', ['--user', 'show-environment'], { encoding: 'utf8', timeout: 3000 });
+  return { ...env, ...sessionVars(r.stdout ?? '') };
+}
+
+/** The desktop variables in `systemctl --user show-environment` output. */
+export function sessionVars(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of text.split('\n')) {
+    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
+    if (m && DESKTOP_VARS.includes(m[1]!)) out[m[1]!] = m[2]!.replace(/^\$?'(.*)'$/, '$1');
+  }
+  return out;
 }
 
 /** One page, driven over its DevTools WebSocket. */
@@ -129,7 +152,10 @@ export class HarvChrome {
     const chrome = findChrome();
     if (!chrome) throw new Error('Google Chrome isn’t installed (or set HARV_CHROME_PATH).');
     mkdirSync(profile, { recursive: true });
-    return spawn(chrome, [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', url], { stdio: 'ignore' });
+    return spawn(chrome, [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', url], {
+      stdio: 'ignore',
+      env: desktopEnv(),
+    });
   }
 
   /** Starts Chrome on `profile` (headless, or a window the user sees) and waits for its debugging port. */

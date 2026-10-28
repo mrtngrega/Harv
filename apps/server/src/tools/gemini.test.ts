@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classify } from '../safety/classify.ts';
+import { sessionVars } from './chrome.ts';
 import { extOf, imageFileName } from './gemini.ts';
 
 describe('pictures from Gemini', () => {
@@ -20,6 +21,17 @@ describe('pictures from Gemini', () => {
     expect(extOf(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46]))).toBe('.jpg');
     expect(extOf(Buffer.from('RIFF\0\0\0\0WEBPVP8 ', 'latin1'))).toBe('.webp');
     expect(extOf(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe('.png');
+  });
+
+  it('finds the desktop’s display for the sign-in window when Harv was started without one (Linux, over SSH)', () => {
+    const out =
+      "DISPLAY=:0\nWAYLAND_DISPLAY=wayland-0\nHOME=/home/me\nXDG_RUNTIME_DIR=/run/user/1000\nXAUTHORITY=$'/run/user/1000/xauth_x'\n";
+    expect(sessionVars(out)).toEqual({
+      DISPLAY: ':0',
+      WAYLAND_DISPLAY: 'wayland-0',
+      XDG_RUNTIME_DIR: '/run/user/1000',
+      XAUTHORITY: '/run/user/1000/xauth_x',
+    });
   });
 
   it('is one of Harv’s own tools for the gate (the user asked for the picture)', () => {
