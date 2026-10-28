@@ -1,5 +1,5 @@
 import type { ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { HARV_HOME } from '../paths.ts';
 import { WORKSPACE } from '../safety/paths.ts';
@@ -11,10 +11,12 @@ import { CdpPage, HarvChrome } from './chrome.ts';
 // costs one tool call of the Claude plan and nothing else.
 
 export const GEMINI_URL = 'https://gemini.google.com/app';
+/** The page the script works in: English whatever the account's language, so its button names are the ones it looks for. */
+const WORK_URL = `${GEMINI_URL}?hl=en`;
 const PROFILE = join(HARV_HOME, 'gemini-profile');
 export const IMAGES_DIR = join(WORKSPACE, 'images');
 /** Pictures Harv may hand to Gemini to edit. */
-const INPUT_TYPES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
+const INPUT_TYPES = ['.png', '.jpg', '.jpeg', '.webp'];
 const MAX_INPUT_BYTES = 10 * 1024 * 1024;
 const ANSWER_MS = 240_000;
 
@@ -40,9 +42,10 @@ export function imageFileName(prompt: string, at: Date, ext = '.png', n = 0): st
 }
 
 /** The file extension for a picture's MIME type. */
-export function extOf(mime: string): string {
-  if (/jpe?g/i.test(mime)) return '.jpg';
-  if (/webp/i.test(mime)) return '.webp';
+export function extOf(data: Buffer): string {
+  // From the bytes themselves: Gemini serves JPEGs, and a screenshot is a PNG, whatever the URL says.
+  if (data[0] === 0xff && data[1] === 0xd8) return '.jpg';
+  if (data.subarray(0, 4).toString('latin1') === 'RIFF' && data.subarray(8, 12).toString('latin1') === 'WEBP') return '.webp';
   return '.png';
 }
 
@@ -55,6 +58,14 @@ const BUSY = `!!document.querySelector('button[aria-label*="Stop" i]')`;
 const LAST_ANSWER = `[...document.querySelectorAll('model-response')].at(-1)`;
 /** The answer's big pictures (icons and avatars are small). */
 const ANSWER_IMAGES = `(() => { const r = ${LAST_ANSWER}; if (!r) return []; return [...r.querySelectorAll('img')].filter(i => i.complete && i.naturalWidth >= 256 && i.naturalHeight >= 256).map(i => i.src); })()`;
+
+/** Opens the "Upload & tools" menu by the prompt box (uploads, Create image). */
+const UPLOAD_MENU = `[...document.querySelectorAll('button')].find(b => /^Upload & tools/i.test(b.getAttribute('aria-label') || ''))?.click()`;
+/** The picture input Gemini's upload menu makes, and the pictures attached to the prompt so far. */
+const PICTURE_INPUT = `document.querySelector('input[type=file][accept^="image/"]')`;
+const ATTACHED = `document.querySelectorAll('img.gem-attachment-style-img').length`;
+/** The one-time "Creating content from images and files" agreement. */
+const AGREE_BUTTON = `([...document.querySelectorAll('button')].find(e => /^Agree/i.test((e.getAttribute('aria-label') || e.innerText || '').trim())) ?? null)`;
 
 /** Gemini's own words in its last answer, for when no picture came. */
 const ANSWER_TEXT = `(${LAST_ANSWER}?.querySelector('message-content')?.innerText ?? ${LAST_ANSWER}?.innerText ?? '').trim()`;
@@ -109,7 +120,7 @@ export class GeminiImages {
     }
     const chrome = await HarvChrome.launch(this.profile, { headless: true });
     this.chrome = chrome;
-    const page = await chrome.open(GEMINI_URL);
+    const page = await chrome.open(WORK_URL);
     try {
       await page.send('Network.enable');
       const images = new Map<string, string>();
@@ -136,6 +147,13 @@ export class GeminiImages {
         throw new GeminiProblem('signed-out');
       }
       for (const file of files) await this.attach(page, file);
+      // Gemini's "Create image" tool, so the answer is a picture and not a description of one.
+      await page.eval(UPLOAD_MENU);
+      await sleep(1000);
+      await page.eval(
+        `[...document.querySelectorAll('button, [role=menuitem]')].find(b => /^Create image/i.test((b.getAttribute('aria-label') || b.innerText || '').trim()))?.click()`,
+      );
+      await sleep(800);
       await page.eval(`${EDITOR}.focus()`);
       await page.send('Input.insertText', { text: prompt });
       await sleep(400);
@@ -175,10 +193,11 @@ export class GeminiImages {
       for (const [i, src] of srcs.entries()) {
         const img = await this.bytes(page, src, images);
         if (!img) continue;
-        let name = imageFileName(prompt, at, extOf(img.mime), i);
-        for (let n = 2; existsSync(join(this.outDir, name)); n++) name = imageFileName(`${prompt} ${n}`, at, extOf(img.mime), i);
+        const ext = extOf(img);
+        let name = imageFileName(prompt, at, ext, i);
+        for (let n = 2; existsSync(join(this.outDir, name)); n++) name = imageFileName(`${prompt} ${n}`, at, ext, i);
         const path = join(this.outDir, name);
-        writeFileSync(path, img.data);
+        writeFileSync(path, img);
         paths.push(path);
       }
       if (!paths.length) throw new GeminiProblem('Gemini made a picture, but Harv couldn’t save it (the page changed?).');
@@ -190,39 +209,48 @@ export class GeminiImages {
     }
   }
 
-  /** One of the user's pictures into the prompt box, pasted like Ctrl+V. */
-  private async attach(page: CdpPage, file: { path: string; mime: string }): Promise<void> {
-    const b64 = readFileSync(file.path).toString('base64');
-    const before = await page.eval<number>(`document.querySelectorAll('img').length`);
-    await page.eval(`(() => {
-      const bin = atob(${JSON.stringify(b64)});
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      const file = new File([bytes], ${JSON.stringify(basename(file.path))}, { type: ${JSON.stringify(file.mime)} });
-      const data = new DataTransfer();
-      data.items.add(file);
-      const editor = ${EDITOR};
-      editor.focus();
-      editor.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
-    })()`);
-    const shown = await page.waitFor(`document.querySelectorAll('img').length > ${before}`, 15_000);
-    if (!shown) throw new GeminiProblem(`Gemini didn’t take the picture ${basename(file.path)} (the page changed?).`);
-    await sleep(1500);
+  /**
+   * One of the user's pictures, through Gemini's own upload: its "Upload & tools" menu makes a
+   * picture file input, which Chrome fills directly (a pasted or dropped file is ignored). The
+   * first upload on an account asks to agree to its rules about rights to pictures: agreed.
+   */
+  private async attach(page: CdpPage, file: { path: string }): Promise<void> {
+    const name = basename(file.path);
+    const changed = () => new GeminiProblem(`Gemini didn’t take the picture ${name} (the page changed?).`);
+    const before = await page.eval<number>(ATTACHED);
+    const give = async () => {
+      await page.eval(UPLOAD_MENU);
+      if (!(await page.waitFor(`!!${PICTURE_INPUT}`, 8000))) throw changed();
+      const { result } = await page.send<{ result: { objectId?: string } }>('Runtime.evaluate', { expression: PICTURE_INPUT });
+      if (!result.objectId) throw changed();
+      await page.send('DOM.setFileInputFiles', { files: [file.path], objectId: result.objectId });
+      await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+      await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    };
+    await give();
+    if (await page.waitFor(`${ATTACHED} > ${before} || ${AGREE_BUTTON} !== null`, 15_000)) {
+      if (await page.eval<boolean>(`(() => { const b = ${AGREE_BUTTON}; if (!b) return false; b.click(); return true; })()`)) {
+        await sleep(1000);
+        if (!((await page.eval<number>(ATTACHED)) > before)) await give();
+      }
+    }
+    if (!(await page.waitFor(`${ATTACHED} > ${before}`, 20_000))) throw changed();
+    await sleep(1000);
   }
 
   /** A picture's bytes: fetched by the page, else from Chrome's network log, else a screenshot of it. */
-  private async bytes(page: CdpPage, src: string, seen: Map<string, string>): Promise<{ data: Buffer; mime: string } | null> {
+  private async bytes(page: CdpPage, src: string, seen: Map<string, string>): Promise<Buffer | null> {
     const fetched = await page
       .eval<string | null>(
         `(async () => { try { const r = await fetch(${JSON.stringify(src)}, { credentials: 'include' }); if (!r.ok) return null; const b = await r.blob(); return await new Promise(ok => { const f = new FileReader(); f.onload = () => ok(f.result); f.readAsDataURL(b); }); } catch { return null; } })()`,
       )
       .catch(() => null);
     const m = fetched && /^data:([^;]+);base64,(.+)$/.exec(fetched);
-    if (m && m[1]!.startsWith('image/')) return { mime: m[1]!, data: Buffer.from(m[2]!, 'base64') };
+    if (m && m[1]!.startsWith('image/')) return Buffer.from(m[2]!, 'base64');
     const requestId = seen.get(src);
     if (requestId) {
       const body = await page.send<{ body: string; base64Encoded: boolean }>('Network.getResponseBody', { requestId }).catch(() => null);
-      if (body?.base64Encoded) return { mime: 'image/png', data: Buffer.from(body.body, 'base64') };
+      if (body?.base64Encoded) return Buffer.from(body.body, 'base64');
     }
     const box = await page.eval<{ x: number; y: number; width: number; height: number } | null>(
       `(() => { const i = [...document.querySelectorAll('img')].find(e => e.src === ${JSON.stringify(src)}); if (!i) return null; i.scrollIntoView(); const r = i.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`,
@@ -231,7 +259,7 @@ export class GeminiImages {
     const shot = await page
       .send<{ data: string }>('Page.captureScreenshot', { format: 'png', clip: { ...box, scale: 2 } })
       .catch(() => null);
-    return shot ? { mime: 'image/png', data: Buffer.from(shot.data, 'base64') } : null;
+    return shot ? Buffer.from(shot.data, 'base64') : null;
   }
 
   close(): void {
@@ -241,11 +269,10 @@ export class GeminiImages {
 }
 
 /** A picture the user gave Harv: it must exist, be a picture and fit. */
-function checkInput(path: string): { path: string; mime: string } {
-  const mime = INPUT_TYPES[extname(path).toLowerCase()];
-  if (!mime) throw new GeminiProblem(`${basename(path)} isn’t a PNG, JPG or WebP picture.`);
+function checkInput(path: string): { path: string } {
+  if (!INPUT_TYPES.includes(extname(path).toLowerCase())) throw new GeminiProblem(`${basename(path)} isn’t a PNG, JPG or WebP picture.`);
   const st = statSync(path, { throwIfNoEntry: false });
   if (!st?.isFile()) throw new GeminiProblem(`${path} doesn’t exist.`);
   if (st.size > MAX_INPUT_BYTES) throw new GeminiProblem(`${basename(path)} is bigger than 10 MB.`);
-  return { path, mime };
+  return { path };
 }
