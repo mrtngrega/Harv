@@ -23,9 +23,19 @@ import { fullPath, isInside, loadSettings, PLANS_DIR, WORKSPACE } from './paths.
 const HARV_HOME_HINT = 'the .harv folder';
 
 /** Harv's own tools that only look or note things: fine in plan mode. */
-const PLAN_SAFE_HARV = ['remember', 'forget', 'list_chats', 'read_chat', 'list_projects', 'list_scheduled', 'terminal_read'].map(
-  (t) => `mcp__harv__${t}`,
-);
+const PLAN_SAFE_HARV = [
+  'remember',
+  'forget',
+  'list_chats',
+  'read_chat',
+  'list_projects',
+  'list_scheduled',
+  'terminal_read',
+  'browser_open',
+  'browser_snapshot',
+  'browser_scroll',
+  'browser_back',
+].map((t) => `mcp__harv__${t}`);
 
 // Every tool call passes through here (Agent SDK hooks, so it can't be skipped):
 //   green   → run

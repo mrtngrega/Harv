@@ -25,7 +25,9 @@ import { RouteStore } from './store/routes.ts';
 import { UsageMeter } from './usage/meter.ts';
 import { loadSettings, updateSettings, workDir } from './settings.ts';
 import { applySharedUi, loadUi, resetUi, saveUi, sharedUi } from './ui.ts';
+import { BrowserHost } from './tools/browserHost.ts';
 import { GeminiImages, GeminiProblem } from './tools/gemini.ts';
+import { HarvBrowser } from './tools/harvBrowser.ts';
 import { cleanPath, listFolder, openWithDefault, places, previewType, suggestPaths } from './tools/files.ts';
 import {
   copyItems,
@@ -234,6 +236,11 @@ chats.images = {
     }
   },
 };
+// Harv's browser (docs/PLAN.md §6x): in the app, driven through its dashboard's connection.
+const browserHost = new BrowserHost();
+/** How long the browser tab says "Harv is using the browser" after Harv's last action. */
+const BROWSER_BUSY_MS = 6000;
+chats.browser = new HarvBrowser(browserHost, () => broadcast({ type: 'browser.busy', until: Date.now() + BROWSER_BUSY_MS }));
 /** The open chats (saved ones and blank tabs), for using another chat's terminal. */
 const openTabs = (): OpenTab[] => {
   const ui = loadUi();
@@ -504,6 +511,7 @@ app.get('/ws', { websocket: true }, (socket) => {
   socket.on('close', () => {
     unsubscribe();
     clients.delete(send);
+    browserHost.detach(send);
   });
 
   socket.on('message', (raw) => {
@@ -516,6 +524,12 @@ app.get('/ws', { websocket: true }, (socket) => {
     switch (msg.type) {
       case 'ping':
         send({ type: 'harv.status', status: chats.status, detail: chats.statusDetail });
+        break;
+      case 'browser.hello':
+        browserHost.attach(send);
+        break;
+      case 'browser.result':
+        browserHost.result(msg.reqId, msg.ok, msg.value, msg.error);
         break;
       case 'chat.send':
         void chats.send(msg.tabId, msg.text, msg.model, msg.effort, msg.attachments);

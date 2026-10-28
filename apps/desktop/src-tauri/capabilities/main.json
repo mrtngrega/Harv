@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The window: the starting page (bundled) and the dashboard (served by Harv on localhost) may move the window, set the tray status, notify, and read or change the app's own settings.",
-  "windows": ["main"],
+  "description": "The window: the starting page (bundled) and the dashboard (served by Harv on localhost) may move the window, set the tray status, notify, read or change the app's own settings, and drive the browser. Only the \"main\" webview: the browser's pages (other webviews in the window) get none of this.",
+  "webviews": ["main"],
   "remote": {
     "urls": ["http://127.0.0.1:5173", "http://127.0.0.1:5173/*"]
   },
@@ -18,6 +18,8 @@
     "allow-check-updates",
     "allow-apply-update",
     "allow-pick-paths",
-    "allow-set-see-through"
+    "allow-set-see-through",
+    "allow-browser",
+    "allow-browser-state"
   ]
 }

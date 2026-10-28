@@ -11,6 +11,8 @@ fn main() {
             "apply_update",
             "pick_paths",
             "set_see_through",
+            "browser",
+            "browser_state",
         ]),
     ))
     .expect("failed to run tauri-build");

@@ -16,6 +16,8 @@ import type {
   UiState,
 } from '@harv/shared';
 import { terminalId } from '@harv/shared';
+import { isTauri } from '@tauri-apps/api/core';
+import { browser, BROWSER_START, getBrowser, onShowBrowser, subscribeBrowser } from './browser.ts';
 import { createStore } from './createStore.ts';
 import { addAttachment, dropDrafts, replaceDrafts, setDraftText } from './drafts.ts';
 import { onServerMessage, sendMessage } from './socket.ts';
@@ -72,6 +74,8 @@ export interface Tab {
 
 /** The Settings tab's id in `activeId`; it sits in the tab bar after the chats. */
 export const SETTINGS_TAB = 'settings';
+/** The Browser tab's id in `activeId`: the shared browser (docs/PLAN.md §6x), after Settings. */
+export const BROWSER_TAB = 'browser';
 
 export interface ChatState {
   tabs: Tab[];
@@ -79,6 +83,8 @@ export interface ChatState {
   activeId: string | null;
   /** The Settings tab is in the tab bar. */
   settingsOpen: boolean;
+  /** The Browser tab is in the tab bar (it has pages). */
+  browserOpen: boolean;
   /** What each chat shows: its log or one of its tools (missing = the log). */
   views: Record<string, ChatView>;
   /** Tools each chat has open, in the order they were opened. */
@@ -123,6 +129,7 @@ const store = createStore<ChatState>({
   tabs: [first],
   activeId: first.id,
   settingsOpen: false,
+  browserOpen: false,
   views: {},
   tools: {},
   hydrated: false,
@@ -199,7 +206,8 @@ function hydrate(chats: ChatSnapshot[], ui?: UiState) {
 
     const settingsOpen = s.settingsOpen || !!ui?.settingsOpen;
     const wanted = ui ? ui.activeId : s.activeId;
-    const valid = (id: string | null) => (id === SETTINGS_TAB && settingsOpen) || tabs.some((t) => t.id === id);
+    const valid = (id: string | null) =>
+      (id === SETTINGS_TAB && settingsOpen) || (id === BROWSER_TAB && s.browserOpen) || tabs.some((t) => t.id === id);
     const activeId = valid(wanted) ? wanted : valid(s.activeId) ? s.activeId : tabs.at(-1)!.id;
     const views = onlyTabs(ui ? { ...ui.views, ...s.views } : s.views, tabs);
     const tools = onlyTabs(ui ? { ...ui.tools, ...s.tools } : s.tools, tabs);
@@ -225,7 +233,8 @@ export function syncLayout(ui: SharedUi): void {
       .sort((a, b) => rank(a.t.id) - rank(b.t.id) || a.i - b.i)
       .map(({ t }) => t);
     if (tabs.length === 0) tabs.push(blankTab());
-    const valid = (id: string | null) => (id === SETTINGS_TAB && s.settingsOpen) || tabs.some((t) => t.id === id);
+    const valid = (id: string | null) =>
+      (id === SETTINGS_TAB && s.settingsOpen) || (id === BROWSER_TAB && s.browserOpen) || tabs.some((t) => t.id === id);
     const activeId = valid(s.activeId) ? s.activeId : tabs.at(-1)!.id;
     return { ...s, tabs, activeId, views: onlyTabs(s.views, tabs), tools: onlyTabs(s.tools, tabs) };
   });
@@ -542,7 +551,8 @@ export const chat = {
     dropDrafts(id);
     store.set((s) => {
       const tabs = s.tabs.filter((t) => t.id !== id);
-      const activeId = s.activeId === id ? (tabs.at(-1)?.id ?? (s.settingsOpen ? SETTINGS_TAB : null)) : s.activeId;
+      const activeId =
+        s.activeId === id ? (tabs.at(-1)?.id ?? (s.settingsOpen ? SETTINGS_TAB : s.browserOpen ? BROWSER_TAB : null)) : s.activeId;
       return { ...withoutChat(s, id), tabs, activeId };
     });
   },
@@ -574,6 +584,22 @@ export const chat = {
 
   /** Opens Settings as a tab in the chat bar (or switches to it). */
   openSettings: () => store.set((s) => ({ ...s, settingsOpen: true, activeId: SETTINGS_TAB })),
+
+  /** Puts the Browser tab in the tab bar, with a first page if it has none; `activate` switches to it. */
+  openBrowser(activate = true) {
+    if (!getBrowser().pages.length && inApp) void browser.open(BROWSER_START).catch(() => {});
+    store.set((s) => ({ ...s, browserOpen: true, activeId: activate ? BROWSER_TAB : s.activeId }));
+  },
+
+  /** Closes the Browser tab and its pages (like closing a browser window). */
+  closeBrowser() {
+    for (const p of getBrowser().pages) void browser.close(p.id).catch(() => {});
+    store.set((s) => ({
+      ...s,
+      browserOpen: false,
+      activeId: s.activeId === BROWSER_TAB ? (s.tabs.at(-1)?.id ?? null) : s.activeId,
+    }));
+  },
 
   closeSettings() {
     store.set((s) => ({
@@ -727,3 +753,16 @@ export const chat = {
     sendMessage({ type: 'history.search', query });
   },
 };
+
+// The Browser tab follows the browser: Harv opening a page puts it in the tab bar, and pages the
+// app still holds (a dashboard reload) bring it back. Closing its last page closes the tab.
+const inApp = isTauri();
+let wasBrowsing = false;
+onShowBrowser((activate) => chat.openBrowser(activate));
+subscribeBrowser(() => {
+  const has = getBrowser().pages.length > 0;
+  const open = store.get().browserOpen;
+  if (has && !open) store.set((s) => ({ ...s, browserOpen: true }));
+  if (!has && open && wasBrowsing) chat.closeBrowser();
+  wasBrowsing = has;
+});

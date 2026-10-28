@@ -148,6 +148,7 @@ export function harvServer(
   schedules?: ScheduleTools,
   terminal?: TerminalTools,
   images?: ImageTools,
+  browser?: BrowserTools,
 ) {
   return createSdkMcpServer({
     name: 'harv',
@@ -314,6 +315,76 @@ export function harvServer(
             ),
           ]
         : []),
+      ...(browser ? browserTools(browser) : []),
     ],
   });
+}
+
+/** Harv's browser (tools/harvBrowser.ts): one per computer, in the app, shared by every chat; the user watches it in its tab. */
+export interface BrowserTools {
+  open(target: string, sameTab?: boolean): Promise<string>;
+  snapshot(): Promise<string>;
+  click(ref: number): Promise<string>;
+  type(ref: number, value: string, submit: boolean): Promise<string>;
+  press(key: string): Promise<string>;
+  scroll(direction: 'up' | 'down'): Promise<string>;
+  back(): Promise<string>;
+}
+
+/** A browser error as the tool's answer (the app closed, the page changed…). */
+const browsing = async (action: () => Promise<string>) => {
+  try {
+    return text(await action());
+  } catch (err) {
+    return { ...text(`Browser: ${(err as Error).message}`), isError: true };
+  }
+};
+
+function browserTools(browser: BrowserTools) {
+  return [
+    tool(
+      'browser_open',
+      "Open a web page, a local file (an HTML mockup, a PDF, a picture: give its full path) or a Google search in Harv's browser: the shared browser in the Harv app (its Browser tab), where the user can watch and use it too. Opens a new page tab unless same_tab. Returns the page read like browser_snapshot. Use it when the user asks to open, show or check something in the browser, or when you need a real page (one that needs scripts or a login the user made there); for plain reading WebFetch/WebSearch are cheaper.",
+      {
+        url: z.string().min(1).describe('A web address, a full file path, or words to search for'),
+        same_tab: z.boolean().optional().describe('Load it in the page that is showing instead of a new page tab'),
+      },
+      async ({ url, same_tab }) => browsing(() => browser.open(url, same_tab === true)),
+    ),
+    tool(
+      'browser_snapshot',
+      "Read the browser's current page: its title, address, the elements you can click or type into (as numbered refs) and its text. Take a new one after the page changes; older refs stop working.",
+      {},
+      async () => browsing(() => browser.snapshot()),
+    ),
+    tool(
+      'browser_click',
+      'Click an element from the latest snapshot by its ref number.',
+      { ref: z.number().int().min(1).describe('The element’s number from browser_snapshot') },
+      async ({ ref }) => browsing(() => browser.click(ref)),
+    ),
+    tool(
+      'browser_type',
+      'Type into a field from the latest snapshot (replacing what is in it). submit: true presses Enter / sends the form afterwards, e.g. for a search box.',
+      {
+        ref: z.number().int().min(1).describe('The field’s number from browser_snapshot'),
+        text: z.string().describe('What to type'),
+        submit: z.boolean().optional().describe('Press Enter afterwards'),
+      },
+      async ({ ref, text: value, submit }) => browsing(() => browser.type(ref, value, submit === true)),
+    ),
+    tool(
+      'browser_press',
+      'Press a key on the page’s focused element: Enter, Escape, Tab, ArrowDown, ArrowUp, PageDown, PageUp, Space, Backspace.',
+      { key: z.string().min(1).describe('A key name like Escape, Tab, ArrowDown, Enter') },
+      async ({ key }) => browsing(() => browser.press(key)),
+    ),
+    tool(
+      'browser_scroll',
+      'Scroll the browser’s page up or down by most of a screen.',
+      { direction: z.enum(['up', 'down']) },
+      async ({ direction }) => browsing(() => browser.scroll(direction)),
+    ),
+    tool('browser_back', 'Go back to the previous page in the browser, and read it.', {}, async () => browsing(() => browser.back())),
+  ];
 }

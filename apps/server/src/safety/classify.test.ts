@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
+import { setBrowserRefs } from '../tools/browserRefs.ts';
 
 // Harv runs on Windows and Linux (docs/PLAN.md §6m): OS-specific cases run on their own OS.
 const onWindows = process.platform === 'win32';
@@ -982,5 +983,47 @@ describe('reasons name what a command does, not a flag (logged 2026-10-26: `java
     ['taskkill /IM notepad.exe', /Stops/],
   ])('still: %s', (command, right) => {
     expect(classifyCommand(command).reason).toMatch(right);
+  });
+});
+
+describe('Harv’s browser (looking is free; committing or sending is judged)', () => {
+  const page = (elements: Parameters<typeof setBrowserRefs>[1]) => setBrowserRefs('https://example.com/form', elements);
+  const el = (ref: number, text: string, extra: Partial<Parameters<typeof setBrowserRefs>[1][number]> = {}) => ({
+    ref,
+    tag: 'button',
+    role: '',
+    text,
+    type: '',
+    name: '',
+    formSubmit: '',
+    ...extra,
+  });
+
+  it('opening, reading and scrolling are green', () => {
+    expect(classify('mcp__harv__browser_open', { url: 'design/mockup.html' }).tier).toBe('green');
+    expect(classify('mcp__harv__browser_snapshot', {}).tier).toBe('green');
+    expect(classify('mcp__harv__browser_scroll', { direction: 'down' }).tier).toBe('green');
+  });
+
+  it('a button that buys, posts or deletes is red; a plain link is green', () => {
+    page([el(1, 'Buy now'), el(2, 'Next page', { tag: 'a' }), el(3, 'Delete account')]);
+    expect(classify('mcp__harv__browser_click', { ref: 1 }).tier).toBe('red');
+    expect(classify('mcp__harv__browser_click', { ref: 2 }).tier).toBe('green');
+    expect(classify('mcp__harv__browser_click', { ref: 3 }).tier).toBe('red');
+    expect(classify('mcp__harv__browser_click', { ref: 99 }).tier).toBe('red');
+  });
+
+  it('password fields are red; a search is green', () => {
+    page([el(1, '', { tag: 'input', type: 'password' }), el(2, 'Search', { tag: 'input', type: 'search' })]);
+    expect(classify('mcp__harv__browser_type', { ref: 1, text: 'x' }).tier).toBe('red');
+    expect(classify('mcp__harv__browser_type', { ref: 2, text: 'weather', submit: true }).tier).toBe('green');
+  });
+
+  it('Send / Post count as sending (asked about unless the user asked to send)', () => {
+    page([el(1, 'Send'), el(2, 'Next'), el(3, '', { tag: 'textarea' }), el(4, 'Search', { tag: 'input', type: 'search' })]);
+    expect(isSending('mcp__harv__browser_click', { ref: 1 })).toBe(true);
+    expect(isSending('mcp__harv__browser_click', { ref: 2 })).toBe(false);
+    expect(isSending('mcp__harv__browser_type', { ref: 3, text: 'hi', submit: true })).toBe(true);
+    expect(isSending('mcp__harv__browser_type', { ref: 4, text: 'hi', submit: true })).toBe(false);
   });
 });

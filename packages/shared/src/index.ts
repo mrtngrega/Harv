@@ -18,6 +18,7 @@ export type * from './safety.ts';
 export type * from './usage.ts';
 export * from './settings.ts';
 export * from './tools.ts';
+export * from './browser.ts';
 export type * from './schedule.ts';
 export type * from './projects.ts';
 export type * from './watchdog.ts';
@@ -27,6 +28,7 @@ import type { ActionEntry, ApprovalRequest, SafetyClientMessage, SafetyServerMes
 import type { PlanUsage, UsageServerMessage } from './usage.ts';
 import type { HarvSettings, SettingsClientMessage, SettingsServerMessage } from './settings.ts';
 import type { ToolClientMessage, ToolServerMessage, UiState } from './tools.ts';
+import type { BrowserClientMessage, BrowserServerMessage } from './browser.ts';
 import type { Project, ProjectClientMessage, ProjectServerMessage } from './projects.ts';
 import type { Catalog, ChatClientMessage, ChatServerMessage, ChatSnapshot, HistoryItem } from './chat.ts';
 import type { WatchdogServerMessage } from './watchdog.ts';
@@ -79,7 +81,8 @@ export type ServerMessage =
   | ProjectServerMessage
   | WatchdogServerMessage
   | SyncServerMessage
-  | ScheduleServerMessage;
+  | ScheduleServerMessage
+  | BrowserServerMessage;
 
 /** Messages the dashboard sends to the server over /ws. */
 export type ClientMessage =
@@ -90,4 +93,5 @@ export type ClientMessage =
   | ToolClientMessage
   | ProjectClientMessage
   | SyncClientMessage
-  | ScheduleClientMessage;
+  | ScheduleClientMessage
+  | BrowserClientMessage;

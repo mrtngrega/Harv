@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Tier } from '@harv/shared';
 import { IS_WINDOWS } from '../platform.ts';
 import { fullPath, isHarvData, isInside, isProgramDir, isSystemDir, isTempDir, loadSettings, WORKSPACE } from './paths.ts';
+import { BROWSER_TOOLS, browserSends, classifyBrowser } from './browser.ts';
 
 /** How the OS folders are named in reasons. */
 const SYSTEM_FOLDER = IS_WINDOWS ? 'the Windows folder' : "the system's own folders";
@@ -256,6 +257,11 @@ export function classify(tool: string, input: Record<string, unknown>, ctx: Clas
     return classifyCommand(command, str(input, 'description'), { ...ctx, shell: 'bash' });
   }
 
+  if (BROWSER_TOOLS.includes(tool)) {
+    const v = classifyBrowser(tool, input);
+    return verdict(v.tier, v.reason, v.summary);
+  }
+
   if (tool.startsWith('mcp__')) return classifyMcp(tool);
 
   if (SCHEDULER_TOOLS.includes(tool))
@@ -344,6 +350,7 @@ function mentions(message: string, recipient: string, service: string): boolean 
  * first only when they didn't ask for it.
  */
 export function isSending(tool: string, input: Record<string, unknown>): boolean {
+  if (BROWSER_TOOLS.includes(tool)) return browserSends(tool, input);
   if (tool.startsWith('mcp__') && !SHELL_TOOLS.includes(tool)) {
     const [, server = '', ...rest] = tool.split('__');
     return !PRIVATE_MCP.test(server) && server !== 'harv' && MCP_SENDS.test(rest.join('__'));

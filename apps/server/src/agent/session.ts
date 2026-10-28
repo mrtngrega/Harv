@@ -4,7 +4,7 @@ import type { ChatServerMessage, EffortLevel, Project, SlashCommandInfo } from '
 import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
 import type { ContentBlockParam } from './attachments.ts';
-import type { Delegate, ImageTools, ProjectTools, ScheduleTools, TerminalTools } from './chatTools.ts';
+import type { BrowserTools, Delegate, ImageTools, ProjectTools, ScheduleTools, TerminalTools } from './chatTools.ts';
 import { toCommandInfo } from './commands.ts';
 import { describeTool, MEMORY_TOOLS } from './guard.ts';
 import { memoryChanges, memorySnapshot } from './memory.ts';
@@ -115,7 +115,14 @@ export class ChatSession {
     gate: SafetyGate,
     start: SessionStart = {},
     delegate?: Delegate,
-    mode: { project?: Project; projects?: ProjectTools; schedules?: ScheduleTools; terminal?: TerminalTools; images?: ImageTools } = {},
+    mode: {
+      project?: Project;
+      projects?: ProjectTools;
+      schedules?: ScheduleTools;
+      terminal?: TerminalTools;
+      images?: ImageTools;
+      browser?: BrowserTools;
+    } = {},
   ) {
     this.resume = start.resume;
     this.chainEnd = start.resumeAt ?? start.chainEnd;

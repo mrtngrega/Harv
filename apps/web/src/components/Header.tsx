@@ -1,7 +1,7 @@
 import { useEffect, useState, type MouseEvent } from 'react';
 import { ModelSwitcher } from './ModelSwitcher.tsx';
 import { Icon } from './tools/explorer/icons.tsx';
-import { chat, SETTINGS_TAB, useChat } from '../lib/chatStore.ts';
+import { BROWSER_TAB, chat, SETTINGS_TAB, useChat } from '../lib/chatStore.ts';
 import { desktop, inApp } from '../lib/desktop.ts';
 
 /** In the app, empty parts of the header (and the page edge) move the window; a double click maximizes. */
@@ -73,6 +73,18 @@ export function Header() {
       <div className="flex-1" />
       <ModelSwitcher />
       <div className="text-muted tabular-nums">{clock}</div>
+      {inApp && (
+        <button
+          type="button"
+          onClick={() => chat.openBrowser()}
+          aria-label="Browser"
+          aria-pressed={activeId === BROWSER_TAB}
+          title="Browser (one for every chat; Harv can use it too)"
+          className={`grid size-9 cursor-pointer place-items-center rounded-lg text-[17px] hover:bg-white/5 hover:text-ink ${activeId === BROWSER_TAB ? 'text-accent' : 'text-muted'}`}
+        >
+          ◍
+        </button>
+      )}
       <button
         type="button"
         onClick={chat.openSettings}

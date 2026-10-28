@@ -11,6 +11,7 @@ import type { ChatStore } from '../store/chats.ts';
 import {
   harvServer,
   recentChatsContext,
+  type BrowserTools,
   type Delegate,
   type ProjectTools,
   type ImageTools,
@@ -59,6 +60,8 @@ export interface ChatContext {
   terminal?: TerminalTools;
   /** Harv's generate_image tool. */
   images?: ImageTools;
+  /** Harv's browser_* tools. */
+  browser?: BrowserTools;
 }
 
 /** The part about the user's other chats, shared by both kinds of chat. */
@@ -279,7 +282,7 @@ export function buildOptions(
             strictMcpConfig: true,
           }),
     mcpServers: chat
-      ? { harv: harvServer(chat.store, chat.tabId, chat.delegate, chat.projects, chat.schedules, chat.terminal, chat.images) }
+      ? { harv: harvServer(chat.store, chat.tabId, chat.delegate, chat.projects, chat.schedules, chat.terminal, chat.images, chat.browser) }
       : {},
     permissionMode: planning ? 'plan' : 'default',
     // Checkpoints of the files Claude edits, so a rewind can put them back.

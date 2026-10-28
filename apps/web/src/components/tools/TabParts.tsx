@@ -5,21 +5,24 @@ import { chat, useChat } from '../../lib/chatStore.ts';
 import { useProjects } from '../../lib/useHarvSocket.ts';
 import { Icon } from './explorer/icons.tsx';
 
-export const TOOL_ICONS: Record<ChatView | 'settings', ReactNode> = {
+export const TOOL_ICONS: Record<ChatView | 'settings' | 'browser', ReactNode> = {
   chat: '≡',
   terminal: '›_',
   files: '▤',
   settings: <Icon name="gear" size={12} />,
+  browser: '◍',
 };
 
-/** A non-chat tab in the chat bar (Settings). */
+/** A non-chat tab in the chat bar (Settings, the Browser). */
 export function SpecialTab({
+  id,
   icon,
   title,
   active,
   onSelect,
   onClose,
 }: {
+  id: string;
   icon: ReactNode;
   title: string;
   active: boolean;
@@ -28,7 +31,7 @@ export function SpecialTab({
 }) {
   return (
     <div
-      data-tab="settings"
+      data-tab={id}
       className={`animate-fade-in flex flex-none items-center gap-0.5 rounded-t-[10px] border border-b-0 ${
         active ? 'border-[rgb(220_232_245/0.18)] bg-white/10' : 'border-transparent'
       }`}

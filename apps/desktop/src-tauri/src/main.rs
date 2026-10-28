@@ -4,6 +4,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod browser;
 mod harv;
 mod notify;
 mod paths;
@@ -188,6 +189,7 @@ fn main() {
                 .build(),
         )
         .manage(update::Updates::default())
+        .manage(browser::Browser::default())
         .invoke_handler(tauri::generate_handler![
             window_action,
             set_status,
@@ -197,7 +199,9 @@ fn main() {
             check_updates,
             apply_update,
             pick_paths,
-            set_see_through
+            set_see_through,
+            browser::browser,
+            browser::browser_state
         ])
         .setup(move |app| {
             let handle = app.handle();

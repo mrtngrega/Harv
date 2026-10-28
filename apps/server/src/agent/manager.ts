@@ -26,7 +26,15 @@ import type { UsageMeter } from '../usage/meter.ts';
 import { buildContent, cleanAttachments, deleteAttachments } from './attachments.ts';
 import { sideQuestion } from './btw.ts';
 import { commandName, hiddenReason } from './commands.ts';
-import { formatTranscript, type HandOff, type ProjectTools, type ImageTools, type ScheduleTools, type TerminalTools } from './chatTools.ts';
+import {
+  formatTranscript,
+  type HandOff,
+  type ProjectTools,
+  type BrowserTools,
+  type ImageTools,
+  type ScheduleTools,
+  type TerminalTools,
+} from './chatTools.ts';
 import { osPath, pathKey } from '../platform.ts';
 import { loadSettings, projectsDir } from '../settings.ts';
 import type { ProjectServerMessage, SharedUi } from '@harv/shared';
@@ -144,6 +152,8 @@ export class ChatManager {
   terminal?: TerminalTools;
   /** Pictures from Gemini (set by the server). */
   images?: ImageTools;
+  /** The shared browser in the app (set by the server). */
+  browser?: BrowserTools;
 
   constructor(
     private store: ChatStore,
@@ -426,6 +436,7 @@ export class ChatManager {
         schedules: this.schedules,
         terminal: this.terminal,
         images: this.images,
+        browser: this.browser,
       },
     );
     this.sessions.set(tabId, session);
