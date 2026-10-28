@@ -17,6 +17,8 @@ export interface BrowserState {
   active: number | null;
   /** Harv used it moments ago, until this time: the view says so. */
   busyUntil: number;
+  /** The app has said what it holds (until then, no pages doesn't mean none). */
+  known: boolean;
 }
 
 /** In the app (asked here, not from desktop.ts: that would import the chat store back, a cycle). */
@@ -24,7 +26,7 @@ const inApp = isTauri();
 /** The page a new browser starts on. */
 export const BROWSER_START = 'https://www.google.com';
 
-const store = createStore<BrowserState>({ pages: [], active: null, busyUntil: 0 });
+const store = createStore<BrowserState>({ pages: [], active: null, busyUntil: 0, known: false });
 export const useBrowser = store.use;
 
 type Args = { id?: number; url?: string; script?: string; x?: number; y?: number; w?: number; h?: number; visible?: boolean };
@@ -68,10 +70,11 @@ if (inApp) {
   // pages stayed over the chat (the user's report, 2026-10-28).
   apply();
   void listen<{ pages: BrowserPage[]; active: number | null }>('browser-state', (e) => {
-    store.set((s) => ({ ...s, pages: e.payload.pages, active: e.payload.active }));
-  });
-  // Pages the app still holds after the dashboard reloaded.
-  void invoke('browser_state').catch(() => {});
+    store.set((s) => ({ ...s, pages: e.payload.pages, active: e.payload.active, known: true }));
+  })
+    // Then the pages the app still holds (after a reload): asked once listening, or the answer is lost.
+    .then(() => invoke('browser_state'))
+    .catch(() => {});
 
   // This dashboard drives the browser for Harv: say so on every (re)connection.
   let connected = false;

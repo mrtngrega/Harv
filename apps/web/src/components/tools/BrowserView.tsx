@@ -11,7 +11,8 @@ import { fileProps } from '../../lib/preview.ts';
  * says when Harv is at it. In a plain browser (not the app) there's no browser.
  */
 export function BrowserView() {
-  const { pages, active, busyUntil } = useBrowser();
+  const { pages, active, busyUntil, known } = useBrowser();
+  const started = useRef(false);
   const page = pages.find((p) => p.id === active) ?? null;
   const area = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<string | null>(null);
@@ -34,12 +35,13 @@ export function BrowserView() {
     };
   }, []);
 
-  // Picking Browser with no page open starts one.
+  // Picking Browser with no page open starts one, once the app has said it has none (a reload
+  // opened a page each time before). Closing the last page later leaves it empty, with +.
   useEffect(() => {
-    if (inApp && !pages.length) void browser.open(BROWSER_START).catch(() => {});
-    // Only when the view opens: closing the last page leaves it empty, with +.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!inApp || !known || pages.length || started.current) return;
+    started.current = true;
+    void browser.open(BROWSER_START).catch(() => {});
+  }, [known, pages.length]);
 
   // "Harv is using the browser" stays a few seconds after its last action.
   useEffect(() => {
