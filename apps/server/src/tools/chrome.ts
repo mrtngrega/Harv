@@ -121,6 +121,17 @@ export class HarvChrome {
     return this.proc.exitCode === null && !this.proc.killed;
   }
 
+  /**
+   * A plain Chrome window on `profile`, without the debugging port: Google refuses to sign in a
+   * browser it can see is remote-controlled ("This browser or app may not be secure").
+   */
+  static openWindow(profile: string, url: string): ChildProcess {
+    const chrome = findChrome();
+    if (!chrome) throw new Error('Google Chrome isn’t installed (or set HARV_CHROME_PATH).');
+    mkdirSync(profile, { recursive: true });
+    return spawn(chrome, [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', url], { stdio: 'ignore' });
+  }
+
   /** Starts Chrome on `profile` (headless, or a window the user sees) and waits for its debugging port. */
   static async launch(profile: string, opts: { headless: boolean; url?: string }): Promise<HarvChrome> {
     const chrome = findChrome();

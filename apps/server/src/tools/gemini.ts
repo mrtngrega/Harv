@@ -1,3 +1,4 @@
+import type { ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { HARV_HOME } from '../paths.ts';
@@ -65,6 +66,8 @@ const ANSWER_TEXT = `(${LAST_ANSWER}?.querySelector('message-content')?.innerTex
  */
 export class GeminiImages {
   private chrome: HarvChrome | null = null;
+  /** The plain window the user signs in with. */
+  private signIn: ChildProcess | null = null;
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(
@@ -72,17 +75,23 @@ export class GeminiImages {
     private outDir = IMAGES_DIR,
   ) {}
 
-  /** Opens Gemini in a Chrome window on Harv's profile, for the user to sign in (or check the account). */
+  /**
+   * Opens Gemini in a plain Chrome window on Harv's profile, for the user to sign in (or check
+   * the account). Pictures wait until it's closed: one profile can't be open twice.
+   */
   async openSignIn(): Promise<void> {
-    if (this.chrome?.running && !this.chrome.headless) {
-      await this.chrome.open(GEMINI_URL).then((p) => p.close());
+    // Already open: Chrome hands the URL to that window (a new tab there).
+    if (this.signIn?.exitCode === null) {
+      HarvChrome.openWindow(this.profile, GEMINI_URL);
       return;
     }
+    await this.queue;
     this.chrome?.quit();
-    const chrome = await HarvChrome.launch(this.profile, { headless: false, url: GEMINI_URL });
-    this.chrome = chrome;
-    chrome.onExit(() => {
-      if (this.chrome === chrome) this.chrome = null;
+    this.chrome = null;
+    const proc = HarvChrome.openWindow(this.profile, GEMINI_URL);
+    this.signIn = proc;
+    proc.once('exit', () => {
+      if (this.signIn === proc) this.signIn = null;
     });
   }
 
@@ -95,10 +104,11 @@ export class GeminiImages {
 
   private async run(prompt: string, inputs: string[]): Promise<{ paths: string[]; text: string }> {
     const files = inputs.map(checkInput);
-    // The sign-in window may still be open: use it (a profile can't be opened twice).
-    const own = !this.chrome?.running;
-    if (own) this.chrome = await HarvChrome.launch(this.profile, { headless: true });
-    const chrome = this.chrome!;
+    if (this.signIn?.exitCode === null) {
+      throw new GeminiProblem('The Gemini sign-in window is still open. The user closes it (after signing in), then asks again.');
+    }
+    const chrome = await HarvChrome.launch(this.profile, { headless: true });
+    this.chrome = chrome;
     const page = await chrome.open(GEMINI_URL);
     try {
       await page.send('Network.enable');
@@ -175,10 +185,8 @@ export class GeminiImages {
       return { paths, text };
     } finally {
       page.close();
-      if (own) {
-        chrome.quit();
-        if (this.chrome === chrome) this.chrome = null;
-      }
+      chrome.quit();
+      if (this.chrome === chrome) this.chrome = null;
     }
   }
 
