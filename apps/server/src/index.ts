@@ -212,6 +212,21 @@ const scheduler = new Scheduler(
   loadSettings().deviceName || hostname(),
 );
 chats.schedules = scheduler;
+// Harv's terminal_run / terminal_read: the chat's own terminal, shown in the dashboard while Harv uses it.
+chats.terminal = {
+  async run(tabId, command, opts) {
+    broadcast({ type: 'term.show', tabId });
+    const cwd = opts.cwd ? (cleanPath(opts.cwd) ?? undefined) : undefined;
+    const r = await terminals.run(terminalId(tabId), command, { ...opts, cwd });
+    const state = r.exited
+      ? 'The shell has exited (a new one starts on the next terminal_run).'
+      : r.running
+        ? 'Still printing when the wait ended: it keeps running in the terminal; terminal_read shows more later.'
+        : 'The output went quiet (finished, or waiting for input).';
+    return `${r.output || '(no output)'}\n\n[${state}]`;
+  },
+  read: (tabId, lines) => terminals.read(terminalId(tabId), lines) ?? "This chat's terminal isn't open; terminal_run starts it.",
+};
 // "Reopen tabs" off: Harv starts with no tabs (the chats stay in history).
 if (!loadSettings().restoreTabs) {
   for (const c of store.openChats()) store.setOpen(c.id, false);

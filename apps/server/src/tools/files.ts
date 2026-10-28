@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { IS_WINDOWS, osPath } from '../platform.ts';
 import type { FileEntry, FilePlaces, FolderListing, PathSuggestion } from '@harv/shared';
@@ -33,8 +33,54 @@ export function cleanPath(p: unknown): string | null {
   return normal;
 }
 
+/**
+ * Linux: the places in Dolphin's sidebar (KDE keeps them in user-places.xbel), in the user's order,
+ * so Harv's explorer shows the same list. Only local folders that exist, plus the Trash; null when
+ * there's no such file (another desktop), so the usual list is used.
+ */
+export function kdePlaces(xml: string, home: string): Pick<FilePlaces, 'places' | 'trash'> | null {
+  const out: FilePlaces['places'] = [];
+  let trash: string | undefined;
+  for (const m of xml.matchAll(/<bookmark\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/bookmark>/g)) {
+    const [, href = '', body = ''] = m;
+    if (/<IsHidden>true<\/IsHidden>/.test(body)) continue;
+    const title = /<title>([^<]*)<\/title>/
+      .exec(body)?.[1]
+      ?.trim()
+      .replace(/&(amp|lt|gt|quot|apos);/g, (_, e: string) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" })[e]!);
+    if (href === 'trash:/') {
+      trash = osPath.join(process.env.XDG_DATA_HOME || osPath.join(home, '.local', 'share'), 'Trash', 'files');
+      continue;
+    }
+    if (!href.startsWith('file://')) continue;
+    let path: string;
+    try {
+      path = decodeURIComponent(href.slice('file://'.length));
+    } catch {
+      continue;
+    }
+    if (!existsSync(path) || out.some((p) => p.path === path)) continue;
+    out.push({ name: path === home ? 'Home' : title || osPath.basename(path), path });
+  }
+  if (!out.length) return null;
+  // Home first: the explorer's Home button and breadcrumb start from it.
+  const homeAt = out.findIndex((p) => p.path === home);
+  if (homeAt > 0) out.unshift(...out.splice(homeAt, 1));
+  else if (homeAt < 0) out.unshift({ name: 'Home', path: home });
+  return { places: out, ...(trash ? { trash } : {}) };
+}
+
 export function places(): FilePlaces {
   const home = homedir();
+  if (!IS_WINDOWS) {
+    try {
+      const xbel = osPath.join(process.env.XDG_DATA_HOME || osPath.join(home, '.local', 'share'), 'user-places.xbel');
+      const kde = existsSync(xbel) ? kdePlaces(readFileSync(xbel, 'utf8'), home) : null;
+      if (kde) return { ...kde, drives: ['/'] };
+    } catch {
+      // The usual list below.
+    }
+  }
   const named = ['Desktop', 'Documents', 'Downloads', 'Pictures', 'Music', 'Videos'].map((name) => ({
     name,
     path: osPath.join(home, name),

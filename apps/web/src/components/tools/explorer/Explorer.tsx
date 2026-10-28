@@ -4,7 +4,7 @@ import { chat, getChatState } from '../../../lib/chatStore.ts';
 import { addReference } from '../../../lib/drafts.ts';
 import { dateGroup } from '../../../lib/format.ts';
 import { explorerPaths, saveLayoutSoon } from '../../../lib/layout.ts';
-import { useProjects, useSettings } from '../../../lib/useHarvSocket.ts';
+import { getPlatform, useProjects, useSettings } from '../../../lib/useHarvSocket.ts';
 import { clipboard, files } from './api.ts';
 import { FileIcon, iconKind, isImage, typeName } from './fileTypes.tsx';
 import { bytes as formatSize, Icon } from './icons.tsx';
@@ -27,10 +27,28 @@ type View = 'details' | 'icons' | 'list';
 type SortKey = 'name' | 'mtime' | 'type' | 'size';
 const DRAG_TYPE = 'application/x-harv-paths';
 type Sort = { key: SortKey; desc: boolean };
-/** Newest first, folders and files together, like Windows shows Downloads. */
-const DEFAULT_SORT: Sort = { key: 'mtime', desc: true };
+/**
+ * On Linux the explorer is laid out like Dolphin, the notebook's file manager (the user's wish 2026-10-28):
+ * Dolphin's places, Home as a real folder, name order with folders first, icons. On Windows, like Explorer.
+ */
+const isLinux = () => getPlatform() !== 'windows';
+/** Windows: newest first, folders and files together, like it shows Downloads. Linux: by name, folders first, like Dolphin. */
+const defaultSort = (): Sort => (isLinux() ? { key: 'name', desc: false } : { key: 'mtime', desc: true });
 /** Date and size start with the biggest/newest on top, like Explorer's column headers. */
 const startsDesc = (key: SortKey) => key === 'mtime' || key === 'size';
+
+/** Dolphin's status bar: "3 folders, 12 files (4.5 MB)". */
+function dolphinCount(entries: FileEntry[]): string {
+  const folders = entries.filter((e) => e.dir).length;
+  const fileList = entries.filter((e) => !e.dir);
+  const parts = [
+    folders ? `${folders} folder${folders === 1 ? '' : 's'}` : '',
+    fileList.length ? `${fileList.length} file${fileList.length === 1 ? '' : 's'}` : '',
+  ].filter(Boolean);
+  if (!parts.length) return 'Folder is empty';
+  const size = fileList.reduce((s, e) => s + (e.size ?? 0), 0);
+  return `${parts.join(', ')}${fileList.length ? ` (${formatSize(size)})` : ''}`;
+}
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -64,7 +82,9 @@ export function Explorer({ id }: { id: string }) {
   const [toast, setToast] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
-  const [view, setView] = useState<View>(() => load('harv.explorer.view', 'details'));
+  const linux = isLinux();
+  const home = linux ? places?.places[0]?.path : undefined;
+  const [view, setView] = useState<View>(() => load('harv.explorer.view', isLinux() ? 'icons' : 'details'));
   // Like Windows, each folder remembers its own sort order.
   const [sorts, setSorts] = useState<Record<string, Sort>>(() => load('harv.explorer.sorts', {}));
   const [showHidden, setShowHidden] = useState<boolean>(() => load('harv.explorer.hidden', false));
@@ -80,7 +100,7 @@ export function Explorer({ id }: { id: string }) {
   const root = useRef<HTMLDivElement>(null);
   const searchBox = useRef<HTMLInputElement>(null);
   const isFolder = loc !== HOME && loc !== THIS_PC;
-  const sort = sorts[loc.toLowerCase()] ?? DEFAULT_SORT;
+  const sort = sorts[loc.toLowerCase()] ?? defaultSort();
   const setSort = (next: Sort) => {
     const all = { ...sorts, [loc.toLowerCase()]: next };
     setSorts(all);
@@ -120,7 +140,11 @@ export function Explorer({ id }: { id: string }) {
   );
 
   useEffect(() => {
-    void files.places().then(setPlaces);
+    void files.places().then((p) => {
+      setPlaces(p);
+      // Linux opens in the home folder, like Dolphin (Windows' Home page is Recent Files there).
+      if (isLinux() && p.places[0]) setLoc((l) => (l === HOME ? p.places[0]!.path : l));
+    });
     void files.drives().then(setDrives);
   }, []);
 
@@ -171,6 +195,8 @@ export function Explorer({ id }: { id: string }) {
     go(next, false);
   };
   const goUp = () => {
+    // Dolphin has no "Computer" above the root.
+    if (linux) return isFolder && listing?.parent ? go(listing.parent) : undefined;
     if (!isFolder) return go(THIS_PC);
     go(listing?.parent ?? THIS_PC);
   };
@@ -344,6 +370,8 @@ export function Explorer({ id }: { id: string }) {
     if (ctrl && k.toLowerCase() === 'v') return (handled(), void paste());
     if (ctrl && e.shiftKey && k.toLowerCase() === 'n') return (handled(), void newItem('newFolder'));
     if (ctrl && k.toLowerCase() === 'f') return (handled(), searchBox.current?.focus());
+    // Dolphin's Ctrl+H: show or hide hidden files.
+    if (linux && ctrl && k.toLowerCase() === 'h') return (handled(), setShowHidden(!showHidden), save('harv.explorer.hidden', !showHidden));
     // Typing a letter jumps to the next item starting with it.
     if (k.length === 1 && !ctrl && !e.altKey) {
       const current = entries.findIndex((x) => x.path === anchor);
@@ -410,12 +438,21 @@ export function Explorer({ id }: { id: string }) {
   // ---- Menus ----
 
   const viewItems = (): MenuItem[] => [
-    { label: 'Large icons', checked: view === 'icons', run: () => (setView('icons'), save('harv.explorer.view', 'icons')) },
-    { label: 'List', checked: view === 'list', run: () => (setView('list'), save('harv.explorer.view', 'list')) },
+    {
+      label: linux ? 'Icons' : 'Large icons',
+      checked: view === 'icons',
+      run: () => (setView('icons'), save('harv.explorer.view', 'icons')),
+    },
+    { label: linux ? 'Compact' : 'List', checked: view === 'list', run: () => (setView('list'), save('harv.explorer.view', 'list')) },
     { label: 'Details', checked: view === 'details', run: () => (setView('details'), save('harv.explorer.view', 'details')) },
     'sep',
     { label: 'Details pane', checked: showPane, run: () => (setShowPane(!showPane), save('harv.explorer.pane', !showPane)) },
-    { label: 'Hidden items', checked: showHidden, run: () => (setShowHidden(!showHidden), save('harv.explorer.hidden', !showHidden)) },
+    {
+      label: linux ? 'Show hidden files' : 'Hidden items',
+      ...(linux ? { hint: 'Ctrl+H' } : {}),
+      checked: showHidden,
+      run: () => (setShowHidden(!showHidden), save('harv.explorer.hidden', !showHidden)),
+    },
   ];
   const sortItems = (): MenuItem[] => {
     const by = (key: SortKey, label: string): MenuItem => ({
@@ -434,7 +471,7 @@ export function Explorer({ id }: { id: string }) {
     });
     return [
       by('name', 'Name'),
-      by('mtime', 'Date modified'),
+      by('mtime', linux ? 'Modified' : 'Date modified'),
       by('type', 'Type'),
       by('size', 'Size'),
       'sep',
@@ -494,7 +531,7 @@ export function Explorer({ id }: { id: string }) {
       { label: 'Copy as path', run: () => copyPath(paths) },
       'sep',
       { label: 'Rename', hint: 'F2', disabled: !single, run: () => setRenaming(entry.path) },
-      { label: 'Delete', hint: 'Del', icon: <Icon name="delete" size={13} />, run: () => void remove(paths) },
+      { label: linux ? 'Move to Trash' : 'Delete', hint: 'Del', icon: <Icon name="delete" size={13} />, run: () => void remove(paths) },
       { label: 'Delete permanently', hint: 'Shift+Del', danger: true, run: () => void remove(paths, true) },
       'sep',
       {
@@ -602,11 +639,14 @@ export function Explorer({ id }: { id: string }) {
     </button>
   );
 
+  const navHeading = 'm-0 mt-2 px-2 pb-0.5 text-[10px] font-normal tracking-[2px] text-faint uppercase first:mt-0';
   const tool =
     'flex size-8 flex-none cursor-pointer items-center justify-center rounded-lg text-sm hover:bg-white/10 disabled:cursor-default disabled:opacity-30';
   const cmd =
     'flex min-h-8 cursor-pointer items-center gap-1.5 rounded-lg px-2 text-xs hover:bg-white/10 disabled:cursor-default disabled:opacity-30';
   const one = selectedEntries.length === 1 ? selectedEntries[0]! : null;
+  /** Dolphin's status bar shows the free space on the folder's drive. */
+  const freeHere = isFolder ? drives.find((d) => d.path === driveOf(loc, drives))?.free : undefined;
 
   return (
     <div
@@ -720,13 +760,19 @@ export function Explorer({ id }: { id: string }) {
         <button type="button" className={tool} disabled={!fwd.length} onClick={goForward} aria-label="Forward (Alt+Right)">
           <Icon name="forward" />
         </button>
-        <button type="button" className={tool} disabled={loc === HOME || loc === THIS_PC} onClick={goUp} aria-label="Up (Alt+Up)">
+        <button
+          type="button"
+          className={tool}
+          disabled={loc === HOME || loc === THIS_PC || (linux && loc === '/')}
+          onClick={goUp}
+          aria-label="Up (Alt+Up)"
+        >
           <Icon name="up" />
         </button>
         <button type="button" className={tool} onClick={() => void refresh()} aria-label="Refresh (F5)">
           <Icon name="refresh" />
         </button>
-        <Breadcrumb loc={loc} drives={drives} onGo={(to) => go(to)} onDropOn={(dir, e) => void dropOn(dir, e)} />
+        <Breadcrumb loc={loc} drives={drives} home={home} onGo={(to) => go(to)} onDropOn={(dir, e) => void dropOn(dir, e)} />
         <form
           className="w-[230px] flex-none"
           onSubmit={(e) => {
@@ -761,12 +807,27 @@ export function Explorer({ id }: { id: string }) {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Navigation pane */}
         <nav aria-label="Navigation" className="flex w-[190px] flex-none flex-col gap-0.5 overflow-y-auto border-r border-line p-2">
-          {navItem('Home', HOME, 'folder')}
-          <div className="my-1 border-t border-line" />
-          {places?.places.slice(1).map((p) => navItem(p.name, p.path, 'folder'))}
-          <div className="my-1 border-t border-line" />
-          {navItem(osWords().computer, THIS_PC, 'drive')}
-          {drives.map((d) => navItem(driveName(d), d.path, 'drive', true))}
+          {linux ? (
+            <>
+              {/* Dolphin's sidebar: its own places (Home first), then Recent and Devices. */}
+              <h3 className={navHeading}>Places</h3>
+              {places?.places.map((p) => navItem(p.name, p.path, 'folder'))}
+              {places?.trash && navItem('Trash', places.trash, 'folder')}
+              <h3 className={navHeading}>Recent</h3>
+              {navItem('Recent Files', HOME, 'folder')}
+              <h3 className={navHeading}>Devices</h3>
+              {drives.map((d) => navItem(driveName(d), d.path, 'drive'))}
+            </>
+          ) : (
+            <>
+              {navItem('Home', HOME, 'folder')}
+              <div className="my-1 border-t border-line" />
+              {places?.places.slice(1).map((p) => navItem(p.name, p.path, 'folder'))}
+              <div className="my-1 border-t border-line" />
+              {navItem(osWords().computer, THIS_PC, 'drive')}
+              {drives.map((d) => navItem(driveName(d), d.path, 'drive', true))}
+            </>
+          )}
         </nav>
 
         {/* Items */}
@@ -788,7 +849,7 @@ export function Explorer({ id }: { id: string }) {
 
           {loc === HOME && !search && (
             <div className="flex flex-col gap-4 p-4 text-xs">
-              <section>
+              <section hidden={linux}>
                 <h3 className="m-0 mb-2 text-[11px] tracking-[2px] text-muted">QUICK ACCESS</h3>
                 <div className="flex flex-wrap gap-2">
                   {places?.places.slice(1).map((p) => (
@@ -809,7 +870,7 @@ export function Explorer({ id }: { id: string }) {
                 </div>
               </section>
               <section>
-                <h3 className="m-0 mb-2 text-[11px] tracking-[2px] text-muted">RECENT</h3>
+                <h3 className="m-0 mb-2 text-[11px] tracking-[2px] text-muted">{linux ? 'RECENT FILES' : 'RECENT'}</h3>
                 {recent.length === 0 ? (
                   <p className="m-0 text-muted">Nothing recent.</p>
                 ) : (
@@ -885,9 +946,19 @@ export function Explorer({ id }: { id: string }) {
               <div className="sticky top-0 z-10 flex border-b border-line bg-[rgb(16_24_34/0.92)] text-[11px] text-muted backdrop-blur">
                 {header('name', 'Name', 'flex-1 min-w-[160px]')}
                 {search && <span className="w-56 px-2 py-1.5">Folder</span>}
-                {header('mtime', 'Date modified', 'w-36')}
-                {header('type', 'Type', 'w-32')}
-                {header('size', 'Size', 'w-20 justify-end')}
+                {/* Dolphin's columns: Name, Size, Modified. Explorer's: Name, Date modified, Type, Size. */}
+                {linux ? (
+                  <>
+                    {header('size', 'Size', 'w-20 justify-end')}
+                    {header('mtime', 'Modified', 'w-36')}
+                  </>
+                ) : (
+                  <>
+                    {header('mtime', 'Date modified', 'w-36')}
+                    {header('type', 'Type', 'w-32')}
+                    {header('size', 'Size', 'w-20 justify-end')}
+                  </>
+                )}
               </div>
               {entries.map((entry, i) => (
                 <div key={entry.path} role="presentation" className="contents">
@@ -908,13 +979,24 @@ export function Explorer({ id }: { id: string }) {
                         {dirOf(entry.path)}
                       </span>
                     )}
-                    <span className="w-36 truncate px-2 text-[11px] text-faint">{when(entry.mtime)}</span>
-                    <span className="w-32 truncate px-2 text-faint" title={typeName(entry)}>
-                      {typeName(entry)}
-                    </span>
-                    <span className="w-20 px-2 text-right text-faint tabular-nums">
-                      {entry.size !== undefined ? formatSize(entry.size) : ''}
-                    </span>
+                    {linux ? (
+                      <>
+                        <span className="w-20 px-2 text-right text-faint tabular-nums">
+                          {entry.size !== undefined ? formatSize(entry.size) : ''}
+                        </span>
+                        <span className="w-36 truncate px-2 text-[11px] text-faint">{when(entry.mtime)}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="w-36 truncate px-2 text-[11px] text-faint">{when(entry.mtime)}</span>
+                        <span className="w-32 truncate px-2 text-faint" title={typeName(entry)}>
+                          {typeName(entry)}
+                        </span>
+                        <span className="w-20 px-2 text-right text-faint tabular-nums">
+                          {entry.size !== undefined ? formatSize(entry.size) : ''}
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
@@ -974,7 +1056,9 @@ export function Explorer({ id }: { id: string }) {
 
       {/* Status bar */}
       <div className="flex items-center gap-3 border-t border-line px-3 py-1 text-[11px] text-muted">
-        <span>{isFolder || search ? `${entries.length} item${entries.length === 1 ? '' : 's'}` : folderName}</span>
+        <span>
+          {isFolder || search ? (linux ? dolphinCount(entries) : `${entries.length} item${entries.length === 1 ? '' : 's'}`) : folderName}
+        </span>
         {selected.size > 0 && (
           <span>
             {selected.size} item{selected.size === 1 ? '' : 's'} selected
@@ -984,7 +1068,8 @@ export function Explorer({ id }: { id: string }) {
           </span>
         )}
         {toast && <span className="animate-fade-in min-w-0 flex-1 truncate text-ink">{toast}</span>}
-        <div className="ml-auto flex gap-0.5">
+        {linux && isFolder && freeHere !== undefined && <span className="ml-auto text-faint">{formatSize(freeHere)} free</span>}
+        <div className={`flex gap-0.5 ${linux && isFolder && freeHere !== undefined ? '' : 'ml-auto'}`}>
           <button
             type="button"
             aria-label="Details view"

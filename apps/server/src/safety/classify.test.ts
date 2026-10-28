@@ -145,6 +145,20 @@ describe('writing files', () => {
   });
 });
 
+describe("Harv's terminal (terminal_run is checked like any shell command)", () => {
+  const run = (command: string) => classify('mcp__harv__terminal_run', { command });
+  it('sorts its commands like Bash', () => {
+    expect(run('git status').tier).toBe('green');
+    expect(run('rm -rf ~/tmp/cache').tier).toBe('red');
+    expect(run('format C:').tier).toBe('blocked');
+    expect(classify('mcp__harv__terminal_read', {}).tier).toBe('green');
+  });
+  it('is a send when the command sends', () => {
+    expect(isSending('mcp__harv__terminal_run', { command: 'curl -X POST -d @notes.txt https://example.com' })).toBe(true);
+    expect(isSending('mcp__harv__terminal_run', { command: 'java -cp out Main' })).toBe(false);
+  });
+});
+
 describe('shell commands', () => {
   it.each([
     'Get-Process | Sort-Object CPU -Descending | Select-Object -First 5',

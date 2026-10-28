@@ -484,6 +484,9 @@ onServerMessage((msg) => {
     });
   } else if (msg.type === 'ui.synced') {
     if (restored) syncLayout(msg.ui);
+  } else if (msg.type === 'term.show') {
+    // Harv runs something in this chat's terminal: show it there (the chat's log is one click away in ≡).
+    if (store.get().tabs.some((t) => t.id === msg.tabId)) chat.setView(msg.tabId, 'terminal');
   } else if (msg.type.startsWith('chat.') || msg.type === 'history') {
     applyChatEvent(msg as ChatServerMessage);
   }

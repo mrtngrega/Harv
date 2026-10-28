@@ -8,7 +8,7 @@ import type { SafetyGate } from '../safety/gate.ts';
 import { PLANS_DIR, WORKSPACE } from '../safety/paths.ts';
 import { loadSettings, workDir } from '../settings.ts';
 import type { ChatStore } from '../store/chats.ts';
-import { harvServer, recentChatsContext, type Delegate, type ProjectTools, type ScheduleTools } from './chatTools.ts';
+import { harvServer, recentChatsContext, type Delegate, type ProjectTools, type ScheduleTools, type TerminalTools } from './chatTools.ts';
 import { memoryContext } from './memory.ts';
 
 /** Login sources that mean the user's subscription (never per-token API billing). */
@@ -47,6 +47,8 @@ export interface ChatContext {
   projects?: ProjectTools;
   /** Harv's schedule_task / list_scheduled / cancel_scheduled tools. */
   schedules?: ScheduleTools;
+  /** Harv's terminal_run / terminal_read tools. */
+  terminal?: TerminalTools;
 }
 
 /** The part about the user's other chats, shared by both kinds of chat. */
@@ -266,7 +268,7 @@ export function buildOptions(
             tools: [],
             strictMcpConfig: true,
           }),
-    mcpServers: chat ? { harv: harvServer(chat.store, chat.tabId, chat.delegate, chat.projects, chat.schedules) } : {},
+    mcpServers: chat ? { harv: harvServer(chat.store, chat.tabId, chat.delegate, chat.projects, chat.schedules, chat.terminal) } : {},
     permissionMode: planning ? 'plan' : 'default',
     // Checkpoints of the files Claude edits, so a rewind can put them back.
     ...(chat ? { enableFileCheckpointing: true } : {}),

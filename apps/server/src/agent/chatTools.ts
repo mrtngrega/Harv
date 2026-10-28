@@ -92,8 +92,22 @@ export interface ScheduleTools {
   cancel(id: string): boolean;
 }
 
-/** Harv's own MCP server for one chat tab: memory tools, the other chats, handing work to them, projects and scheduled tasks. */
-export function harvServer(store: ChatStore, tabId: string, delegate?: Delegate, projects?: ProjectTools, schedules?: ScheduleTools) {
+/** The chat's visible terminal, as Harv's terminal tools see it (the server's TerminalManager). */
+export interface TerminalTools {
+  /** Shows the chat's terminal in the dashboard, types the command and returns what it printed. */
+  run(tabId: string, command: string, opts: { cwd?: string; interrupt?: boolean; waitMs?: number }): Promise<string>;
+  read(tabId: string, lines: number): string;
+}
+
+/** Harv's own MCP server for one chat tab: memory tools, the other chats, handing work to them, projects, scheduled tasks and the terminal. */
+export function harvServer(
+  store: ChatStore,
+  tabId: string,
+  delegate?: Delegate,
+  projects?: ProjectTools,
+  schedules?: ScheduleTools,
+  terminal?: TerminalTools,
+) {
   return createSdkMcpServer({
     name: 'harv',
     version: '1.0.0',
@@ -208,6 +222,28 @@ export function harvServer(store: ChatStore, tabId: string, delegate?: Delegate,
               'Cancel a scheduled task by its id (from list_scheduled), when the user asks to stop it.',
               { id: z.string().min(1) },
               async ({ id }) => text(schedules.cancel(id) ? `Cancelled ${id}.` : `No scheduled task with id ${id}.`),
+            ),
+          ]
+        : []),
+      ...(terminal
+        ? [
+            tool(
+              'terminal_run',
+              "Run a command in this chat's Terminal, the one the user sees (its view menu ≡ → Terminal): it opens in the dashboard, the command is typed there as if by the user, and you get back what it printed. Use it when the user asks to open the terminal, to run something in it, or to watch a program run (e.g. `java Main`, a dev server, an interactive program); use Bash for your own quiet work. The shell is PowerShell on Windows and the user's shell (bash) on Linux, and it keeps its folder and state between calls. It returns after the output has been quiet for a moment (or wait_seconds): a program that's still running keeps running; read it later with terminal_read, or answer its prompts with another terminal_run (command = the text to type).",
+              {
+                command: z.string().describe('The command line, or text to type into a running program; empty just reads'),
+                cwd: z.string().optional().describe('Folder to cd into first'),
+                interrupt: z.boolean().optional().describe('Press Ctrl+C first, to stop what is running'),
+                wait_seconds: z.number().min(1).max(120).optional().describe('Longest to wait for output (default 15)'),
+              },
+              async ({ command, cwd, interrupt, wait_seconds }) =>
+                text(await terminal.run(tabId, command, { cwd, interrupt, waitMs: (wait_seconds ?? 15) * 1000 })),
+            ),
+            tool(
+              'terminal_read',
+              "Read the latest lines on this chat's Terminal (what the user sees there), e.g. a program started with terminal_run that's still running, or something the user ran.",
+              { lines: z.number().int().min(1).max(500).optional().describe('How many of the last lines (default 60)') },
+              async ({ lines }) => text(terminal.read(tabId, lines ?? 60)),
             ),
           ]
         : []),

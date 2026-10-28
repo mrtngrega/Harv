@@ -26,7 +26,7 @@ import type { UsageMeter } from '../usage/meter.ts';
 import { buildContent, cleanAttachments, deleteAttachments } from './attachments.ts';
 import { sideQuestion } from './btw.ts';
 import { commandName, hiddenReason } from './commands.ts';
-import { formatTranscript, type HandOff, type ProjectTools, type ScheduleTools } from './chatTools.ts';
+import { formatTranscript, type HandOff, type ProjectTools, type ScheduleTools, type TerminalTools } from './chatTools.ts';
 import { osPath, pathKey } from '../platform.ts';
 import { loadSettings, projectsDir } from '../settings.ts';
 import type { ProjectServerMessage, SharedUi } from '@harv/shared';
@@ -140,6 +140,8 @@ export class ChatManager {
   catalog: Catalog | null = null;
   /** Harv's scheduler (set by the server once it exists). */
   schedules?: ScheduleTools & { dropChat(tabId: string): void };
+  /** Each chat's visible terminal (set by the server). */
+  terminal?: TerminalTools;
 
   constructor(
     private store: ChatStore,
@@ -416,7 +418,7 @@ export class ChatManager {
       this.gate,
       { resume, resumeAt: resume ? resumeAt : undefined, chainEnd: this.store.chainEnd(tabId), planning: this.gate.isPlanning(tabId) },
       (req, signal) => this.delegate(tabId, req, signal),
-      { project: this.store.projectOf(tabId), projects: this.projectTools, schedules: this.schedules },
+      { project: this.store.projectOf(tabId), projects: this.projectTools, schedules: this.schedules, terminal: this.terminal },
     );
     this.sessions.set(tabId, session);
     return session;

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { cleanPath, listFolder, previewType, suggestPaths } from './files.ts';
+import { cleanPath, kdePlaces, listFolder, previewType, suggestPaths } from './files.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'harv-files-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -33,6 +33,26 @@ describe('file explorer', () => {
     expect(listing.entries.find((e) => e.name === 'a.txt')).toMatchObject({ dir: false, size: 5, hidden: false });
     expect(listing.entries.find((e) => e.name === '.secret')?.hidden).toBe(true);
     expect(listing.parent).toBe(join(dir, '..'));
+  });
+
+  it.runIf(process.platform !== 'win32')("shows Dolphin's places, in its order, with the Trash", () => {
+    mkdirSync(join(dir, 'Code'));
+    mkdirSync(join(dir, 'Downloads'));
+    const xml = `<xbel>
+      <bookmark href="file://${dir}"><title>Home</title></bookmark>
+      <bookmark href="file://${dir}/Downloads"><title>Downloads</title></bookmark>
+      <bookmark href="file://${dir}/Gone"><title>Gone</title></bookmark>
+      <bookmark href="file://${dir}/Code"><title>Code &amp; stuff</title><info><metadata><IsHidden>true</IsHidden></metadata></info></bookmark>
+      <bookmark href="remote:/"><title>Network</title></bookmark>
+      <bookmark href="trash:/"><title>Trash</title></bookmark>
+    </xbel>`;
+    const kde = kdePlaces(xml, dir)!;
+    expect(kde.places).toEqual([
+      { name: 'Home', path: dir },
+      { name: 'Downloads', path: `${dir}/Downloads` },
+    ]);
+    expect(kde.trash).toMatch(/Trash\/files$/);
+    expect(kdePlaces('<xbel></xbel>', dir)).toBeNull();
   });
 
   it('previews SVG and HTML as text, never rendered', () => {

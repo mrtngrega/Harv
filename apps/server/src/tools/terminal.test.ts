@@ -111,6 +111,31 @@ describe('terminal restore', () => {
     rmSync(target, { recursive: true, force: true });
   });
 
+  it("Harv's terminal_run types a command in the visible terminal and gets its output back", { timeout: 40_000 }, async () => {
+    const id = 'terminal-run';
+    let out = '';
+    const terms = new TerminalManager({ data: (_, d) => (out += d), exit: () => {} }, dir);
+    // Starts the shell itself, in the folder asked for.
+    const first = await terms.run(id, 'echo harv-one', { cwd: tmpdir(), quietMs: 1000 });
+    expect(first.output).toContain('harv-one');
+    expect(first.running).toBe(false);
+    // The dashboard sees it too (the same output stream).
+    expect(out).toContain('harv-one');
+    // Only what came after the command: not the earlier one.
+    const second = await terms.run(id, PWD, { quietMs: 1000 });
+    expect(second.output.toLowerCase()).toContain(TMP);
+    expect(second.output).not.toContain('harv-one');
+    expect(terms.read(id, 50)).toContain('harv-one');
+    // A closed shell starts again.
+    await terms.run(id, 'exit', { quietMs: 500, waitMs: 3000 });
+    await new Promise((r) => setTimeout(r, 500));
+    const again = await terms.run(id, 'echo harv-two', { quietMs: 1000 });
+    expect(again.output).toContain('harv-two');
+    expect(terms.read('terminal-none')).toBeUndefined();
+    terms.close(id);
+    terms.closeAll();
+  });
+
   it('forgets saved terminals of chats that are gone', async () => {
     const terms = new TerminalManager({ data: () => {}, exit: () => {} }, dir);
     terms.attach('terminal-keep');

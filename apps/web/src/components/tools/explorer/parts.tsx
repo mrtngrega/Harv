@@ -4,7 +4,8 @@ import type { DriveInfo, FileEntry, FileProps } from '@harv/shared';
 import { files } from './api.ts';
 import { FileIcon, iconKind, isImage, isMedia, isPdf, isTextLike, typeName } from './fileTypes.tsx';
 import { bytes as formatSize } from './icons.tsx';
-import { baseName, dirOf, driveName, osWords, pathParts, typedPath } from './paths.ts';
+import { getPlatform } from '../../../lib/useHarvSocket.ts';
+import { baseName, dirOf, driveName, linuxParts, osWords, pathParts, typedPath } from './paths.ts';
 
 export const when = (ms?: number) => (ms ? new Date(ms).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : '');
 
@@ -119,26 +120,33 @@ export function DropButton({ label, icon, items, title }: { label: string; icon?
 export const HOME = 'home';
 export const THIS_PC = 'thispc';
 
+/** Linux (laid out like Dolphin): Windows' Home page is Recent Files there, and Home is the real home folder. */
+const linux = () => getPlatform() !== 'windows';
+const homeName = () => (linux() ? 'Recent Files' : 'Home');
+
 export function locationName(loc: string, drives: DriveInfo[]): string {
-  if (loc === HOME) return 'Home';
+  if (loc === HOME) return homeName();
   if (loc === THIS_PC) return osWords().computer;
   const drive = drives.find((d) => d.path.toLowerCase() === loc.toLowerCase());
-  if (drive) return driveName(drive);
+  if (drive) return linux() && loc === '/' ? 'Root' : driveName(drive);
   return baseName(loc);
 }
 
 /** What the address bar shows when it turns into a text box. */
-const addressText = (loc: string) => (loc === HOME ? 'Home' : loc === THIS_PC ? osWords().computer : loc);
+const addressText = (loc: string) => (loc === HOME ? homeName() : loc === THIS_PC ? osWords().computer : loc);
 
-/** "This PC › Local Disk (C:) › Users › you", each part clickable; click the empty space to type a path. */
+/** "This PC › Local Disk (C:) › Users › you" (Linux: "Home › Code"), each part clickable; click the empty space to type a path. */
 export function Breadcrumb({
   loc,
   drives,
+  home,
   onGo,
   onDropOn,
 }: {
   loc: string;
   drives: DriveInfo[];
+  /** Linux: the home folder, where the breadcrumb starts. */
+  home?: string | undefined;
   onGo: (loc: string) => void;
   onDropOn: (dir: string, e: React.DragEvent) => void;
 }) {
@@ -152,7 +160,8 @@ export function Breadcrumb({
   }, [editing]);
 
   const parts: { label: string; loc: string }[] = [];
-  if (loc === HOME) parts.push({ label: 'Home', loc: HOME });
+  if (loc === HOME) parts.push({ label: homeName(), loc: HOME });
+  else if (linux() && loc !== THIS_PC) parts.push(...linuxParts(loc, home));
   else {
     parts.push({ label: osWords().computer, loc: THIS_PC });
     if (loc !== THIS_PC) {
@@ -174,6 +183,12 @@ export function Breadcrumb({
           setEditing(false);
           const text = draft.trim();
           if (!text) return;
+          if (linux() && home) {
+            // Dolphin's address bar: ~ is the home folder, "Recent Files" the recent page.
+            if (/^recent( files)?$/i.test(text)) return onGo(HOME);
+            if (/^home$/i.test(text)) return onGo(home);
+            return onGo(text === '~' ? home : text.startsWith('~/') ? `${home}${text.slice(1)}` : typedPath(text));
+          }
           onGo(/^(this pc|computer)$/i.test(text) ? THIS_PC : /^home$/i.test(text) ? HOME : typedPath(text));
         }}
       >

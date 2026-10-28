@@ -108,6 +108,8 @@ export type FileOp =
 export interface FilePlaces {
   places: { name: string; path: string }[];
   drives: string[];
+  /** Linux: the Trash's files folder, when the user's file manager shows a Trash place. */
+  trash?: string;
 }
 
 export type ToolClientMessage =
@@ -127,5 +129,7 @@ export type ToolServerMessage =
    */
   | { type: 'term.data'; id: string; data: string; reset?: boolean; restored?: string[] }
   | { type: 'term.exit'; id: string; code: number }
+  /** Harv runs something in a chat's terminal (terminal_run): the dashboard shows that terminal. */
+  | { type: 'term.show'; tabId: string }
   /** The other device's tabs and drafts are newer: the dashboard shows them (its own tab and tools stay). */
   | { type: 'ui.synced'; ui: SharedUi };

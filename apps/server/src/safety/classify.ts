@@ -23,8 +23,10 @@ export interface Verdict {
   targets: string[];
 }
 
-/** Built-in tools Harv may use; anything else is refused. */
-export const SHELL_TOOLS = ['Bash', 'PowerShell'];
+/** Harv's own tool that types a command into the chat's visible terminal (PowerShell on Windows, the user's shell elsewhere). */
+export const TERMINAL_RUN = 'mcp__harv__terminal_run';
+/** Built-in tools Harv may use; anything else is refused. Every tool that runs a shell command is checked as one. */
+export const SHELL_TOOLS = ['Bash', 'PowerShell', TERMINAL_RUN];
 export const FILE_WRITE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
 export const READ_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'NotebookRead', 'WebSearch', 'WebFetch'];
 /**
@@ -77,6 +79,7 @@ export const HARV_TOOLS = [
   'mcp__harv__schedule_task',
   'mcp__harv__list_scheduled',
   'mcp__harv__cancel_scheduled',
+  'mcp__harv__terminal_read',
 ];
 export const ENABLED_TOOLS = [...READ_TOOLS, ...FILE_WRITE_TOOLS, ...SHELL_TOOLS];
 
@@ -240,7 +243,7 @@ export function classify(tool: string, input: Record<string, unknown>, ctx: Clas
       ...ctx,
       project: inProject,
       attachedRoot: inProject ? undefined : attachedOfCommand(command, ctx.attached ?? []),
-      shell: tool === 'PowerShell' ? 'powershell' : 'bash',
+      shell: tool === 'PowerShell' || (tool === TERMINAL_RUN && IS_WINDOWS) ? 'powershell' : 'bash',
     });
   }
 
@@ -339,7 +342,7 @@ function mentions(message: string, recipient: string, service: string): boolean 
  * first only when they didn't ask for it.
  */
 export function isSending(tool: string, input: Record<string, unknown>): boolean {
-  if (tool.startsWith('mcp__')) {
+  if (tool.startsWith('mcp__') && !SHELL_TOOLS.includes(tool)) {
     const [, server = '', ...rest] = tool.split('__');
     return !PRIVATE_MCP.test(server) && server !== 'harv' && MCP_SENDS.test(rest.join('__'));
   }
@@ -359,7 +362,7 @@ export function asksToSend(message: string): boolean {
  */
 export function askedToSend(tool: string, input: Record<string, unknown>, message: string): boolean {
   if (!asksToSend(message)) return false;
-  if (!tool.startsWith('mcp__')) return true;
+  if (!tool.startsWith('mcp__') || SHELL_TOOLS.includes(tool)) return true;
   const service = (tool.split('__')[1] ?? '').replace(/^claude_ai_/, '').replace(/_/g, ' ');
   return recipientsOf(input).every((r) => mentions(message, r, service));
 }

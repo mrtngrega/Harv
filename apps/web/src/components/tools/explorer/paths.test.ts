@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { baseName, dirOf, driveName, driveOf, pathParts } from './paths.ts';
+import { baseName, dirOf, driveName, driveOf, linuxParts, pathParts } from './paths.ts';
 
 const linuxDrives = [
   { path: '/', label: 'File System', total: 0, free: 0 },
@@ -23,6 +23,17 @@ describe('explorer paths on Windows and Linux', () => {
     expect(pathParts('C:\\Users\\me').map((p) => p.loc)).toEqual(['C:\\', 'C:\\Users', 'C:\\Users\\me']);
     expect(pathParts('/home/me').map((p) => p.loc)).toEqual(['/', '/home', '/home/me']);
     expect(pathParts('/').map((p) => p.loc)).toEqual(['/']);
+  });
+
+  it('starts the Linux breadcrumb at Home inside the home folder, else at Root, like Dolphin', () => {
+    expect(linuxParts('/home/me/Code/Harv', '/home/me')).toEqual([
+      { label: 'Home', loc: '/home/me' },
+      { label: 'Code', loc: '/home/me/Code' },
+      { label: 'Harv', loc: '/home/me/Code/Harv' },
+    ]);
+    expect(linuxParts('/home/me', '/home/me')).toEqual([{ label: 'Home', loc: '/home/me' }]);
+    expect(linuxParts('/home/meg', '/home/me').map((p) => p.label)).toEqual(['Root', 'home', 'meg']);
+    expect(linuxParts('/', '/home/me')).toEqual([{ label: 'Root', loc: '/' }]);
   });
 
   it('knows which drive a path is on', () => {

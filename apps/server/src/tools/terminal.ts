@@ -41,6 +41,24 @@ export interface TerminalReplay {
   data: string;
 }
 
+/** What Harv's terminal_run gets back. */
+export interface TerminalRun {
+  /** What the terminal printed after the command was typed (the command line itself first). */
+  output: string;
+  /** It was still printing when the wait ended (a long or interactive program). */
+  running: boolean;
+  exited: boolean;
+}
+
+/** Keeps what goes back to the model small: it counts against the user's plan. */
+const MAX_RUN_CHARS = 8000;
+const tail = (lines: string[]) => {
+  const text = lines.join('\n').trimEnd();
+  return text.length > MAX_RUN_CHARS ? `(…earlier output left out)\n${text.slice(-MAX_RUN_CHARS)}` : text;
+};
+const CTRL_C = '\x03';
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 interface Saved {
   cwd?: string;
   at: number;
@@ -82,7 +100,8 @@ export function cdCommand(shell: string, folder: string): string {
 /**
  * The user's own terminals, one per chat that opens one: PowerShell in a real
  * pseudo-terminal (ConPTY). What the user types here is theirs, so it doesn't
- * pass Harv's safety gate; Harv itself never writes to these terminals.
+ * pass Harv's safety gate. Harv types into one only with its terminal_run tool
+ * (when the user wants to watch something run), which the gate checks like Bash.
  * Each one's text and folder are saved to ~/.harv/terminals, so after a
  * restart it comes back as a fresh PowerShell in the same folder with the old
  * output above it.
@@ -165,6 +184,50 @@ export class TerminalManager {
       this.events.exit(id, exitCode);
     });
     return { restored, data: term.buffer };
+  }
+
+  /**
+   * Harv's terminal_run: types `command` (and Enter) into the terminal, starting it if needed, then
+   * waits until the output has been quiet for `quietMs` (or `waitMs` passed) and returns what it printed.
+   */
+  async run(
+    id: string,
+    command: string,
+    opts: { cwd?: string; interrupt?: boolean; waitMs?: number; quietMs?: number } = {},
+  ): Promise<TerminalRun> {
+    const old = this.terms.get(id);
+    if (old?.exited) {
+      // The shell was closed (exit): a fresh one, like the dashboard's Restart.
+      this.terms.delete(id);
+      this.kill(old);
+    }
+    if (!this.terms.has(id) || opts.cwd) this.attach(id, opts.cwd);
+    const term = this.terms.get(id);
+    if (!term) throw new Error('Could not start the terminal.');
+    if (opts.interrupt) term.pty.write(CTRL_C);
+    // Where the new output starts: a marker on the cursor's line follows it as the screen scrolls.
+    await new Promise<void>((done) => term.screen.write('', done));
+    const marker = term.screen.registerMarker(0);
+    // The command's own echo always comes back, so quiet only counts once something has (a new shell takes a moment).
+    let last = 0;
+    const off = term.pty.onData(() => (last = Date.now()));
+    if (command) term.pty.write(`${command}\r`);
+    const waitMs = opts.waitMs ?? 15_000;
+    const quietMs = opts.quietMs ?? 1500;
+    const start = Date.now();
+    while (Date.now() - start < waitMs && !term.exited && (!last || Date.now() - last < quietMs)) await sleep(100);
+    off.dispose();
+    await new Promise<void>((done) => term.screen.write('', done));
+    const from = marker && marker.line >= 0 ? marker.line : 0;
+    marker?.dispose();
+    const lines = this.lines(term).slice(from);
+    return { output: tail(lines), running: !term.exited && Date.now() - last < quietMs, exited: term.exited };
+  }
+
+  /** The last `count` lines on the terminal's screen and scrollback (Harv's terminal_read). */
+  read(id: string, count = 60): string | undefined {
+    const term = this.terms.get(id);
+    return term ? tail(this.lines(term).slice(-count)) : undefined;
   }
 
   input(id: string, data: string): void {

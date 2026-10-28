@@ -12,16 +12,20 @@ import {
   READ_TOOLS,
   rulesFor,
   SHELL_TOOLS,
+  TERMINAL_RUN,
   type ClassifyContext,
   type Verdict,
 } from './classify.ts';
+import { IS_WINDOWS } from '../platform.ts';
 import { fullPath, isInside, loadSettings, PLANS_DIR, WORKSPACE } from './paths.ts';
 
 /** How Harv's own folder is named to the model in a block message. */
 const HARV_HOME_HINT = 'the .harv folder';
 
 /** Harv's own tools that only look or note things: fine in plan mode. */
-const PLAN_SAFE_HARV = ['remember', 'forget', 'list_chats', 'read_chat', 'list_projects', 'list_scheduled'].map((t) => `mcp__harv__${t}`);
+const PLAN_SAFE_HARV = ['remember', 'forget', 'list_chats', 'read_chat', 'list_projects', 'list_scheduled', 'terminal_read'].map(
+  (t) => `mcp__harv__${t}`,
+);
 
 // Every tool call passes through here (Agent SDK hooks, so it can't be skipped):
 //   green   → run
@@ -103,7 +107,7 @@ function describeSize(path: string): string {
 function buildPreview(tool: string, input: Record<string, unknown>, verdict: Verdict): string {
   const lines: string[] = [];
   if (SHELL_TOOLS.includes(tool)) {
-    lines.push(`${tool === 'PowerShell' ? 'PS>' : '$'} ${String(input.command ?? '')}`);
+    lines.push(`${tool === 'PowerShell' || (tool === TERMINAL_RUN && IS_WINDOWS) ? 'PS>' : '$'} ${String(input.command ?? '')}`);
   } else if (tool === 'Write') {
     const content = String(input.content ?? '');
     lines.push(`write ${String(input.file_path)} (${content.length} characters):`, ...content.split(/\r?\n/).slice(0, 15));

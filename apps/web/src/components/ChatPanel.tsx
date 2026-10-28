@@ -405,12 +405,29 @@ export function ChatPanel() {
     return () => window.removeEventListener('harv-focus', onFocus);
   }, [nonChat]);
 
-  // Keep the newest output in view while Harv streams.
-  const lastText = active?.lines.at(-1)?.text;
-  useEffect(() => {
+  // Keep the newest output in view while Harv streams, unless the user scrolled up to read (the user's wish):
+  // then it stays put until they scroll back down, press ↓ or send something.
+  const lastLine = active?.lines.at(-1);
+  const lastText = lastLine?.text;
+  const stuck = useRef(true);
+  /** The chat whose log is scrolled up (it shows the ↓ button); its scroll event keeps this right. */
+  const [scrolledUp, setScrolledUp] = useState<string | null>(null);
+  const toBottom = () => {
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [active?.lines.length, lastText, activeId, waiting.length]);
+    stuck.current = true;
+  };
+  const onLogScroll = () => {
+    const el = logRef.current;
+    if (!el) return;
+    stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    setScrolledUp(stuck.current ? null : activeId);
+  };
+  useLayoutEffect(toBottom, [activeId]);
+  useEffect(() => {
+    if (lastLine?.kind === 'you') stuck.current = true;
+    if (stuck.current) toBottom();
+  }, [active?.lines.length, lastText, waiting.length, lastLine?.kind]);
 
   // The message box grows with what's typed (up to its max height).
   useLayoutEffect(() => {
@@ -675,9 +692,20 @@ export function ChatPanel() {
             <Explorer key={active.id} id={active.id} />
           </Suspense>
         ) : (
-          <div className={`flex min-h-0 flex-1 ${preview ? 'flex-col gap-2 pb-2 lg:flex-row lg:pr-2' : ''}`}>
+          <div className={`relative flex min-h-0 flex-1 ${preview ? 'flex-col gap-2 pb-2 lg:flex-row lg:pr-2' : ''}`}>
+            {scrolledUp === activeId && (
+              <button
+                type="button"
+                onClick={toBottom}
+                title="Back to the newest output"
+                className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 cursor-pointer rounded-full border border-accent/50 bg-[rgb(16_24_34/0.9)] px-3 py-1 text-[11px] text-accent hover:bg-accent/15"
+              >
+                ↓ {active?.busy ? 'live' : 'newest'}
+              </button>
+            )}
             <div
               ref={logRef}
+              onScroll={onLogScroll}
               className={`flex min-w-0 flex-1 flex-col overflow-y-auto px-5 ${preview ? 'max-lg:max-h-[45%] lg:max-w-[50%]' : ''} ${density === 'compact' ? 'gap-1.5 py-3 leading-normal' : 'gap-3.5 py-4 leading-relaxed'}`}
             >
               {!hydrated ? null : !active || active.lines.length === 0 ? (

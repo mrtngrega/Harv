@@ -21,6 +21,7 @@ export function describeTool(name: string, input: Record<string, unknown>, chatT
       return pick('url');
     case 'Bash':
     case 'PowerShell':
+    case 'mcp__harv__terminal_run':
       return pick('command').split(/\r?\n/)[0]!.slice(0, 160);
     case 'mcp__harv__remember':
     case 'mcp__harv__forget':
