@@ -7,8 +7,8 @@ const uiPath = () => join(HARV_HOME, 'ui.json');
 
 /** Bigger than any real layout; a runaway dashboard can't fill the disk. */
 const MAX_BYTES = 512 * 1024;
-const KINDS: readonly string[] = ['terminal', 'files'] satisfies ToolKind[];
-const VIEWS: readonly string[] = ['chat', 'terminal', 'files'] satisfies ChatView[];
+const KINDS: readonly string[] = ['terminal', 'files', 'browser'] satisfies ToolKind[];
+const VIEWS: readonly string[] = ['chat', 'terminal', 'files', 'browser'] satisfies ChatView[];
 
 const isId = (v: unknown): v is string => typeof v === 'string' && /^[\w-]{1,64}$/.test(v);
 const record = (v: unknown): Record<string, unknown> =>

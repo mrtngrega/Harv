@@ -5,9 +5,10 @@ import { inApp } from '../../lib/desktop.ts';
 import { fileProps } from '../../lib/preview.ts';
 
 /**
- * The Browser tab (docs/PLAN.md §6x): page tabs, back / forward / reload, an address bar, and the
- * area the app's real web view sits over. One browser for every chat: Harv's browser tools use
- * the same pages, and the tab says when Harv is at it. In a plain browser there's no browser.
+ * A chat's Browser view (its ≡ menu; docs/PLAN.md §6x): page tabs, back / forward / reload, an
+ * address bar, and the area the app's real web view sits over. One browser for every chat:
+ * whichever chat shows it sees the same pages, Harv's browser tools use them too, and the view
+ * says when Harv is at it. In a plain browser (not the app) there's no browser.
  */
 export function BrowserView() {
   const { pages, active, busyUntil } = useBrowser();
@@ -17,11 +18,11 @@ export function BrowserView() {
   const [now, setNow] = useState(() => Date.now());
   const busy = busyUntil > now;
 
-  // The app's web view goes exactly over the page area, and away when this tab isn't showing.
+  // The app's web view goes exactly over the page area, and away when this view isn't showing.
   useLayoutEffect(() => {
     const el = area.current;
     if (!el || !inApp) return;
-    const put = () => browser.place(el.getBoundingClientRect(), true);
+    const put = () => browser.place(el.getBoundingClientRect());
     put();
     const watch = new ResizeObserver(put);
     watch.observe(el);
@@ -29,8 +30,15 @@ export function BrowserView() {
     return () => {
       watch.disconnect();
       window.removeEventListener('resize', put);
-      browser.place(null, false);
+      browser.place(null);
     };
+  }, []);
+
+  // Picking Browser with no page open starts one.
+  useEffect(() => {
+    if (inApp && !pages.length) void browser.open(BROWSER_START).catch(() => {});
+    // Only when the view opens: closing the last page leaves it empty, with +.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // "Harv is using the browser" stays a few seconds after its last action.

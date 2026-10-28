@@ -1,7 +1,7 @@
 import type { Attachment } from './chat.ts';
 
-/** Tools a chat can switch to from its view menu. (A browser existed in a3d96e0; removed for now.) */
-export type ToolKind = 'terminal' | 'files';
+/** Tools a chat can switch to from its view menu. The browser is one for all chats (docs/PLAN.md §6x), shown in whichever chat picks it. */
+export type ToolKind = 'terminal' | 'files' | 'browser';
 
 /** What a chat shows: its conversation or one of its tools. */
 export type ChatView = 'chat' | ToolKind;

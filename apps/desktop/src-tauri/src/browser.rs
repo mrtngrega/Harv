@@ -236,6 +236,13 @@ fn active(app: &AppHandle, id: Option<u32>) -> Result<u32, String> {
         .ok_or_else(|| "No page is open in the browser.".to_string())
 }
 
+/// The dashboard (re)loads: no page shows until its Browser view places them again. Without
+/// this a restart left the pages over the chat (the user's report, 2026-10-28).
+pub fn dashboard_loading(app: &AppHandle) {
+    app.state::<Browser>().inner.lock().unwrap().visible = false;
+    layout(app);
+}
+
 /// Everything the dashboard asks of the browser: open, navigate, back, forward, reload, close,
 /// select a page, place the browser over its tab, run a script in a page, or list the pages.
 #[tauri::command]

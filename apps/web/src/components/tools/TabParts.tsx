@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { ChatView, ToolKind } from '@harv/shared';
 import { chat, useChat } from '../../lib/chatStore.ts';
+import { browser } from '../../lib/browser.ts';
+import { inApp } from '../../lib/desktop.ts';
 import { useProjects } from '../../lib/useHarvSocket.ts';
 import { Icon } from './explorer/icons.tsx';
 
@@ -64,6 +66,8 @@ const VIEWS: { view: ChatView; label: string }[] = [
   { view: 'chat', label: 'Chat' },
   { view: 'files', label: 'File Explorer' },
   { view: 'terminal', label: 'Terminal' },
+  // One browser for every chat (docs/PLAN.md §6x), only in the app (it's the app's own web views).
+  ...(inApp ? [{ view: 'browser' as const, label: 'Browser' }] : []),
 ];
 
 /**
@@ -82,6 +86,13 @@ export function ViewMenu({ tabId }: { tabId: string }) {
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const current = VIEWS.find((v) => v.view === view)!;
+
+  // The browser's pages are windows of their own: they step aside while the menu is open over them.
+  useEffect(() => {
+    if (!shown) return;
+    browser.cover(true);
+    return () => browser.cover(false);
+  }, [shown]);
 
   useEffect(() => {
     if (!shown) return;
@@ -106,7 +117,7 @@ export function ViewMenu({ tabId }: { tabId: string }) {
         type="button"
         aria-haspopup="menu"
         aria-expanded={shown}
-        title="Switch this chat to its file explorer or terminal"
+        title="Switch this chat to its file explorer, terminal or the browser"
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect();
           setAt({ left: Math.max(8, Math.min(r.right - 210, window.innerWidth - 218)), top: r.bottom + 4 });

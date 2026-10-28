@@ -15,8 +15,7 @@ import { formatSize, uploadAttachment } from '../lib/attachments.ts';
 import { lineTime, resetTime, tokens } from '../lib/format.ts';
 import { HELP, parseCommand } from '../lib/commands.ts';
 import { useCatalog, useSettings, useUsage } from '../lib/useHarvSocket.ts';
-import { BROWSER_TAB, chat, getChatState, SETTINGS_TAB, startQuestions, useChat, type Line } from '../lib/chatStore.ts';
-import { useBrowser } from '../lib/browser.ts';
+import { chat, getChatState, SETTINGS_TAB, startQuestions, useChat, type Line } from '../lib/chatStore.ts';
 import { useSafety } from '../lib/safetyStore.ts';
 import { ActionBadge, ApprovalCard } from './ApprovalCard.tsx';
 import { FileCards } from './chat/FileCards.tsx';
@@ -266,12 +265,10 @@ function useWide(): boolean {
 }
 
 export function ChatPanel() {
-  const { tabs: allTabs, activeId, settingsOpen, browserOpen, views, hydrated } = useChat();
-  const { pages: browserPages, active: browserActive } = useBrowser();
+  const { tabs: allTabs, activeId, settingsOpen, views, hydrated } = useChat();
   // Nothing until the saved chats are here: the starter tab only flashed "New chat" before them.
   const tabs = hydrated ? allTabs : [];
   const inSettings = activeId === SETTINGS_TAB;
-  const inBrowser = activeId === BROWSER_TAB;
   const { approvals } = useSafety();
   const usage = useUsage();
   const { density, sendKey } = useSettings();
@@ -293,7 +290,7 @@ export function ChatPanel() {
   /** The active chat's log, or one of its tools (the view menu). */
   const view = active ? (views[active.id] ?? 'chat') : 'chat';
   /** Settings or a tool is showing: no chat input or attachments. */
-  const nonChat = inSettings || inBrowser || view !== 'chat';
+  const nonChat = inSettings || view !== 'chat';
   // Each chat keeps its own unsent text.
   const draft = (active && draftTexts[active.id]) || '';
   const setDraft = (text: string) => setDraftText(active?.id ?? chat.ensureTab(), text);
@@ -629,16 +626,6 @@ export function ChatPanel() {
               </div>
             );
           })}
-          {browserOpen && (
-            <SpecialTab
-              id={BROWSER_TAB}
-              icon={TOOL_ICONS.browser}
-              title={browserPages.find((p) => p.id === browserActive)?.title || 'Browser'}
-              active={inBrowser}
-              onSelect={() => chat.openBrowser()}
-              onClose={chat.closeBrowser}
-            />
-          )}
           {settingsOpen && (
             <SpecialTab
               id={SETTINGS_TAB}
@@ -687,7 +674,7 @@ export function ChatPanel() {
       {/* Everything under the tab bar, so a chat's start question covers only this part. */}
       <div className="relative flex min-h-0 flex-1 flex-col">
         {/* A chat showing its files or terminal still shows what it waits for (hidden, the turn just hung). */}
-        {!inSettings && !inBrowser && view !== 'chat' && waiting.length > 0 && (
+        {!inSettings && view !== 'chat' && waiting.length > 0 && (
           <div className="flex max-h-[60%] flex-none flex-col gap-2 overflow-y-auto border-b border-line p-3">
             {waiting.map((a) => (
               <ApprovalCard key={a.id} approval={a} />
@@ -698,7 +685,7 @@ export function ChatPanel() {
           <div className="@container flex flex-1 flex-col overflow-y-auto px-5 py-4">
             <SettingsView />
           </div>
-        ) : inBrowser ? (
+        ) : active && view === 'browser' ? (
           <BrowserView />
         ) : active && view === 'terminal' ? (
           <Suspense fallback={<p className="m-auto text-muted">Starting the terminal…</p>}>

@@ -219,6 +219,13 @@ fn main() {
             update::schedule(handle.clone());
             Ok(())
         })
+        .on_page_load(|webview, payload| {
+            if webview.label() == "main"
+                && payload.event() == tauri::webview::PageLoadEvent::Started
+            {
+                browser::dashboard_loading(webview.app_handle());
+            }
+        })
         .on_window_event(|window, event| {
             // × hides to the tray: replies and background tasks go on. Quit is in the tray menu.
             match event {

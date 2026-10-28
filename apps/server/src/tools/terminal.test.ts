@@ -157,7 +157,7 @@ describe('dashboard layout (ui.json)', () => {
       activeId: 'abc',
       settingsOpen: 'yes',
       order: ['a', 'a', 'b', 5, '../x'],
-      tools: { a: ['files', 'browser'], '../x': ['terminal'] },
+      tools: { a: ['files', 'paint'], '../x': ['terminal'] },
       views: { a: 'files', b: 'nope' },
       explorer: { a: 'C:\\Users' },
       drafts: { a: 'half a thought', b: '' },

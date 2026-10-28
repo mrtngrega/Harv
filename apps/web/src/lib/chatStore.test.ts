@@ -3,15 +3,6 @@ import { answerStart, applyChatEvent, askOnStart, chat, getChatState, startQuest
 import { getDrafts, getDraftTexts } from './drafts.ts';
 
 vi.mock('./socket.ts', () => ({ onServerMessage: () => {}, sendMessage: () => true }));
-// The browser (docs/PLAN.md §6x) only lives in the app.
-vi.mock('./browser.ts', () => ({
-  browser: { open: async () => ({ id: 1 }), close: async () => null },
-  BROWSER_START: 'https://www.google.com',
-  getBrowser: () => ({ pages: [], active: null, busyUntil: 0 }),
-  onShowBrowser: () => {},
-  subscribeBrowser: () => () => {},
-}));
-
 function openTab(): string {
   chat.newTab();
   return getChatState().tabs.at(-1)!.id;
