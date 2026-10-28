@@ -54,8 +54,11 @@ export function pathParts(loc: string): { label: string; loc: string }[] {
   return out;
 }
 
-/** The breadcrumb's parts on Linux, like Dolphin's: "Home › Code › Harv" inside the home folder, else "Root › etc". */
-export function linuxParts(loc: string, home: string | undefined): { label: string; loc: string }[] {
+/** The breadcrumb's parts on Linux, like Dolphin's: "Home › Code › Harv" inside the home folder, "Trash › …", else "Root › etc". */
+export function linuxParts(loc: string, home: string | undefined, trash?: string): { label: string; loc: string }[] {
+  if (trash && (loc === trash || loc.startsWith(`${trash}/`))) {
+    return [{ label: 'Trash', loc: trash }, ...pathParts(loc).slice(pathParts(trash).length)];
+  }
   if (home && (loc === home || loc.startsWith(`${home}/`))) {
     return [{ label: 'Home', loc: home }, ...pathParts(loc).slice(pathParts(home).length)];
   }

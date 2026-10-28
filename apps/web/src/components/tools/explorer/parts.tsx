@@ -140,6 +140,7 @@ export function Breadcrumb({
   loc,
   drives,
   home,
+  trash,
   onGo,
   onDropOn,
 }: {
@@ -147,6 +148,8 @@ export function Breadcrumb({
   drives: DriveInfo[];
   /** Linux: the home folder, where the breadcrumb starts. */
   home?: string | undefined;
+  /** Linux: the Trash folder, shown as "Trash". */
+  trash?: string | undefined;
   onGo: (loc: string) => void;
   onDropOn: (dir: string, e: React.DragEvent) => void;
 }) {
@@ -161,7 +164,7 @@ export function Breadcrumb({
 
   const parts: { label: string; loc: string }[] = [];
   if (loc === HOME) parts.push({ label: homeName(), loc: HOME });
-  else if (linux() && loc !== THIS_PC) parts.push(...linuxParts(loc, home));
+  else if (linux() && loc !== THIS_PC) parts.push(...linuxParts(loc, home, trash));
   else {
     parts.push({ label: osWords().computer, loc: THIS_PC });
     if (loc !== THIS_PC) {

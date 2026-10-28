@@ -34,6 +34,8 @@ describe('explorer paths on Windows and Linux', () => {
     expect(linuxParts('/home/me', '/home/me')).toEqual([{ label: 'Home', loc: '/home/me' }]);
     expect(linuxParts('/home/meg', '/home/me').map((p) => p.label)).toEqual(['Root', 'home', 'meg']);
     expect(linuxParts('/', '/home/me')).toEqual([{ label: 'Root', loc: '/' }]);
+    const trash = '/home/me/.local/share/Trash/files';
+    expect(linuxParts(`${trash}/old`, '/home/me', trash).map((p) => p.label)).toEqual(['Trash', 'old']);
   });
 
   it('knows which drive a path is on', () => {

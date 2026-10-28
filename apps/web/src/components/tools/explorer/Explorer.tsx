@@ -114,20 +114,27 @@ export function Explorer({ id }: { id: string }) {
 
   // ---- Loading ----
 
+  /** The location on screen: an answer for one the user has already left (a slow Recent Files) is dropped. */
+  const shown = useRef(loc);
   const refresh = useCallback(
     async (target = loc, quiet = false) => {
       if (target === HOME) {
-        setRecent(await files.recent().catch(() => []));
+        const items = await files.recent().catch(() => []);
+        if (shown.current !== target) return false;
+        setRecent(items);
         setListing(null);
         return true;
       }
       if (target === THIS_PC) {
-        setDrives(await files.drives().catch(() => []));
+        const list = await files.drives().catch(() => []);
+        if (shown.current !== target) return false;
+        setDrives(list);
         setListing(null);
         return true;
       }
       try {
         const next = await files.list(target);
+        if (shown.current !== target) return false;
         setListing(next);
         if (!quiet) setError(null);
         return true;
@@ -151,6 +158,7 @@ export function Explorer({ id }: { id: string }) {
   useEffect(() => {
     // Kept per chat (and saved), so switching away and back, or restarting, keeps the folder.
     explorerPaths.set(id, loc);
+    shown.current = loc;
     saveLayoutSoon();
     // refresh() only sets state after its request comes back, not during the effect.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -772,7 +780,14 @@ export function Explorer({ id }: { id: string }) {
         <button type="button" className={tool} onClick={() => void refresh()} aria-label="Refresh (F5)">
           <Icon name="refresh" />
         </button>
-        <Breadcrumb loc={loc} drives={drives} home={home} onGo={(to) => go(to)} onDropOn={(dir, e) => void dropOn(dir, e)} />
+        <Breadcrumb
+          loc={loc}
+          drives={drives}
+          home={home}
+          trash={places?.trash}
+          onGo={(to) => go(to)}
+          onDropOn={(dir, e) => void dropOn(dir, e)}
+        />
         <form
           className="w-[230px] flex-none"
           onSubmit={(e) => {
