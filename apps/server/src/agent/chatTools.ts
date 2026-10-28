@@ -120,10 +120,12 @@ export function findTab(ref: string, tabs: OpenTab[], self: string): OpenTab | s
   const others = tabs.filter((t) => t.id !== self);
   const byId = tabs.find((t) => t.id === ref.trim()) ?? (want.length >= 6 ? tabs.filter((t) => t.id.startsWith(want)) : []).at(0);
   if (byId) return byId;
-  const exact = tabs.filter((t) => t.title.toLowerCase() === want);
-  if (exact.length === 1) return exact[0]!;
-  const partial = tabs.filter((t) => t.title.toLowerCase().includes(want));
-  if (partial.length === 1) return partial[0]!;
+  // By name it's always another chat (this one may well be called "Terminal test"); one showing its terminal wins a tie.
+  const one = (list: OpenTab[]) =>
+    list.length === 1 ? list[0] : list.filter((t) => t.terminal).length === 1 ? list.find((t) => t.terminal) : undefined;
+  const named =
+    one(others.filter((t) => t.title.toLowerCase() === want)) ?? one(others.filter((t) => t.title.toLowerCase().includes(want)));
+  if (named) return named;
   const showing = others.filter((t) => t.terminal);
   if (/terminal|shell|konzol|termin[aá]l/.test(want) && showing.length === 1) return showing[0]!;
   const list = tabs

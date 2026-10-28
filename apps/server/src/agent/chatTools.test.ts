@@ -64,6 +64,11 @@ describe("another chat's terminal (the user's wish: a terminal tab every chat ca
     expect(findTab('terminal', tabs, 'bbbbbbbb-2222')).toMatch(/No single open chat/);
   });
 
+  it('never picks the asking chat by name (it may be titled "Terminal test")', () => {
+    const withSelf = [...tabs, { id: 'eeeeeeee-5555', title: 'Terminal echo test', terminal: false }];
+    expect(id(findTab('terminal', withSelf, 'eeeeeeee-5555'))).toBe('bbbbbbbb-2222');
+  });
+
   it('asks instead of guessing when it is unclear', () => {
     const two = [...tabs, { id: 'dddddddd-4444', title: 'Server logs', terminal: true }];
     const r = findTab('serv', two, 'aaaaaaaa-1111');
