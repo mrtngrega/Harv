@@ -24,6 +24,7 @@ import { RouteStore } from './store/routes.ts';
 import { UsageMeter } from './usage/meter.ts';
 import { loadSettings, updateSettings, workDir } from './settings.ts';
 import { applySharedUi, loadUi, resetUi, saveUi, sharedUi } from './ui.ts';
+import { GeminiImages, GeminiProblem } from './tools/gemini.ts';
 import { cleanPath, listFolder, openWithDefault, places, previewType, suggestPaths } from './tools/files.ts';
 import {
   copyItems,
@@ -213,6 +214,25 @@ const scheduler = new Scheduler(
 );
 chats.schedules = scheduler;
 // Harv's terminal_run / terminal_read: the chat's own terminal, shown in the dashboard while Harv uses it.
+// Harv's generate_image: pictures from the Gemini website on Harv's own Chrome profile (docs/PLAN.md §6w).
+const gemini = new GeminiImages();
+chats.images = {
+  async generate(prompt, images) {
+    try {
+      const { paths, text } = await gemini.generate(prompt, images);
+      const said = text ? `\n\nGemini said: ${text.slice(0, 800)}` : '';
+      const saved = paths.length === 1 ? 'the picture' : `${paths.length} pictures`;
+      return `Saved ${saved}:\n${paths.join('\n')}${said}\n\nName the full path in your reply so it shows in the chat.`;
+    } catch (err) {
+      if (err instanceof GeminiProblem && err.message === 'signed-out') {
+        await gemini.openSignIn().catch(() => undefined);
+        return "Gemini isn't signed in yet. I opened a Chrome window with Gemini: the user signs in there once with the Google account they keep for pictures, then closes the window and asks again. (Settings › This computer › Pictures opens it too.)";
+      }
+      if (err instanceof GeminiProblem) return err.message;
+      return `Gemini didn't work: ${(err as Error).message}`;
+    }
+  },
+};
 chats.terminal = {
   async run(tabId, command, opts) {
     broadcast({ type: 'term.show', tabId });
@@ -392,6 +412,15 @@ app.post<{ Querystring: { dir?: string; name?: string } }>('/api/files/upload', 
 
 // Lets the dashboard retry starting the sensors (e.g. after the UAC prompt was declined).
 app.post('/api/sensors/start', async () => ({ result: await ensureLhmRunning() }));
+// Settings › This computer › Pictures: Gemini in a window on Harv's profile, to sign in once.
+app.post('/api/gemini/signin', async (_req, reply) => {
+  try {
+    await gemini.openSignIn();
+    return { ok: true };
+  } catch (err) {
+    return reply.code(500).send({ error: (err as Error).message });
+  }
+});
 
 // Stopping and restarting Harv (scripts/harv.ps1, harv.sh on Linux, the desktop shortcuts and Settings' Restart button).
 const HARV_SCRIPT = fileURLToPath(new URL('../../../scripts/harv.ps1', import.meta.url));
@@ -574,6 +603,7 @@ app.addHook('onClose', async () => {
   live.stop();
   scheduler.stop();
   terminals.closeAll();
+  gemini.close();
   chats.closeAll();
   store.close();
   actions.close();

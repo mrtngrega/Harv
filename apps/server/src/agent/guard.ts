@@ -23,6 +23,8 @@ export function describeTool(name: string, input: Record<string, unknown>, chatT
     case 'PowerShell':
     case 'mcp__harv__terminal_run':
       return pick('command').split(/\r?\n/)[0]!.slice(0, 160);
+    case 'mcp__harv__generate_image':
+      return pick('prompt').slice(0, 120);
     case 'mcp__harv__remember':
     case 'mcp__harv__forget':
       return pick('name');

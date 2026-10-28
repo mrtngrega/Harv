@@ -99,7 +99,12 @@ export interface TerminalTools {
   read(tabId: string, lines: number): string;
 }
 
-/** Harv's own MCP server for one chat tab: memory tools, the other chats, handing work to them, projects, scheduled tasks and the terminal. */
+/** Pictures made by Gemini (tools/gemini.ts): returns what to tell the model (saved paths, or what the user must do). */
+export interface ImageTools {
+  generate(prompt: string, images: string[]): Promise<string>;
+}
+
+/** Harv's own MCP server for one chat tab: memory tools, the other chats, handing work to them, projects, scheduled tasks, the terminal and pictures. */
 export function harvServer(
   store: ChatStore,
   tabId: string,
@@ -107,6 +112,7 @@ export function harvServer(
   projects?: ProjectTools,
   schedules?: ScheduleTools,
   terminal?: TerminalTools,
+  images?: ImageTools,
 ) {
   return createSdkMcpServer({
     name: 'harv',
@@ -244,6 +250,23 @@ export function harvServer(
               "Read the latest lines on this chat's Terminal (what the user sees there), e.g. a program started with terminal_run that's still running, or something the user ran.",
               { lines: z.number().int().min(1).max(500).optional().describe('How many of the last lines (default 60)') },
               async ({ lines }) => text(terminal.read(tabId, lines ?? 60)),
+            ),
+          ]
+        : []),
+      ...(images
+        ? [
+            tool(
+              'generate_image',
+              "Make a picture with Google's Gemini when the user asks for one (a photo, illustration, logo, icon, wallpaper…), or change one of their pictures. Write a full, specific prompt in English (subject, style, composition, colours, mood, aspect ratio), not just the user's words. It takes up to a few minutes; the result is saved in your workspace's images folder: name the full path in your reply so the picture shows in the chat. Pass images only when the user gave you pictures for this (they go to Google). If it says the user must sign in, tell them exactly that.",
+              {
+                prompt: z.string().min(1).describe('The full prompt for Gemini'),
+                images: z
+                  .array(z.string())
+                  .max(4)
+                  .optional()
+                  .describe('Full paths of the user’s pictures to edit or use (PNG, JPG, WebP, up to 10 MB each)'),
+              },
+              async ({ prompt, images: inputs }) => text(await images.generate(prompt, inputs ?? [])),
             ),
           ]
         : []),

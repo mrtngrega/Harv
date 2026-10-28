@@ -592,6 +592,39 @@ function ScheduledTasks() {
   );
 }
 
+/** Pictures from Gemini: signing Harv's own Chrome profile in to the Google account kept for it (docs/PLAN.md §6w). */
+function Pictures() {
+  const [status, setStatus] = useState<string | null>(null);
+  const open = async () => {
+    setStatus('Opening…');
+    try {
+      const res = await fetch('/api/gemini/signin', { method: 'POST' });
+      const body = (await res.json()) as { error?: string };
+      setStatus(res.ok ? 'Sign in in the Chrome window, then close it.' : (body.error ?? 'Couldn’t open Chrome.'));
+    } catch {
+      setStatus('Couldn’t reach the Harv server.');
+    }
+  };
+  return (
+    <Sub title="Pictures">
+      <Note>
+        Ask Harv for a picture in any chat and Gemini makes it, on the Google account you sign in with here (once per computer, in a Chrome
+        window of Harv’s own). The free Gemini app has a daily limit.
+      </Note>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => void open()}
+          className="cursor-pointer rounded-lg border border-accent/50 px-3 py-1.5 text-xs text-accent hover:bg-accent/15"
+        >
+          Sign in to Gemini
+        </button>
+        {status && <span className="text-xs text-muted">{status}</span>}
+      </div>
+    </Sub>
+  );
+}
+
 /** The photo: preview, choose, remove. */
 function PhotoPicker() {
   const { version } = useBackground();
@@ -1024,6 +1057,7 @@ export function SettingsView() {
           <RestartButton />
         </Sub>
         <ScheduledTasks />
+        <Pictures />
         <Watchdog />
         {inApp && <AppSection />}
       </Group>

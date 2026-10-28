@@ -80,6 +80,8 @@ export const HARV_TOOLS = [
   'mcp__harv__list_scheduled',
   'mcp__harv__cancel_scheduled',
   'mcp__harv__terminal_read',
+  // Sends the prompt (and pictures the user gave for it) to Gemini, like a web search.
+  'mcp__harv__generate_image',
 ];
 export const ENABLED_TOOLS = [...READ_TOOLS, ...FILE_WRITE_TOOLS, ...SHELL_TOOLS];
 
