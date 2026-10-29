@@ -22,6 +22,8 @@ import { SpecialTab, TOOL_ICONS, ViewMenu } from './tools/TabParts.tsx';
 import { addReference, lastPart, setDraftText, updatePending, useDrafts, useDraftTexts } from '../lib/drafts.ts';
 import { desktop, inApp } from '../lib/desktop.ts';
 import { ErrorBoundary, retryImport } from './ErrorBoundary.tsx';
+import { isPhone } from '../lib/phone.ts';
+import { MicButton, VoiceBar } from './phone/VoiceBar.tsx';
 
 // The terminal (xterm) and the explorer load when first opened, keeping the dashboard's first load small.
 const TerminalView = lazy(() => retryImport(() => import('./tools/TerminalView.tsx')).then((m) => ({ default: m.TerminalView })));
@@ -482,7 +484,10 @@ export function ChatPanel() {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
       }}
       onDrop={(e) => !nonChat && onDrop(e)}
-      className="glass relative flex h-[calc(var(--app-h)-140px)] min-h-[420px] min-w-0 flex-1 flex-col overflow-hidden rounded-2xl lg:h-auto lg:max-h-[calc(var(--app-h)-110px)] lg:min-h-0"
+      className={`glass relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl ${
+        // The phone's layout gives the chat all the height that's left (docs/PLAN.md §6q).
+        isPhone ? 'min-h-0' : 'h-[calc(var(--app-h)-140px)] min-h-[420px] lg:h-auto lg:max-h-[calc(var(--app-h)-110px)] lg:min-h-0'
+      }`}
     >
       {/* The whole bar takes a dragged tab: gaps, the space past the last tab and the + too (the nearest slot wins). */}
       <div
@@ -847,6 +852,7 @@ export function ChatPanel() {
           </div>
         )}
 
+        {!nonChat && isPhone && <VoiceBar />}
         {!nonChat && (
           <form onSubmit={send} className="relative flex items-end gap-2.5 pt-1 pr-3 pb-2.5 pl-5">
             {menuItems.length > 0 && <SlashMenu items={menuItems} index={menuAt} onPick={(c) => pickCommand(c.name)} />}
@@ -998,6 +1004,7 @@ export function ChatPanel() {
                 +<span className="hidden sm:inline"> ATTACH</span>
               </button>
             </div>
+            {isPhone && <MicButton />}
             {active?.busy ? (
               <button
                 type="button"

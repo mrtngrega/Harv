@@ -196,6 +196,10 @@ describe('reading', () => {
     }
     expect(tier('mcp__harv__schedule_task', { prompt: 'x' })).toBe('green');
   });
+
+  it("lets Harv notify the user's own phone without asking (docs/PLAN.md §6q)", () => {
+    expect(tier('mcp__harv__phone_notify', { title: 'Build', body: 'Done', talk: true })).toBe('green');
+  });
 });
 
 describe('writing files', () => {

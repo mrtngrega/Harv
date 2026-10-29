@@ -29,7 +29,8 @@ function cli(): string {
   return IS_WINDOWS && existsSync(win) ? win : 'tailscale';
 }
 
-function run(args: string[]): Promise<string> {
+/** Runs the tailscale CLI (also used by phone access, docs/PLAN.md §6q). */
+export function run(args: string[]): Promise<string> {
   return new Promise((resolve, reject) =>
     execFile(cli(), args, { timeout: 8000, windowsHide: true }, (err, out) => (err ? reject(err) : resolve(String(out)))),
   );

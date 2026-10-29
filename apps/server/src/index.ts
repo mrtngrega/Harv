@@ -31,7 +31,8 @@ import { ActionStore } from './store/actions.ts';
 import { ChatStore } from './store/chats.ts';
 import { RouteStore } from './store/routes.ts';
 import { UsageMeter } from './usage/meter.ts';
-import { loadSettings, updateSettings, workDir } from './settings.ts';
+import { loadSettings, onSettingsChange, updateSettings, workDir } from './settings.ts';
+import { phoneOf, PhoneService } from './phone/service.ts';
 import { keepBackup, listBackups, pruneBackups } from './safety/backup.ts';
 import { applySharedUi, loadUi, resetUi, saveUi, sharedUi } from './ui.ts';
 import { BrowserHost } from './tools/browserHost.ts';
@@ -96,7 +97,13 @@ const ALLOWED_ORIGINS = new Set([
 // requests here. Its requests still carry its own name in Host, so only Harv's own names get in.
 const ALLOWED_HOSTS = new Set([...ALLOWED_ORIGINS].map((o) => new URL(o).host));
 app.addHook('onRequest', async (req, reply) => {
-  if (!ALLOWED_HOSTS.has((req.headers.host ?? '').toLowerCase())) return reply.code(403).send({ error: 'Forbidden host' });
+  const host = (req.headers.host ?? '').toLowerCase();
+  // The phone address (`tailscale serve`, docs/PLAN.md §6q) has its own, stricter check: a paired phone with Face ID.
+  if (!ALLOWED_HOSTS.has(host) && phone?.isPhoneHost(host)) {
+    if (!phone.check(req, reply)) return reply;
+    return;
+  }
+  if (!ALLOWED_HOSTS.has(host)) return reply.code(403).send({ error: 'Forbidden host' });
   const origin = req.headers.origin;
   if (origin && !ALLOWED_ORIGINS.has(origin)) return reply.code(403).send({ error: 'Forbidden origin' });
   // A plain <img> or link from another site sends no Origin, but browsers mark it. Only the dashboard itself may read files.
@@ -106,7 +113,13 @@ app.addHook('onRequest', async (req, reply) => {
 
 // Every connected dashboard window gets every update, so several windows stay in sync.
 const clients = new Set<(msg: ServerMessage) => void>();
-const broadcast = (msg: ServerMessage) => clients.forEach((send) => send(msg));
+const broadcast = (msg: ServerMessage) => {
+  clients.forEach((send) => send(msg));
+  // Some events also go to the phone as a notification (docs/PLAN.md §6q).
+  phone?.observe(msg);
+};
+// eslint-disable-next-line prefer-const -- made further down, once the chats and sync exist
+let phone: PhoneService | undefined;
 
 const metrics = new MetricsCollector(() => loadSettings().metricsMs);
 /** A laptop (asked once at start; false until known). */
@@ -253,6 +266,37 @@ const scheduler = new Scheduler(
   loadSettings().deviceName || hostname(),
 );
 chats.schedules = scheduler;
+// Harv on the phone (docs/PLAN.md §6q): `tailscale serve`, pairing, Face ID, push, Siri and the share sheet.
+const deviceLabel = () => loadSettings().deviceName || hostname();
+phone = new PhoneService({
+  enabled: () => loadSettings().phoneAccess,
+  deviceName: deviceLabel,
+  peers: () => {
+    const names = new Map(sync.status().peers.map((p) => [p.id, p.name]));
+    return sync.livePeers().map((p) => ({ name: names.get(p.id) ?? 'Other device', ip: p.ip }));
+  },
+  broadcast,
+  log: (message) => app.log.warn(message),
+  phoneTab: () => `phone-${sync.status().device.id}`,
+  ask: (tabId, text, files, waitMs) => chats.askSpoken(tabId, 'Phone', text, files, waitMs),
+  saveFile: (tabId, name, data) => saveAttachment(tabId, name, data),
+  send: (tabId, text, files) => chats.send(tabId, text, 'auto', 'medium', files),
+  title: (tabId) => store.title(tabId) ?? 'Chat',
+  openChat: (tabId) => chats.ensureOpen(tabId, 'Phone'),
+});
+phone.routes(app);
+void phone.refresh();
+chats.phone = {
+  notify: async (tabId, title, body, talk) => {
+    const sent = await phone!.notify({ title, body, tabId, talk, tag: talk ? `talk-${tabId}` : undefined });
+    return sent
+      ? `Sent to ${sent} phone${sent > 1 ? 's' : ''}.`
+      : 'No phone gets notifications yet: the user turns them on in the Harv app on the phone (Settings › Phone).';
+  },
+};
+onSettingsChange((before, after) => {
+  if (before.phoneAccess !== after.phoneAccess) void phone?.refresh();
+});
 // Harv's terminal_run / terminal_read: the chat's own terminal, shown in the dashboard while Harv uses it.
 // Harv's generate_image: pictures from the Gemini website on Harv's own Chrome profile (docs/PLAN.md §6w).
 const gemini = new GeminiImages();
@@ -529,8 +573,12 @@ app.post('/api/restart', async () => {
   return { ok: true };
 });
 
-app.get('/ws', { websocket: true }, (socket) => {
+app.get('/ws', { websocket: true }, (socket, req) => {
   const send = (msg: ServerMessage) => socket.send(JSON.stringify(msg));
+  /** This window is a paired phone (docs/PLAN.md §6q). */
+  const phoneId = phoneOf(req);
+  const fromPhone = !!phoneId;
+  const detachPhone = phoneId ? phone?.attachSocket(phoneId, () => socket.close(4401, 'revoked')) : undefined;
   clients.add(send);
   send({
     type: 'hello',
@@ -559,6 +607,8 @@ app.get('/ws', { websocket: true }, (socket) => {
     unsubscribe();
     clients.delete(send);
     browserHost.detach(send);
+    phone?.setVisible(send, false);
+    detachPhone?.();
   });
 
   socket.on('message', (raw) => {
@@ -569,6 +619,8 @@ app.get('/ws', { websocket: true }, (socket) => {
       return;
     }
     if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') return;
+    // A phone's Face ID unlock ends after 30 minutes idle; each message keeps it alive.
+    if (phoneId && !phone?.stillUnlocked(phoneId, req.headers.cookie)) return socket.close(4401, 'locked');
     // One bad message must never take Harv down (it doesn't restart by itself): log it and go on.
     try {
       handle(msg);
@@ -588,8 +640,22 @@ app.get('/ws', { websocket: true }, (socket) => {
       case 'browser.result':
         browserHost.result(msg.reqId, msg.ok, msg.value, msg.error);
         break;
+      case 'phone.visible':
+        if (fromPhone) phone?.setVisible(send, msg.visible === true);
+        break;
+      case 'phone.list':
+        phone?.publish();
+        break;
+      case 'phone.revoke':
+        phone?.revoke(String(msg.id));
+        break;
+      case 'phone.rename':
+        phone?.phones.rename(String(msg.id), String(msg.name));
+        phone?.publish();
+        break;
       case 'chat.send':
-        void chats.send(msg.tabId, msg.text, msg.model, msg.effort, msg.attachments);
+        if (fromPhone) phone?.markPhoneTurn(msg.tabId);
+        void chats.send(msg.tabId, msg.text, msg.model, msg.effort, msg.attachments, msg.spoken === true);
         break;
       case 'chat.stop':
         void chats.stop(msg.tabId);

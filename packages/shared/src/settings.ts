@@ -104,6 +104,10 @@ export interface HarvSettings {
   syncRepo: string;
   /** This device's name, shown on the other one ('' = the computer's name). */
   deviceName: string;
+
+  // Phone (docs/PLAN.md §6q)
+  /** Paired phones may open this device's Harv over Tailscale (`tailscale serve`). Per device, off by default. */
+  phoneAccess: boolean;
 }
 
 export const DEFAULT_SETTINGS: HarvSettings = {
@@ -143,6 +147,7 @@ export const DEFAULT_SETTINGS: HarvSettings = {
   syncEnabled: false,
   syncRepo: '',
   deviceName: '',
+  phoneAccess: false,
 };
 
 /**

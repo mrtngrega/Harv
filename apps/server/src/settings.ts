@@ -85,6 +85,7 @@ export function cleanSettings(raw: Raw, base: HarvSettings = DEFAULT_SETTINGS): 
         ]
       : base.watchdogIgnored,
     syncEnabled: bool(raw.syncEnabled, base.syncEnabled),
+    phoneAccess: bool(raw.phoneAccess, base.phoneAccess),
     syncRepo:
       typeof raw.syncRepo === 'string' && (raw.syncRepo.trim() === '' || SYNC_REPO.test(raw.syncRepo.trim()))
         ? raw.syncRepo.trim()

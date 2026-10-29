@@ -92,9 +92,12 @@ function ProjectRow({ project, latest, active }: { project: Project; latest?: Hi
   );
 }
 
-export function HistorySidebar() {
+/** `sheet`: the phone's slide-in (docs/PLAN.md §6q), always open, closed with `onClose`. */
+export function HistorySidebar({ sheet = false, onClose }: { sheet?: boolean; onClose?: () => void } = {}) {
   // Starts collapsed (the user's wish); the ‹ › buttons match the stats panel's.
-  const [open, setOpen] = useState(false);
+  const [opened, setOpened] = useState(false);
+  const open = sheet || opened;
+  const setOpen = (on: boolean) => (sheet ? !on && onClose?.() : setOpened(on));
   const { items, query } = useHistory();
   const { activeId, tabs } = useChat();
   const { list: projects } = useProjects();
@@ -138,7 +141,9 @@ export function HistorySidebar() {
   return (
     <nav
       aria-label="Chat history"
-      className="glass flex max-h-64 w-full flex-col gap-2.5 rounded-2xl p-3 lg:max-h-[calc(var(--app-h)-110px)] lg:w-[230px] lg:flex-none"
+      className={`glass flex w-full flex-col gap-2.5 rounded-2xl p-3 ${
+        sheet ? 'h-full' : 'max-h-64 lg:max-h-[calc(var(--app-h)-110px)] lg:w-[230px] lg:flex-none'
+      }`}
     >
       <button
         type="button"

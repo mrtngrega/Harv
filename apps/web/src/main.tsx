@@ -6,16 +6,26 @@ import '@fontsource/ibm-plex-mono/600.css';
 import './index.css';
 import { App } from './App.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
+import { PhoneGate } from './components/phone/PhoneGate.tsx';
+import { isPhone } from './lib/phone.ts';
 import { startSocket } from './lib/socket.ts';
 import './lib/layout.ts';
 import './lib/desktop.ts';
 
-startSocket();
+// On the phone (docs/PLAN.md §6q) the connection waits for pairing and Face ID.
+if (!isPhone) startSocket();
+else document.getElementById('boot')?.remove();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary whole>
-      <App />
+      {isPhone ? (
+        <PhoneGate>
+          <App />
+        </PhoneGate>
+      ) : (
+        <App />
+      )}
     </ErrorBoundary>
   </StrictMode>,
 );

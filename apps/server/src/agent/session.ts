@@ -5,7 +5,7 @@ import { StruggleWatch } from '../router/struggle.ts';
 import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
 import type { ContentBlockParam } from './attachments.ts';
-import type { BrowserTools, Delegate, ImageTools, ProjectTools, ScheduleTools, TerminalTools } from './chatTools.ts';
+import type { BrowserTools, Delegate, ImageTools, PhoneTools, ProjectTools, ScheduleTools, TerminalTools } from './chatTools.ts';
 import { toCommandInfo } from './commands.ts';
 import { describeTool, MEMORY_TOOLS } from './guard.ts';
 import { memoryChanges, memorySnapshot } from './memory.ts';
@@ -135,6 +135,7 @@ export class ChatSession {
       terminal?: TerminalTools;
       images?: ImageTools;
       browser?: BrowserTools;
+      phone?: PhoneTools;
     } = {},
   ) {
     this.resume = start.resume;

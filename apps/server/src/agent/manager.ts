@@ -31,6 +31,7 @@ import {
   type HandOff,
   type ProjectTools,
   type BrowserTools,
+  type PhoneTools,
   type ImageTools,
   type ScheduleTools,
   type TerminalTools,
@@ -108,6 +109,10 @@ type Queued =
  * Owns one ChatSession per open tab, derives Harv's overall status, and records
  * every finished line in the history database so chats survive restarts.
  */
+/** In front of a spoken turn (Siri, the phone's voice mode): the reply is read aloud. */
+export const SPOKEN_NOTE =
+  "[The user is talking to you by voice from their phone, and your reply is read aloud. Answer in one to three short spoken sentences: no Markdown, lists, tables, code or file paths unless they ask. For a longer job, say you're on it, do it, then end with one short spoken sentence on the result.]\n\n";
+
 export class ChatManager {
   private sessions = new Map<string, ChatSession>();
   /** Chats that just moved into or out of a project: the conversation so far, given to the new session with the next message. */
@@ -137,6 +142,8 @@ export class ChatManager {
   private handoffs = new Map<string, string>();
   /** What a tab replies while another chat waits for it. */
   private replies = new Map<string, string[]>();
+  /** A note for Claude in front of a tab's next turn only (e.g. "this reply is spoken", docs/PLAN.md §6q). */
+  private notes = new Map<string, string>();
   /** Messages typed while a tab was busy, in order. */
   private followUps = new Map<string, FollowUp[]>();
   /** Each running session's slash commands (otherwise the catalog's). */
@@ -156,6 +163,8 @@ export class ChatManager {
   images?: ImageTools;
   /** The shared browser in the app (set by the server). */
   browser?: BrowserTools;
+  /** Notifications on the user's phones (set by the server, docs/PLAN.md §6q). */
+  phone?: PhoneTools;
 
   constructor(
     private store: ChatStore,
@@ -448,14 +457,23 @@ export class ChatManager {
         terminal: this.terminal,
         images: this.images,
         browser: this.browser,
+        phone: this.phone,
       },
     );
     this.sessions.set(tabId, session);
     return session;
   }
 
-  async send(tabId: string, message: string, choice: ModelChoice, effort: EffortLevel, sent: Attachment[] = []): Promise<void> {
+  async send(
+    tabId: string,
+    message: string,
+    choice: ModelChoice,
+    effort: EffortLevel,
+    sent: Attachment[] = [],
+    spoken = false,
+  ): Promise<void> {
     this.usedHere.set(tabId, Date.now());
+    if (spoken) this.notes.set(tabId, SPOKEN_NOTE);
     // Files and folders on the PC are checked here (the dashboard only names them).
     const files = cleanAttachments(sent);
     const isNew = !this.store.exists(tabId);
@@ -736,6 +754,11 @@ export class ChatManager {
   /** Routes a message and runs it. `note` goes in front of what Claude sees (not the chat log or the router). */
   private async start(tabId: string, message: string, choice: ModelChoice, effort: EffortLevel, files: Attachment[], note = '') {
     // A chat that just changed project starts a new session: it gets the conversation so far as context.
+    const once = this.notes.get(tabId);
+    if (once) {
+      this.notes.delete(tabId);
+      note = once + note;
+    }
     const carried = this.carry.get(tabId);
     const stale = this.store.takeStale(tabId);
     if (carried) {
@@ -1039,6 +1062,60 @@ export class ChatManager {
    * A scheduled task is due (docs/PLAN.md §6s C4): a turn in the chat that made it, reopened
    * if it was closed (a new one if it's gone), on AUTO. Queued like any message if the chat is busy.
    */
+  /** A chat the server starts by itself (the phone chat): made if new and open as a tab, without taking the focus. */
+  ensureOpen(tabId: string, title: string): void {
+    const known = this.store.exists(tabId);
+    this.store.ensureChat(tabId, title);
+    if (!this.store.openChats().some((c) => c.id === tabId)) {
+      this.store.setOpen(tabId, true);
+      const chat = this.store.snapshot(tabId);
+      if (chat) this.broadcast({ type: 'chat.opened', chat, focus: false });
+    }
+    if (!known) this.publishHistory();
+  }
+
+  /**
+   * Siri on the phone (`POST /api/phone/ask`, docs/PLAN.md §6q): a spoken message runs as a turn in
+   * the phone's chat, like a typed one, and its reply comes back for Siri to read out. A turn that
+   * takes longer than `waitMs` keeps going; its answer appears in the chat (and a push says so).
+   */
+  async askSpoken(
+    tabId: string,
+    title: string,
+    text: string,
+    files: Attachment[],
+    waitMs: number,
+  ): Promise<{ reply: string; done: boolean }> {
+    this.ensureOpen(tabId, title);
+    if (this.meter.paused) return { reply: `Your Claude limit is used up. It resets ${this.resetText()}.`, done: true };
+    if (this.busy(tabId) || this.followUps.get(tabId)?.length || this.replies.has(tabId)) {
+      await this.send(tabId, text, 'auto', 'medium', files, true);
+      return { reply: 'I’m still busy in the phone chat. This is next in line; I’ll let you know when it’s done.', done: false };
+    }
+    this.usedHere.set(tabId, Date.now());
+    this.notes.set(tabId, SPOKEN_NOTE);
+    this.addLine(tabId, { kind: 'you', text, ...(files.length ? { files: files.map(lineName) } : {}) });
+    this.replies.set(tabId, []);
+    let finished = false;
+    const done = (async () => {
+      try {
+        await this.begin(tabId, text, 'auto', 'medium', files, false);
+        await this.turnDone(tabId);
+      } finally {
+        finished = true;
+      }
+    })();
+    await Promise.race([done.catch(() => {}), new Promise((r) => setTimeout(r, waitMs))]);
+    if (!finished) {
+      // Still working: keep the collector until the turn ends, then drop it.
+      void done.catch(() => {}).finally(() => this.replies.delete(tabId));
+      return { reply: 'On it. This takes a bit longer; I’ll let you know when it’s done.', done: false };
+    }
+    const reply = (this.replies.get(tabId) ?? []).join('\n\n').trim();
+    this.replies.delete(tabId);
+    return { reply: reply || 'Done.', done: true };
+  }
+
   async runScheduled(task: { tabId: string; title: string; prompt: string }, late: boolean): Promise<void> {
     const { tabId } = task;
     const known = this.store.exists(tabId);

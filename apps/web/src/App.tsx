@@ -4,6 +4,8 @@ import { HistorySidebar } from './components/HistorySidebar.tsx';
 import { ChatPanel } from './components/ChatPanel.tsx';
 import { StatsPanel } from './components/StatsPanel.tsx';
 import { Toasts } from './components/Toasts.tsx';
+import { PhoneShell } from './components/phone/PhoneShell.tsx';
+import { isPhone } from './lib/phone.ts';
 import { revealWhenReady } from './lib/boot.ts';
 import { getChatState, subscribeChat } from './lib/chatStore.ts';
 import { desktop, inApp } from './lib/desktop.ts';
@@ -65,18 +67,22 @@ export function App() {
       )}
       {!plain && <div aria-hidden="true" className="absolute inset-0" style={{ background: `rgb(10 16 24 / ${scrim / 100})` }} />}
 
-      <div
-        className="relative flex min-h-[var(--app-h)] flex-col gap-3.5 p-4"
-        onMouseDown={(e) => e.target === e.currentTarget && dragWindow(e)}
-      >
-        <Header />
-        {/* Three columns that shrink from 1024px up; stacked below that. */}
-        <main className="flex flex-1 flex-col items-stretch gap-3.5 lg:min-h-0 lg:flex-row">
-          <HistorySidebar />
-          <ChatPanel />
-          <StatsPanel />
-        </main>
-      </div>
+      {isPhone ? (
+        <PhoneShell />
+      ) : (
+        <div
+          className="relative flex min-h-[var(--app-h)] flex-col gap-3.5 p-4"
+          onMouseDown={(e) => e.target === e.currentTarget && dragWindow(e)}
+        >
+          <Header />
+          {/* Three columns that shrink from 1024px up; stacked below that. */}
+          <main className="flex flex-1 flex-col items-stretch gap-3.5 lg:min-h-0 lg:flex-row">
+            <HistorySidebar />
+            <ChatPanel />
+            <StatsPanel />
+          </main>
+        </div>
+      )}
       <Toasts />
     </div>
   );

@@ -26,12 +26,35 @@ export function sendMessage(msg: ClientMessage): boolean {
   return true;
 }
 
+/** A locked phone (docs/PLAN.md §6q) stops reconnecting until Face ID unlocks it again. */
+let paused = false;
+let reconnect: (() => void) | null = null;
+
+export function pauseSocket(): void {
+  paused = true;
+  socket?.close();
+}
+
+export function resumeSocket(): void {
+  if (!paused) return;
+  paused = false;
+  reconnect?.();
+}
+
+/** Fires with the close code each time the connection drops (4401: the phone's unlock ended). */
+const closeListeners = new Set<(code: number) => void>();
+export function onSocketClosed(listener: (code: number) => void): () => void {
+  closeListeners.add(listener);
+  return () => closeListeners.delete(listener);
+}
+
 export function startSocket(): void {
   if (started) return;
   started = true;
   let delay = 500;
 
   const connect = () => {
+    if (paused) return;
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
     socket = new WebSocket(`${scheme}://${location.host}/ws`);
     socket.onopen = () => {
@@ -42,11 +65,17 @@ export function startSocket(): void {
       const msg = JSON.parse(String(event.data)) as ServerMessage;
       messageListeners.forEach((l) => l(msg));
     };
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       connectionListeners.forEach((l) => l(false));
+      closeListeners.forEach((l) => l(event.code));
+      if (paused) return;
       setTimeout(connect, delay);
       delay = Math.min(delay * 2, 8000);
     };
+  };
+  reconnect = () => {
+    delay = 500;
+    connect();
   };
   connect();
 }

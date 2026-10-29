@@ -163,7 +163,16 @@ export interface HistoryItem {
 }
 
 export type ChatClientMessage =
-  | { type: 'chat.send'; tabId: string; text: string; model: ModelChoice; effort: EffortLevel; attachments?: Attachment[] }
+  /** `spoken`: the phone's voice mode, so the reply is read aloud (docs/PLAN.md §6q). */
+  | {
+      type: 'chat.send';
+      tabId: string;
+      text: string;
+      model: ModelChoice;
+      effort: EffortLevel;
+      attachments?: Attachment[];
+      spoken?: boolean;
+    }
   | { type: 'chat.stop'; tabId: string }
   /** Stop one background task (a subagent or shell) without stopping the reply. */
   | { type: 'chat.stopTask'; tabId: string; taskId: string }

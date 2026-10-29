@@ -84,6 +84,8 @@ export const HARV_TOOLS = [
   'mcp__harv__terminal_read',
   // Sends the prompt (and pictures the user gave for it) to Gemini, like a web search.
   'mcp__harv__generate_image',
+  // A notification on the user's own phone: it's the user, so the sending check doesn't ask (docs/PLAN.md §6q).
+  'mcp__harv__phone_notify',
 ];
 export const ENABLED_TOOLS = [...READ_TOOLS, ...FILE_WRITE_TOOLS, ...SHELL_TOOLS];
 

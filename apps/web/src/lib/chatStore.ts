@@ -618,8 +618,10 @@ export const chat = {
     return store.get().activeId!;
   },
 
-  send(text: string, attachments: Attachment[] = []) {
+  /** `spoken`: from the phone's voice mode, so Harv answers in a few sentences to be read aloud (docs/PLAN.md §6q). */
+  send(text: string, attachments: Attachment[] = [], spoken = false) {
     const tabId = chat.ensureTab();
+    const voice = spoken ? { spoken: true } : {};
     const { model, effort } = store.get();
     const files = attachments.map((a) => a.name);
     // /btw answers on the side, even mid-reply, and /report writes a note: the server adds the lines, and no turn starts.
@@ -631,7 +633,7 @@ export const chat = {
     }
     // Harv is still answering: the server queues it (shown above the input) and runs it when the turn ends.
     if (store.get().tabs.find((t) => t.id === tabId)?.busy) {
-      if (!sendMessage({ type: 'chat.send', tabId, text, model, effort, ...(attachments.length ? { attachments } : {}) }))
+      if (!sendMessage({ type: 'chat.send', tabId, text, model, effort, ...voice, ...(attachments.length ? { attachments } : {}) }))
         updateTab(tabId, (t) => ({ ...t, lines: [...t.lines, line('error', 'Not connected to the Harv server.')] }));
       return;
     }
@@ -641,7 +643,7 @@ export const chat = {
       stored: true,
       lines: [...t.lines, line('you', text, files.length ? { files } : {})],
     }));
-    chat.dispatch(tabId, { type: 'chat.send', tabId, text, model, effort, ...(attachments.length ? { attachments } : {}) });
+    chat.dispatch(tabId, { type: 'chat.send', tabId, text, model, effort, ...voice, ...(attachments.length ? { attachments } : {}) });
   },
 
   /** Runs the tab's last message again one step up the model·effort ladder. */

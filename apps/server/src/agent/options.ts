@@ -12,6 +12,7 @@ import {
   harvServer,
   recentChatsContext,
   type BrowserTools,
+  type PhoneTools,
   type Delegate,
   type ProjectTools,
   type ImageTools,
@@ -62,6 +63,8 @@ export interface ChatContext {
   images?: ImageTools;
   /** Harv's browser_* tools. */
   browser?: BrowserTools;
+  /** Harv's phone_notify tool (docs/PLAN.md §6q). */
+  phone?: PhoneTools;
 }
 
 /** The part about the user's other chats, shared by both kinds of chat. */
@@ -282,7 +285,7 @@ export function buildOptions(
             strictMcpConfig: true,
           }),
     mcpServers: chat
-      ? { harv: harvServer(chat.store, chat.tabId, chat.delegate, chat.projects, chat.schedules, chat.terminal, chat.images, chat.browser) }
+      ? { harv: harvServer(chat.store, chat.tabId, chat.delegate, chat.projects, chat.schedules, chat.terminal, chat.images, chat.browser, chat.phone) }
       : {},
     permissionMode: planning ? 'plan' : 'default',
     // Checkpoints of the files Claude edits, so a rewind can put them back.

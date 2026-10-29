@@ -56,11 +56,13 @@ function CompactRow({ item }: { item: CompactItem }) {
   );
 }
 
-export function StatsPanel() {
+/** `sheet`: the phone's slide-in (docs/PLAN.md §6q), always expanded, closed with `onClose`. */
+export function StatsPanel({ sheet = false, onClose }: { sheet?: boolean; onClose?: () => void } = {}) {
   const { statsExpanded, compactRows, metricsMs } = useSettings();
   // Starts the way Settings says; the ‹ › buttons change it for this visit.
-  const [toggled, setWide] = useState<boolean | null>(null);
-  const wide = toggled ?? statsExpanded;
+  const [toggled, setToggled] = useState<boolean | null>(null);
+  const wide = sheet || (toggled ?? statsExpanded);
+  const setWide = (on: boolean) => (sheet ? !on && onClose?.() : setToggled(on));
   const metrics = useMetrics();
   const usage = useUsage();
   const show = (items: CompactItem[]) => items.filter((i) => compactRows.includes(i.id));
@@ -93,7 +95,9 @@ export function StatsPanel() {
   return (
     <aside
       aria-label="System and plan, expanded"
-      className="glass animate-fade-in flex w-full flex-col gap-2.5 overflow-y-auto rounded-2xl p-3 lg:max-h-[calc(var(--app-h)-110px)] lg:w-[clamp(320px,30vw,470px)] lg:flex-none"
+      className={`glass animate-fade-in flex w-full flex-col gap-2.5 overflow-y-auto rounded-2xl p-3 ${
+        sheet ? 'h-full' : 'lg:max-h-[calc(var(--app-h)-110px)] lg:w-[clamp(320px,30vw,470px)] lg:flex-none'
+      }`}
     >
       <div className="flex items-center justify-between px-1">
         <span className="text-[11px] tracking-[2px] text-muted">SYSTEM · LIVE · {metricsMs / 1000}s</span>

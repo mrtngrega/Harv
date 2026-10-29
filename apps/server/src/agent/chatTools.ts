@@ -139,6 +139,11 @@ export interface ImageTools {
   generate(prompt: string, images: string[]): Promise<string>;
 }
 
+/** The user's phones (phone/service.ts): returns what to tell the model. */
+export interface PhoneTools {
+  notify(tabId: string, title: string, body: string, talk: boolean): Promise<string>;
+}
+
 /** Harv's own MCP server for one chat tab: memory tools, the other chats, handing work to them, projects, scheduled tasks, the terminal and pictures. */
 export function harvServer(
   store: ChatStore,
@@ -149,6 +154,7 @@ export function harvServer(
   terminal?: TerminalTools,
   images?: ImageTools,
   browser?: BrowserTools,
+  phone?: PhoneTools,
 ) {
   return createSdkMcpServer({
     name: 'harv',
@@ -264,6 +270,20 @@ export function harvServer(
               'Cancel a scheduled task by its id (from list_scheduled), when the user asks to stop it.',
               { id: z.string().min(1) },
               async ({ id }) => text(schedules.cancel(id) ? `Cancelled ${id}.` : `No scheduled task with id ${id}.`),
+            ),
+          ]
+        : []),
+      ...(phone
+        ? [
+            tool(
+              'phone_notify',
+              "Send a notification to the user's own iPhone (the Harv app on it), e.g. when they asked to be told when something finishes, for a reminder from a scheduled task, or when you need them and they may be away from the computer. With talk, tapping it opens this chat in voice mode and the body is read aloud (\"Harv wants to talk\"): use it when they'd want to answer by voice. Keep the title short; the body is one or two sentences, no secrets. It's the user's own phone, so it needs no permission.",
+              {
+                title: z.string().min(1).max(60),
+                body: z.string().min(1).max(240),
+                talk: z.boolean().optional().describe('Tapping opens voice mode and reads the body aloud'),
+              },
+              async ({ title, body, talk }) => text(await phone.notify(tabId, title, body, talk === true)),
             ),
           ]
         : []),

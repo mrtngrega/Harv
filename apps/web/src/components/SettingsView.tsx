@@ -4,6 +4,8 @@ import { useChat } from '../lib/chatStore.ts';
 import { ACCENTS, COMPACT_ROWS, DEFAULT_SETTINGS, WARN_CHOICES, type BackupInfo, type CompactRow, type HarvSettings } from '@harv/shared';
 import { comboOf, desktop, inApp, type AppSettings, type UpdateInfo } from '../lib/desktop.ts';
 import { ago } from '../lib/format.ts';
+import { disablePush, enablePush, isPhone, lockPhone, newShortcutToken, testPush } from '../lib/phone.ts';
+import { askPhones, revokePhone, usePhones } from '../lib/phoneStore.ts';
 import {
   projectActions,
   syncNow,
@@ -521,6 +523,210 @@ function Sync() {
         )}
       </Sub>
     </>
+  );
+}
+
+/** Settings › Phone on the computer: the switch, the address, the paired phones (docs/PLAN.md §6q). */
+function PhoneAccessSettings() {
+  const settings = useSettings();
+  const { phones, access } = usePhones();
+  useEffect(() => void askPhones(), []);
+  return (
+    <>
+      <Sub title="Phone access">
+        <Toggle
+          on={settings.phoneAccess}
+          label="Open Harv from my phone"
+          hint="Only over Tailscale, only from your own account, and only on phones you pair here, with Face ID each time. Nothing is opened to the internet."
+          onChange={(phoneAccess) => updateSettings({ phoneAccess })}
+        />
+        {settings.phoneAccess && access?.problem && <Note warn>{access.problem}</Note>}
+        {settings.phoneAccess && access?.serving && access.url && (
+          <>
+            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              <span className="text-faint">Address:</span>
+              <code className="rounded bg-black/30 px-1.5 py-0.5 text-ink select-all">{access.url}</code>
+              <CopyButton text={access.url} />
+            </div>
+            <Note>
+              On the iPhone: Tailscale on (same account) → open the address in Safari → Share › Add to Home Screen → open Harv from the Home
+              Screen → pair. The code shows up here.
+            </Note>
+          </>
+        )}
+        {settings.phoneAccess && !access?.serving && !access?.problem && <Note>Starting Tailscale’s phone address…</Note>}
+      </Sub>
+      <Sub title="Paired phones">
+        {phones.length === 0 && <Note>None yet.</Note>}
+        {phones.map((p) => (
+          <div key={p.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <span className="text-ink">{p.name}</span>
+            <span className="text-[11px] text-faint">
+              {[p.passkey ? 'Face ID' : 'Face ID not set up', p.push && 'notifications', p.shortcut && 'Siri'].filter(Boolean).join(' · ')}
+              {p.lastSeen ? ` · seen ${ago(p.lastSeen)}` : ''}
+            </span>
+            <button type="button" className={`${BUTTON} ml-auto`} onClick={() => revokePhone(p.id)}>
+              Remove
+            </button>
+          </div>
+        ))}
+        {phones.length > 0 && <Note>Remove a phone you lost or gave away: it’s locked out at once.</Note>}
+      </Sub>
+    </>
+  );
+}
+
+function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      className={BUTTON}
+      onClick={() => {
+        void navigator.clipboard.writeText(text).then(
+          () => {
+            setDone(true);
+            window.setTimeout(() => setDone(false), 1500);
+          },
+          () => {},
+        );
+      }}
+    >
+      {done ? 'Copied' : label}
+    </button>
+  );
+}
+
+/** Settings › Phone on the phone itself: notifications, Siri and the share sheet (docs/PLAN.md §6q). */
+function ThisPhoneSettings() {
+  const [pushNote, setPushNote] = useState('');
+  const [pushOn, setPushOn] = useState(() => typeof Notification !== 'undefined' && Notification.permission === 'granted');
+  const [token, setToken] = useState<{ token: string; url: string } | null>(null);
+  const [err, setErr] = useState('');
+  return (
+    <>
+      <Sub title="This phone">
+        <div className="flex flex-wrap gap-2">
+          {!pushOn ? (
+            <button
+              type="button"
+              className={BUTTON}
+              onClick={() =>
+                void enablePush().then((problem) => {
+                  setPushNote(problem ?? 'Notifications are on.');
+                  setPushOn(!problem);
+                })
+              }
+            >
+              Turn on notifications
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className={BUTTON}
+                onClick={() =>
+                  void testPush().then((r) => setPushNote(r.sent ? 'Sent: it should show in a moment.' : 'No phone has notifications on.'))
+                }
+              >
+                Send a test
+              </button>
+              <button
+                type="button"
+                className={BUTTON}
+                onClick={() => void disablePush().then(() => (setPushOn(false), setPushNote('Notifications are off.')))}
+              >
+                Turn off notifications
+              </button>
+            </>
+          )}
+          <button type="button" className={BUTTON} onClick={() => void lockPhone().then(() => location.reload())}>
+            Lock now
+          </button>
+        </div>
+        <Note>
+          Notifications: a reply you started here is done, usage and watchdog warnings, scheduled tasks, and “Harv wants to talk”.
+        </Note>
+        {pushNote && <Note>{pushNote}</Note>}
+      </Sub>
+      <Sub title="Siri and the share sheet">
+        <Note>
+          Two Shortcuts in Apple’s Shortcuts app: “Hey Siri, Harv” to talk to Harv (in CarPlay too), and “Send to Harv” in the share sheet
+          for photos, files and links. They need this phone’s token.
+        </Note>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className={BUTTON}
+            onClick={() =>
+              void newShortcutToken().then(
+                (t) => (setToken(t), setErr('')),
+                (e: Error) => setErr(e.message),
+              )
+            }
+          >
+            {token ? 'Make a new token' : 'Make the Shortcut token'}
+          </button>
+        </div>
+        {err && <Note warn>{err}</Note>}
+        {token && <ShortcutGuide url={token.url} token={token.token} />}
+        {!token && <Note>Making a new token stops the old one: Shortcuts that use it need the new one.</Note>}
+      </Sub>
+    </>
+  );
+}
+
+function CopyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2 text-[11px]">
+      <span className="text-faint">{label}</span>
+      <code className="min-w-0 flex-1 truncate rounded bg-black/30 px-1.5 py-0.5 text-ink select-all">{value}</code>
+      <CopyButton text={value} />
+    </div>
+  );
+}
+
+function ShortcutGuide({ url, token }: { url: string; token: string }) {
+  const auth = `Bearer ${token}`;
+  const Field = CopyField;
+  return (
+    <div className="flex flex-col gap-3 text-[11px] text-muted">
+      <Note warn>Copy these now: the token isn’t shown again (make a new one if you lose it).</Note>
+      <Field label="Ask address" value={`${url}/api/phone/ask`} />
+      <Field label="Share address" value={`${url}/api/phone/share`} />
+      <Field label="Authorization" value={auth} />
+      <div>
+        <p className="m-0 mb-1 text-ink">“Hey Siri, Harv”</p>
+        <ol className="m-0 list-decimal space-y-1 pl-5">
+          <li>Shortcuts › + . Name it “Harv”.</li>
+          <li>Add “Dictate Text”.</li>
+          <li>
+            Add “Get Contents of URL”: the Ask address, Method POST, Headers: <code>Authorization</code> = the Authorization value, Request
+            Body JSON with a Text field <code>text</code> = Dictated Text.
+          </li>
+          <li>
+            Add “Get Dictionary Value”: key <code>reply</code> in Contents of URL.
+          </li>
+          <li>Add “Speak Text”: Dictionary Value.</li>
+          <li>Say “Hey Siri, Harv”, then what you want.</li>
+        </ol>
+      </div>
+      <div>
+        <p className="m-0 mb-1 text-ink">“Send to Harv” (share sheet)</p>
+        <ol className="m-0 list-decimal space-y-1 pl-5">
+          <li>Shortcuts › + . Name it “Send to Harv”. In its ⓘ details turn on “Show in Share Sheet” (Images, Files, URLs, Text).</li>
+          <li>Optional: “Ask for Input” (Text, “Anything for Harv?”), then “URL Encode” on Provided Input.</li>
+          <li>For photos: “Convert Image” Shortcut Input to JPEG (Harv can’t read iPhone HEIC photos).</li>
+          <li>
+            Add “Get Contents of URL”: the Share address followed by <code>?name=</code> + Shortcut Input’s Name (and{' '}
+            <code>&amp;text=</code> + URL Encoded Text), Method POST, the same Authorization header, Request Body File = the (converted)
+            input.
+          </li>
+          <li>Add “Show Notification”: “Sent to Harv”.</li>
+        </ol>
+        <p className="m-0 mt-1">With a note, Harv gets to work on it in the Phone chat. Without one it waits there for you.</p>
+      </div>
+    </div>
   );
 }
 
@@ -1159,6 +1365,10 @@ export function SettingsView() {
 
       <Group title="Sync">
         <Sync />
+      </Group>
+
+      <Group title="Phone" hint={isPhone ? 'This phone.' : 'Harv on your iPhone, over Tailscale. Per device.'}>
+        {isPhone ? <ThisPhoneSettings /> : <PhoneAccessSettings />}
       </Group>
     </div>
   );

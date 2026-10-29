@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { UsageWarning, WatchdogAlert } from '@harv/shared';
 import { chat } from '../lib/chatStore.ts';
+import { addAttachment } from '../lib/drafts.ts';
+import { isPhone } from '../lib/phone.ts';
 import { resetTime } from '../lib/format.ts';
 import { onServerMessage } from '../lib/socket.ts';
 import { updateSettings, useSettings } from '../lib/useHarvSocket.ts';
@@ -26,11 +28,12 @@ export function askHarvAbout(alert: WatchdogAlert) {
 type Toast =
   | { key: string; kind: 'usage'; warning: UsageWarning }
   | { key: string; kind: 'watchdog'; alert: WatchdogAlert }
-  | { key: string; kind: 'project'; text: string };
+  | { key: string; kind: 'project'; text: string }
+  | { key: string; kind: 'pairing'; name: string; code: string; until: number };
 
-/** Warnings stay until dismissed: a critical watchdog alert, or plan usage at 90% and up. */
+/** Warnings stay until dismissed: a critical watchdog alert, plan usage at 90% and up, a phone's pairing code. */
 const isWarning = (t: Toast) =>
-  (t.kind === 'watchdog' && t.alert.severity === 'critical') || (t.kind === 'usage' && t.warning.percent >= 90);
+  (t.kind === 'watchdog' && t.alert.severity === 'critical') || (t.kind === 'usage' && t.warning.percent >= 90) || t.kind === 'pairing';
 
 /** Newest on top, the same toast replaced rather than repeated, at most MAX_SHOWN. */
 export function addToast(list: Toast[], toast: Toast): Toast[] {
@@ -64,6 +67,29 @@ export function Toasts() {
         } else if (msg.type === 'schedule.ran') {
           const text = `⏰ Running “${msg.task.title}”${msg.late ? ' (late: it was due while Harv was off)' : ''} in its chat.`;
           setToasts((list) => addToast(list, { key: `schedule:${msg.task.id}`, kind: 'project', text }));
+        } else if (msg.type === 'phone.pairing' && !isPhone) {
+          // Shown on the computer only: typing it on the phone proves the phone is in the user's hands at the PC.
+          setToasts((list) => addToast(list, { key: 'pairing', kind: 'pairing', name: msg.name, code: msg.code, until: msg.until }));
+        } else if (msg.type === 'phone.paired') {
+          const text = msg.ok
+            ? `📱 ${msg.name} is paired. Face ID is next, on the phone.`
+            : `📱 Pairing ${msg.name} stopped: too many wrong codes.`;
+          setToasts((list) =>
+            addToast(
+              list.filter((t) => t.key !== 'pairing'),
+              { key: 'paired', kind: 'project', text },
+            ),
+          );
+        } else if (msg.type === 'phone.shared') {
+          for (const file of msg.attachments) addAttachment(msg.tabId, file);
+          const names = msg.attachments.map((a) => a.name).join(', ');
+          setToasts((list) =>
+            addToast(list, {
+              key: `shared:${names}`,
+              kind: 'project',
+              text: `📱 From your phone: ${names}. It’s in the Phone chat, ready to send.`,
+            }),
+          );
         }
       }),
     [],
@@ -87,7 +113,41 @@ function ToastView({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
       return <Card icon="⇅" title={toast.text} onDismiss={onDismiss} />;
     case 'watchdog':
       return <WatchdogCard alert={toast.alert} warn={isWarning(toast)} onDismiss={onDismiss} />;
+    case 'pairing':
+      return <PairingCard toast={toast} onDismiss={onDismiss} />;
   }
+}
+
+/** A phone wants to pair: the code to type on it, until it runs out. */
+function PairingCard({ toast, onDismiss }: { toast: Extract<Toast, { kind: 'pairing' }>; onDismiss: () => void }) {
+  useEffect(() => {
+    const timer = window.setTimeout(onDismiss, Math.max(0, toast.until - Date.now()));
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one timer per code
+  }, [toast.until]);
+  return (
+    <div
+      role="alert"
+      className="animate-fade-in flex flex-col gap-2 rounded-xl border border-accent/60 bg-[rgb(16_24_34/0.94)] px-4 py-3 text-xs shadow-[0_12px_32px_rgb(0_0_0/0.4)] backdrop-blur-[22px]"
+    >
+      <div className="flex items-start gap-2.5">
+        <span aria-hidden="true" className="text-accent">
+          📱
+        </span>
+        <span className="flex-1 text-ink">{toast.name} wants to pair with Harv. Type this code on the phone:</span>
+        <button
+          type="button"
+          aria-label="Dismiss"
+          onClick={onDismiss}
+          className="-my-1 size-6 flex-none cursor-pointer rounded text-muted hover:bg-white/10 hover:text-ink"
+        >
+          ×
+        </button>
+      </div>
+      <div className="pl-6 text-2xl font-semibold tracking-[0.4em] text-accent tabular-nums">{toast.code}</div>
+      <span className="pl-6 text-faint">Not you? Close this; nothing gets paired without the code.</span>
+    </div>
+  );
 }
 
 /** The one toast look: icon, title, optional detail and buttons, ×. Info fades by itself. */
