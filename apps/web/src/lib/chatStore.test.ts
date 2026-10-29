@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { answerStart, applyChatEvent, askOnStart, chat, getChatState, startQuestions, syncLayout } from './chatStore.ts';
 import { getDrafts, getDraftTexts } from './drafts.ts';
+import { sendMessage } from './socket.ts';
 
-vi.mock('./socket.ts', () => ({ onServerMessage: () => {}, sendMessage: () => true }));
+vi.mock('./socket.ts', () => ({ onServerMessage: () => {}, sendMessage: vi.fn(() => true) }));
 function openTab(): string {
   chat.newTab();
   return getChatState().tabs.at(-1)!.id;
@@ -253,5 +254,33 @@ describe("the other device's tabs (sync)", () => {
     expect(s.tabs[0]!.id).toBe('remote-blank');
     expect(getDraftTexts()['remote-blank']).toBe('typed on the laptop');
     expect(s.tabs.some((t) => t.id === s.activeId)).toBe(true);
+  });
+});
+
+describe('the other windows of this Harv (phone and computer)', () => {
+  it('keeps a blank tab that got its first message in another window, as a saved chat', () => {
+    const n = openTab();
+    syncLayout({ order: [n], blanks: [n], drafts: {}, attachments: {} });
+    expect(tab(n).stored).toBeFalsy();
+    // The other window sent the first message: the tab left the blanks but not the order.
+    syncLayout({ order: [n], blanks: [], drafts: {}, attachments: {} });
+    expect(tab(n).stored).toBe(true);
+    syncLayout({ order: [n], blanks: [], drafts: {}, attachments: {} });
+    expect(tab(n)).toBeDefined();
+  });
+
+  it('marks a tab saved when a line for it comes from the server', () => {
+    const n = openTab();
+    applyChatEvent({ type: 'chat.line', tabId: n, line: { kind: 'you', text: 'sent from the phone' } });
+    expect(tab(n).stored).toBe(true);
+  });
+
+  it('asks the server for a saved chat it has not got, once', () => {
+    vi.mocked(sendMessage).mockClear();
+    const ui = { order: ['made-elsewhere'], blanks: [], drafts: {}, attachments: {} };
+    syncLayout(ui);
+    syncLayout(ui);
+    const asks = vi.mocked(sendMessage).mock.calls.filter(([m]) => m.type === 'chat.load');
+    expect(asks).toEqual([[{ type: 'chat.load', tabId: 'made-elsewhere' }]]);
   });
 });

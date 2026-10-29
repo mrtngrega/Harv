@@ -691,6 +691,11 @@ app.get('/ws', { websocket: true }, (socket, req) => {
       case 'chat.open':
         chats.open(msg.tabId);
         break;
+      case 'chat.load': {
+        const chat = chats.openChats().find((c) => c.id === msg.tabId);
+        if (chat) send({ type: 'chat.opened', chat, focus: false });
+        break;
+      }
       case 'chat.delete':
         chats.delete(msg.tabId);
         terminals.close(terminalId(msg.tabId));
@@ -733,7 +738,12 @@ app.get('/ws', { websocket: true }, (socket, req) => {
         const shared = ({ order, blanks, drafts, attachments, tools, views }: UiState) =>
           JSON.stringify({ order, blanks, drafts, attachments, tools, views });
         const before = shared(loadUi());
-        saveUi(chats.keepRemoteTabs(msg.state));
+        const state = chats.keepRemoteTabs(msg.state);
+        // Every open chat is a tab: one this window hasn't heard of yet (another window just made it)
+        // stays in the order, and this window gets it.
+        const unknown = chats.openChats().filter((c) => !state.order.includes(c.id));
+        for (const chat of unknown) send({ type: 'chat.opened', chat, focus: false });
+        saveUi(unknown.length ? { ...state, order: [...state.order, ...unknown.map((c) => c.id)] } : state);
         const after = loadUi();
         // The other windows of this Harv (the phone, the app, a browser) show the same tabs: one Harv, not one per window.
         if (shared(after) !== before) {

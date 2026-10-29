@@ -216,12 +216,24 @@ function hydrate(chats: ChatSnapshot[], saved?: UiState) {
  * tab takes its place in the order, and the drafts are the same. Saved chats open and close
  * through chat.opened / chat.removed, which come first. Which tab shows stays this device's.
  */
+/** Chats asked for with chat.load, and when (asked again after a while: it may not have been saved yet). */
+const loading = new Map<string, number>();
+
 export function syncLayout(ui: SharedUi, windows?: Pick<UiState, 'tools' | 'views'>): void {
   store.set((s) => {
     // Another window of this same Harv (docs/PLAN.md §6q): each chat's open tools and view too.
     if (windows) s = { ...s, tools: windows.tools, views: windows.views };
-    let tabs = s.tabs.filter((t) => t.stored || t.busy || ui.blanks.includes(t.id));
+    // A blank tab that left the blanks but not the order got its first message in another window: a saved chat now.
+    let tabs = s.tabs
+      .filter((t) => t.stored || t.busy || ui.order.includes(t.id))
+      .map((t) => (t.stored || ui.blanks.includes(t.id) ? t : { ...t, stored: true }));
     for (const id of ui.blanks) if (!tabs.some((t) => t.id === id)) tabs.push({ ...blankTab(), id });
+    // Saved chats this window hasn't got (made while it was away or asleep): the server sends them.
+    for (const id of ui.order)
+      if (!ui.blanks.includes(id) && !tabs.some((t) => t.id === id) && Date.now() - (loading.get(id) ?? 0) > 3000) {
+        loading.set(id, Date.now());
+        sendMessage({ type: 'chat.load', tabId: id });
+      }
     const rank = (id: string) => {
       const i = ui.order.indexOf(id);
       return i === -1 ? Infinity : i;
@@ -358,13 +370,15 @@ export function applyChatEvent(msg: ChatServerMessage): void {
       break;
     case 'chat.line': {
       const { kind, text, ...rest } = msg.line;
-      updateTab(msg.tabId, (t) => ({ ...t, lines: [...t.lines, line(kind, text, rest)] }));
+      // A line from the server: the chat is saved there (it may have been sent from another window).
+      updateTab(msg.tabId, (t) => ({ ...t, stored: true, lines: [...t.lines, line(kind, text, rest)] }));
       break;
     }
     case 'chat.error':
       updateTab(msg.tabId, (t) => ({ ...t, lines: [...t.lines, line('error', msg.message)] }));
       break;
     case 'chat.opened':
+      loading.delete(msg.chat.id);
       store.set((s) => ({
         ...s,
         tabs: s.tabs.some((t) => t.id === msg.chat.id) ? s.tabs : [...s.tabs, fromSnapshot(msg.chat)],

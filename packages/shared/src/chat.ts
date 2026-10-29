@@ -185,6 +185,8 @@ export type ChatClientMessage =
   | { type: 'chat.close'; tabId: string }
   /** Reopen a chat from history as a tab. */
   | { type: 'chat.open'; tabId: string }
+  /** This window doesn't have an open chat another window made: send it here only, without switching to it. */
+  | { type: 'chat.load'; tabId: string }
   | { type: 'chat.delete'; tabId: string }
   /** The user renamed a chat (right-click on its tab); auto-naming leaves it alone after that. */
   | { type: 'chat.rename'; tabId: string; title: string }
