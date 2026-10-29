@@ -416,21 +416,29 @@ export const startQuestions = createStore<string[]>([]);
  */
 const ANSWERED_KEY = 'harv.startAnswered';
 let boot: number | null = null;
-function answered(): string[] {
+/** This server start's record: the chats it asked (`asked`, absent before the first ask) and those answered (`ids`). */
+interface StartRecord {
+  boot: number;
+  ids: string[];
+  asked?: string[];
+}
+function record(): StartRecord | null {
   try {
-    const saved = JSON.parse(localStorage.getItem(ANSWERED_KEY) ?? 'null') as { boot: number; ids: string[] } | null;
-    return saved?.boot === boot ? saved.ids : [];
+    const saved = JSON.parse(localStorage.getItem(ANSWERED_KEY) ?? 'null') as StartRecord | null;
+    return saved?.boot === boot ? saved : null;
   } catch {
-    return [];
+    return null;
   }
 }
-function markAnswered(id: string) {
+const answered = () => record()?.ids ?? [];
+function saveRecord(next: StartRecord) {
   try {
-    localStorage.setItem(ANSWERED_KEY, JSON.stringify({ boot, ids: [...answered(), id] }));
+    localStorage.setItem(ANSWERED_KEY, JSON.stringify(next));
   } catch {
     // No storage: a reload just asks again.
   }
 }
+const markAnswered = (id: string) => saveRecord({ ...(record() ?? { boot: boot ?? 0 }), ids: [...answered(), id] });
 
 /**
  * On a fresh server start, every chat Harv has answered in asks once (unless answered before a reload).
@@ -442,9 +450,14 @@ export function askOnStart(chats: ChatSnapshot[], startedAt: number | undefined)
   boot = startedAt ?? 0;
   // A reconnect to the same server (no startedAt from an older server) isn't a new start.
   if (!first && !startedAt) return;
-  const done = answered();
+  const saved = record();
+  const done = saved?.ids ?? [];
   // Only a chat with a Claude session here has something to continue (one from the other device starts fresh anyway).
-  startQuestions.set(chats.filter((c) => c.resumable && c.lines.some((l) => l.kind === 'harv') && !done.includes(c.id)).map((c) => c.id));
+  const resumable = chats.filter((c) => c.resumable && c.lines.some((l) => l.kind === 'harv')).map((c) => c.id);
+  // A page reload in the same server run asks only what the start asked: a chat first used after it has nothing to pick.
+  const asked = saved?.asked ?? resumable;
+  if (!saved?.asked) saveRecord({ boot: boot ?? 0, ids: done, asked });
+  startQuestions.set(resumable.filter((id) => asked.includes(id) && !done.includes(id)));
 }
 
 /**

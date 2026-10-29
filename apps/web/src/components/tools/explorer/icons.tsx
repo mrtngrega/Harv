@@ -45,7 +45,7 @@ export function Icon({ name, size = 15 }: { name: IconName; size?: number }) {
 
 /** Bytes the way Explorer shows them: 512 bytes, 14.2 KB, 3.1 GB, 1.8 TB. */
 export function bytes(n: number): string {
-  if (n < 1024) return `${n} bytes`;
+  if (n < 1024) return `${n} B`;
   const units = ['KB', 'MB', 'GB', 'TB'];
   let v = n / 1024;
   let i = 0;

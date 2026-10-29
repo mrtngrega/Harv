@@ -1,15 +1,4 @@
-import {
-  lazy,
-  memo,
-  Suspense,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type DragEvent,
-  type FormEvent,
-} from 'react';
+import { lazy, memo, Suspense, useEffect, useLayoutEffect, useRef, useState, type DragEvent, type FormEvent, type RefObject } from 'react';
 import { FRESH_HINT_TOKENS, type PathSuggestion } from '@harv/shared';
 import { formatSize, uploadAttachment } from '../lib/attachments.ts';
 import { lineTime, resetTime, tokens } from '../lib/format.ts';
@@ -32,10 +21,11 @@ import { atToken, insideFolder, PathMenu, usePathSuggestions, withoutToken } fro
 import { SpecialTab, TOOL_ICONS, ViewMenu } from './tools/TabParts.tsx';
 import { addReference, lastPart, setDraftText, updatePending, useDrafts, useDraftTexts } from '../lib/drafts.ts';
 import { desktop, inApp } from '../lib/desktop.ts';
+import { ErrorBoundary, retryImport } from './ErrorBoundary.tsx';
 
 // The terminal (xterm) and the explorer load when first opened, keeping the dashboard's first load small.
-const TerminalView = lazy(() => import('./tools/TerminalView.tsx').then((m) => ({ default: m.TerminalView })));
-const Explorer = lazy(() => import('./tools/explorer/Explorer.tsx').then((m) => ({ default: m.Explorer })));
+const TerminalView = lazy(() => retryImport(() => import('./tools/TerminalView.tsx')).then((m) => ({ default: m.TerminalView })));
+const Explorer = lazy(() => retryImport(() => import('./tools/explorer/Explorer.tsx')).then((m) => ({ default: m.Explorer })));
 
 /** An attached file: an upload (▤), or a file or folder on the PC pointed at by its path (@, nothing copied). */
 function FileChip({
@@ -252,16 +242,17 @@ function dropSlot(bar: HTMLElement, x: number): { id: string; after: boolean } |
 }
 
 /** Tailwind's `sm` and up: room for the long placeholder on one line. */
-function useWide(): boolean {
-  const query = '(min-width: 640px)';
-  return useSyncExternalStore(
-    (onChange) => {
-      const mq = window.matchMedia(query);
-      mq.addEventListener('change', onChange);
-      return () => mq.removeEventListener('change', onChange);
-    },
-    () => window.matchMedia(query).matches,
-  );
+/** An element's width, kept up to date (0 until it's shown). `again` re-attaches when the element is swapped. */
+function useWidth(ref: RefObject<HTMLElement | null>, again: unknown): number {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const watch = new ResizeObserver(() => setWidth(el.clientWidth));
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [ref, again]);
+  return width;
 }
 
 export function ChatPanel() {
@@ -272,7 +263,6 @@ export function ChatPanel() {
   const { approvals } = useSafety();
   const usage = useUsage();
   const { density, sendKey } = useSettings();
-  const wide = useWide();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const pendingByTab = useDrafts();
   const draftTexts = useDraftTexts();
@@ -291,6 +281,8 @@ export function ChatPanel() {
   const view = active ? (views[active.id] ?? 'chat') : 'chat';
   /** Settings or a tool is showing: no chat input or attachments. */
   const nonChat = inSettings || view !== 'chat';
+  // The long hints only where they fit on one line: the box's own width, not the window's (side panels take room).
+  const inputWidth = useWidth(inputRef, nonChat);
   // Each chat keeps its own unsent text.
   const draft = (active && draftTexts[active.id]) || '';
   const setDraft = (text: string) => setDraftText(active?.id ?? chat.ensureTab(), text);
@@ -382,15 +374,23 @@ export function ChatPanel() {
     if (dropped.length) attach(dropped);
   };
 
-  // The active tab scrolls into view in the tab bar (by hand: scrollIntoView would also scroll the page).
+  // The active tab scrolls into view in the tab bar (by hand: scrollIntoView would also scroll the page),
+  // also when the bar gets narrower (a smaller window, a side panel opening), or it slid out of sight.
   useEffect(() => {
     const bar = tabsRef.current;
-    const tab = bar?.querySelector<HTMLElement>(`[data-tab="${activeId}"]`);
-    if (!bar || !tab) return;
-    const left = tab.offsetLeft - bar.offsetLeft;
-    if (left < bar.scrollLeft) bar.scrollLeft = left - 8;
-    else if (left + tab.offsetWidth > bar.scrollLeft + bar.clientWidth) bar.scrollLeft = left + tab.offsetWidth - bar.clientWidth + 8;
-  }, [activeId, tabs.length]);
+    if (!bar) return;
+    const show = () => {
+      const tab = bar.querySelector<HTMLElement>(`[data-tab="${activeId}"]`);
+      if (!tab) return;
+      const left = tab.offsetLeft - bar.offsetLeft;
+      if (left < bar.scrollLeft) bar.scrollLeft = left - 8;
+      else if (left + tab.offsetWidth > bar.scrollLeft + bar.clientWidth) bar.scrollLeft = left + tab.offsetWidth - bar.clientWidth + 8;
+    };
+    show();
+    const watch = new ResizeObserver(show);
+    watch.observe(bar);
+    return () => watch.disconnect();
+  }, [activeId, tabs.length, settingsOpen]);
 
   // Opening or switching to a chat puts the cursor in its command line, ready to type (the user's wish).
   // Not while a tab is being renamed, or when the start question covers the chat.
@@ -688,13 +688,17 @@ export function ChatPanel() {
         ) : active && view === 'browser' ? (
           <BrowserView />
         ) : active && view === 'terminal' ? (
-          <Suspense fallback={<p className="m-auto text-muted">Starting the terminal…</p>}>
-            <TerminalView key={active.id} chatId={active.id} />
-          </Suspense>
+          <ErrorBoundary key={`t-${active.id}`} label="terminal">
+            <Suspense fallback={<p className="m-auto text-muted">Starting the terminal…</p>}>
+              <TerminalView key={active.id} chatId={active.id} />
+            </Suspense>
+          </ErrorBoundary>
         ) : active && view === 'files' ? (
-          <Suspense fallback={<p className="m-auto text-muted">Opening the explorer…</p>}>
-            <Explorer key={active.id} id={active.id} />
-          </Suspense>
+          <ErrorBoundary key={`e-${active.id}`} label="file explorer">
+            <Suspense fallback={<p className="m-auto text-muted">Opening the explorer…</p>}>
+              <Explorer key={active.id} id={active.id} />
+            </Suspense>
+          </ErrorBoundary>
         ) : (
           <div className={`relative flex min-h-0 flex-1 ${preview ? 'flex-col gap-2 pb-2 lg:flex-row lg:pr-2' : ''}`}>
             {scrolledUp !== null && scrolledUp === activeId && (
@@ -915,10 +919,10 @@ export function ChatPanel() {
               }}
               placeholder={
                 active?.busy
-                  ? wide
+                  ? inputWidth >= 400
                     ? 'queue a message · it runs when Harv finishes'
                     : 'queue a message'
-                  : wide
+                  : inputWidth >= 270
                     ? 'ask anything · / for commands'
                     : 'ask anything'
               }

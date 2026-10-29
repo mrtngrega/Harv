@@ -5,7 +5,15 @@ import { fileURLToPath } from 'node:url';
 import { basename, join } from 'node:path';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
-import { HARV_VERSION, HISTORY_QUERY_MAX, MAX_ATTACHMENT_BYTES, SERVER_PORT, terminalId, type ClientMessage, type ServerMessage } from '@harv/shared';
+import {
+  HARV_VERSION,
+  HISTORY_QUERY_MAX,
+  MAX_ATTACHMENT_BYTES,
+  SERVER_PORT,
+  terminalId,
+  type ClientMessage,
+  type ServerMessage,
+} from '@harv/shared';
 import { isValidTab, saveAttachment } from './agent/attachments.ts';
 import { loadCatalog } from './agent/catalog.ts';
 import { findTab, type OpenTab } from './agent/chatTools.ts';

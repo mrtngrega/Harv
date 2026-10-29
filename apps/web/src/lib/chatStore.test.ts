@@ -165,6 +165,28 @@ describe('start question (continue or new session)', () => {
     expect(startQuestions.get()).toEqual([]);
   });
 
+  it('after a page reload in the same server run, a chat first used after the start does not ask', async () => {
+    const line = (kind: 'you' | 'harv', text: string) => ({ kind, text, at: 0 });
+    const old = { id: 'old', title: 'Old', resumable: true, lines: [line('you', 'a'), line('harv', 'b')] };
+    const fresh = { id: 'fresh', title: 'Fresh', resumable: true, lines: [line('you', 'c'), line('harv', 'd')] };
+    // What survives the reload (the tests run without a browser's localStorage).
+    const kept = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => kept.set(k, v) });
+    vi.resetModules();
+    const first = await import('./chatStore.ts');
+    first.askOnStart([old], 5000);
+    expect(first.startQuestions.get()).toEqual(['old']);
+    // The page reloads (a fresh module), same server start; "fresh" got its first reply in between.
+    vi.resetModules();
+    const reloaded = await import('./chatStore.ts');
+    reloaded.askOnStart([old, fresh], 5000);
+    expect(reloaded.startQuestions.get()).toEqual(['old']);
+    // A real restart asks both.
+    reloaded.askOnStart([old, fresh], 6000);
+    expect(reloaded.startQuestions.get()).toEqual(['old', 'fresh']);
+    vi.unstubAllGlobals();
+  });
+
   it('asks each chat on its own; "new" swaps just that tab for a blank chat in the same place', () => {
     const [a, b, c] = [openTab(), openTab(), openTab()];
     startQuestions.set([a, b]);

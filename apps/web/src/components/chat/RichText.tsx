@@ -1,5 +1,6 @@
 import { createContext, memo, useContext, useEffect, useState, type ReactNode } from 'react';
 import Markdown, { defaultUrlTransform, type Components } from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { getChatState } from '../../lib/chatStore.ts';
 import { keepWindowsPaths, LOCAL_PATH, openPreview, rawUrl, type PreviewKind } from '../../lib/preview.ts';
@@ -126,13 +127,14 @@ function urlTransform(url: string): string {
 }
 
 type Plugins = { remark: unknown[]; rehype: unknown[] };
-const BASIC: Plugins = { remark: [remarkGfm], rehype: [] };
+// A single line break in a reply stays one (lists of lines, addresses, poems ran together).
+const BASIC: Plugins = { remark: [remarkGfm, remarkBreaks], rehype: [] };
 let extras: Plugins | null = null;
 let loadingExtras: Promise<Plugins> | null = null;
 /** Highlighting and math load the first time a reply needs them: they'd double the dashboard's first load. */
 function loadExtras(): Promise<Plugins> {
   loadingExtras ??= import('./markdownExtras.ts').then(
-    (m) => (extras = { remark: [remarkGfm, ...m.remarkExtras], rehype: m.rehypeExtras }),
+    (m) => (extras = { remark: [remarkGfm, remarkBreaks, ...m.remarkExtras], rehype: m.rehypeExtras }),
   );
   return loadingExtras;
 }

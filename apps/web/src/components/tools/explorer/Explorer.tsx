@@ -996,7 +996,7 @@ export function Explorer({ id }: { id: string }) {
                     )}
                     {linux ? (
                       <>
-                        <span className="w-20 px-2 text-right text-faint tabular-nums">
+                        <span className="w-20 px-2 text-right whitespace-nowrap text-faint tabular-nums">
                           {entry.size !== undefined ? formatSize(entry.size) : ''}
                         </span>
                         <span className="w-36 truncate px-2 text-[11px] text-faint">{when(entry.mtime)}</span>
@@ -1007,7 +1007,7 @@ export function Explorer({ id }: { id: string }) {
                         <span className="w-32 truncate px-2 text-faint" title={typeName(entry)}>
                           {typeName(entry)}
                         </span>
-                        <span className="w-20 px-2 text-right text-faint tabular-nums">
+                        <span className="w-20 px-2 text-right whitespace-nowrap text-faint tabular-nums">
                           {entry.size !== undefined ? formatSize(entry.size) : ''}
                         </span>
                       </>

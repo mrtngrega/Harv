@@ -68,12 +68,21 @@ describe('read-only programs with options that write or run something', () => {
     expect(cmd(command)).not.toBe('green');
   });
 
-  it.each(['sort names.txt', 'uniq -c names.txt', 'git diff', 'git branch', 'git branch -a', 'git tag --list', 'rg foo src', 'tree', 'ss -tlnp', 'hostname', 'find . -name x'])(
-    '%s stays green',
-    (command) => {
-      expect(cmd(command)).toBe('green');
-    },
-  );
+  it.each([
+    'sort names.txt',
+    'uniq -c names.txt',
+    'git diff',
+    'git branch',
+    'git branch -a',
+    'git tag --list',
+    'rg foo src',
+    'tree',
+    'ss -tlnp',
+    'hostname',
+    'find . -name x',
+  ])('%s stays green', (command) => {
+    expect(cmd(command)).toBe('green');
+  });
 });
 
 describe('secrets reached without naming them (wildcards, variables, recursive searches)', () => {
@@ -99,16 +108,12 @@ describe('secrets reached without naming them (wildcards, variables, recursive s
     expect(tier('PowerShell', { command })).toBe('blocked');
   });
 
-  it.each([
-    'ls ~',
-    'Get-ChildItem ~ -Recurse -Filter *.mp3',
-    'find ~ -name "*.json"',
-    'cat *.txt',
-    'grep -r TODO src',
-    'rg --files ~',
-  ])('leaves %s alone', (command) => {
-    expect(cmd(command)).not.toBe('blocked');
-  });
+  it.each(['ls ~', 'Get-ChildItem ~ -Recurse -Filter *.mp3', 'find ~ -name "*.json"', 'cat *.txt', 'grep -r TODO src', 'rg --files ~'])(
+    'leaves %s alone',
+    (command) => {
+      expect(cmd(command)).not.toBe('blocked');
+    },
+  );
 
   windowsIt.each(['Get-ChildItem ~\\Documents\\*.docx', 'Get-ChildItem ~ -Recurse -Filter *.mp3 | Select-Object Name'])(
     'leaves %s alone (PowerShell)',
@@ -784,12 +789,15 @@ describe('sending, however PowerShell spells it', () => {
     expect(sendsData(c)).toBe(true);
   });
 
-  it.each(['Invoke-WebRequest https://x -OutFile a.zip', 'irm https://x', 'iwr https://x -UseBasicParsing', 'ssh host ls', 'curl -fsSL https://x -o a'])(
-    '%s only fetches',
-    (c) => {
-      expect(sendsData(c)).toBe(false);
-    },
-  );
+  it.each([
+    'Invoke-WebRequest https://x -OutFile a.zip',
+    'irm https://x',
+    'iwr https://x -UseBasicParsing',
+    'ssh host ls',
+    'curl -fsSL https://x -o a',
+  ])('%s only fetches', (c) => {
+    expect(sendsData(c)).toBe(false);
+  });
 });
 
 describe('downloads (no upload) into scratch folders run', () => {

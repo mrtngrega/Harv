@@ -76,7 +76,7 @@ const GLOB = /[*?[]/;
 
 /** `~`, `$HOME`, `$env:NAME`, `${env:NAME}` and `%NAME%` replaced by their values (unknown ones stay). */
 export function expandVars(word: string): string {
-  const value = (name: string) => (name.toUpperCase() === 'HOME' ? home : process.env[name] ?? process.env[name.toUpperCase()]);
+  const value = (name: string) => (name.toUpperCase() === 'HOME' ? home : (process.env[name] ?? process.env[name.toUpperCase()]));
   return word
     .replace(/^~(?=$|[\\/])/, home)
     .replace(/\$\{?env:(\w+)\}?/gi, (m, n: string) => value(n) ?? m)
@@ -99,7 +99,10 @@ function globRegex(pattern: string): RegExp {
       const end = pattern.indexOf(']', i + 1);
       if (end < 0) re += '\\[';
       else {
-        re += `[${pattern.slice(i + 1, end).replace(/^!/, '^').replace(/\\/g, '\\\\')}]`;
+        re += `[${pattern
+          .slice(i + 1, end)
+          .replace(/^!/, '^')
+          .replace(/\\/g, '\\\\')}]`;
         i = end;
       }
     } else re += ch.replace(/[.+^${}()|\\]/g, '\\$&');
@@ -108,7 +111,13 @@ function globRegex(pattern: string): RegExp {
 }
 
 /** A secret's own placeholder folder ("*") matches any name the pattern gives it. */
-const secretRegex = (secret: string) => new RegExp(`^${secret.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]+')}$`);
+const secretRegex = (secret: string) =>
+  new RegExp(
+    `^${secret
+      .split('*')
+      .map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+      .join('[^/]+')}$`,
+  );
 const SECRET_RES = SECRETS.map((s) => ({ path: s, re: secretRegex(s) }));
 
 /** A path pattern that names a secret, or a folder of one (with letters of its own, so `~/*` alone isn't one). */
@@ -142,7 +151,8 @@ const holdsSecrets = (dir: string) => {
 const RECURSIVE = /^(-r|-R|-rn|-rl|-ri|-Rn|--recursive|-recurse|\/s)$/i;
 const NAME_FILTER = /^(-filter|-include|-name|-iname|-path|-ipath|--include|--glob|-g)$/i;
 /** Tools that read what they find (as opposed to only listing names). */
-const READERS = /^(grep|egrep|fgrep|rg|ag|ack|findstr|select-string|sls|get-content|gc|cat|type|more|less|head|tail|strings|xxd|od|copy-item|cp|copy)$/i;
+const READERS =
+  /^(grep|egrep|fgrep|rg|ag|ack|findstr|select-string|sls|get-content|gc|cat|type|more|less|head|tail|strings|xxd|od|copy-item|cp|copy)$/i;
 
 /**
  * Does this command reach a secret without naming it? `segments` are the command's parts (a pipe
