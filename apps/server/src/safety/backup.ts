@@ -116,3 +116,50 @@ export function readBackup(dir: string): Backup | null {
     return null;
   }
 }
+
+/** What a cleanup did: the backup folders it deleted, and how much is left. */
+export interface PruneResult {
+  removed: string[];
+  freedBytes: number;
+  keptBytes: number;
+}
+
+/** A backup folder's time, from its name (`2026-10-25T11-33-19-592Z-…`), else its modified time. */
+function backupTime(dir: string): number {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z/.exec(dir.split(/[\\/]/).at(-1) ?? '');
+  if (m) return Date.parse(`${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`);
+  return statSync(dir, { throwIfNoEntry: false })?.mtimeMs ?? 0;
+}
+
+/** A folder's size on disk (all of it). */
+function folderBytes(path: string): number {
+  const st = statSync(path, { throwIfNoEntry: false });
+  if (!st) return 0;
+  if (!st.isDirectory()) return st.size;
+  return readdirSync(path).reduce((sum, name) => sum + folderBytes(join(path, name)), 0);
+}
+
+/**
+ * Deletes backups older than `days`, then the oldest ones while all of them together are over
+ * `maxBytes` (the user's wish: backups don't pile up forever). Their actions lose Undo; the log stays.
+ */
+export function pruneBackups(days: number, maxBytes: number, now = Date.now(), root = BACKUPS_DIR): PruneResult {
+  const result: PruneResult = { removed: [], freedBytes: 0, keptBytes: 0 };
+  if (!existsSync(root)) return result;
+  const all = readdirSync(root)
+    .map((name) => join(root, name))
+    .filter((dir) => statSync(dir, { throwIfNoEntry: false })?.isDirectory())
+    .map((dir) => ({ dir, at: backupTime(dir), bytes: folderBytes(dir) }))
+    .sort((a, b) => a.at - b.at);
+  let total = all.reduce((sum, b) => sum + b.bytes, 0);
+  const cutoff = now - days * 24 * 60 * 60 * 1000;
+  for (const b of all) {
+    if (b.at >= cutoff && total <= maxBytes) break;
+    rmSync(b.dir, { recursive: true, force: true });
+    result.removed.push(b.dir);
+    result.freedBytes += b.bytes;
+    total -= b.bytes;
+  }
+  result.keptBytes = total;
+  return result;
+}

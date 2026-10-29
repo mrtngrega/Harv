@@ -6,6 +6,7 @@ import { createBackup, readBackup, restoreBackup, type Backup } from './backup.t
 import {
   AGENT_TOOLS,
   askedToSend,
+  backupTargets,
   classify,
   FILE_WRITE_TOOLS,
   isSending,
@@ -181,7 +182,10 @@ export class SafetyGate {
     if (action && action.tier !== 'green') this.hooks.broadcast({ type: 'action', action });
   }
 
-  private backup(id: string, targets: string[]): Backup | null {
+  private backup(id: string, wanted: string[], tool: string, input: Record<string, unknown>): Backup | null {
+    // A shell command's folders are copied only when it can change them as a whole (backupTargets).
+    const command = SHELL_TOOLS.includes(tool) && typeof input.command === 'string' ? input.command : undefined;
+    const targets = backupTargets(wanted, command);
     if (targets.length === 0) return null;
     const backup = createBackup(id, targets);
     if (backup.entries.length === 0) return backup;
@@ -266,13 +270,13 @@ export class SafetyGate {
           result: this.trustedTurns.has(tabId) ? 'Approved with the rest of this reply.' : 'Ran without asking (Settings › Safety).',
         });
       }
-      this.backup(id, verdict.targets);
+      this.backup(id, verdict.targets, tool, input);
       this.publish(id);
       return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } };
     }
 
     // Red (or yellow with confirm on): safety check and preview, backup, then the user decides.
-    const backup = this.backup(id, verdict.targets);
+    const backup = this.backup(id, verdict.targets, tool, input);
     const backedUp = backup?.entries.filter((e) => e.copy).map((e) => e.original) ?? [];
     const rules = SHELL_TOOLS.includes(tool) ? rulesFor(String(input.command ?? ''), ctx) : null;
     const notes: string[] = [];

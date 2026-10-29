@@ -32,6 +32,7 @@ import { ChatStore } from './store/chats.ts';
 import { RouteStore } from './store/routes.ts';
 import { UsageMeter } from './usage/meter.ts';
 import { loadSettings, updateSettings, workDir } from './settings.ts';
+import { pruneBackups } from './safety/backup.ts';
 import { applySharedUi, loadUi, resetUi, saveUi, sharedUi } from './ui.ts';
 import { BrowserHost } from './tools/browserHost.ts';
 import { GeminiImages, GeminiProblem } from './tools/gemini.ts';
@@ -119,6 +120,24 @@ startWatchdog(metrics, (alert) => {
 const store = new ChatStore(join(HARV_HOME, 'harv.db'));
 const actions = new ActionStore(join(HARV_HOME, 'harv.db'));
 actions.markInterrupted();
+
+// Backups for Undo don't pile up: older than Settings › Safety's days, or over its size cap, they go (oldest first).
+function cleanBackups() {
+  try {
+    const { backupDays, backupMaxGb } = loadSettings();
+    const done = pruneBackups(backupDays, backupMaxGb * 1024 ** 3);
+    if (!done.removed.length) return;
+    actions.forgetBackups(done.removed);
+    app.log.info(
+      { removed: done.removed.length, freedMb: Math.round(done.freedBytes / 1024 ** 2), keptMb: Math.round(done.keptBytes / 1024 ** 2) },
+      'Old backups cleaned up',
+    );
+  } catch (err) {
+    app.log.warn({ err: (err as Error).message }, 'Backup cleanup failed');
+  }
+}
+setTimeout(cleanBackups, 60_000).unref();
+setInterval(cleanBackups, 6 * 60 * 60 * 1000).unref();
 const gate = new SafetyGate(actions, {
   broadcast,
   notice: (tabId, message) => chats.notice(tabId, message),

@@ -44,6 +44,8 @@ export function cleanSettings(raw: Raw, base: HarvSettings = DEFAULT_SETTINGS): 
     allowRules: Array.isArray(raw.allowRules)
       ? [...new Set(raw.allowRules.filter((r): r is string => typeof r === 'string' && r.trim() !== '').map((r) => r.trim().toLowerCase()))]
       : base.allowRules,
+    backupDays: num(raw.backupDays, 1, 365, base.backupDays),
+    backupMaxGb: num(raw.backupMaxGb, 1, 100, base.backupMaxGb),
     motion: bool(raw.motion, base.motion),
     accent: typeof raw.accent === 'string' && /^#[0-9a-f]{6}$/i.test(raw.accent) ? raw.accent.toUpperCase() : base.accent,
     backgroundBlur: num(raw.backgroundBlur, 0, 30, base.backgroundBlur),

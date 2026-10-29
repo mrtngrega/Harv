@@ -123,7 +123,8 @@ function Slider({
         onBlur={save}
         className="min-w-0 flex-1 accent-[var(--color-accent)]"
       />
-      <span className="w-12 flex-none text-right tabular-nums">
+      {/* A fixed width, so dragging never moves the slider ("7 days" → "180 days" needs the wider one). */}
+      <span className={`${unit.length > 2 ? 'w-20' : 'w-12'} flex-none text-right whitespace-nowrap tabular-nums`}>
         {shown}
         {unit}
       </span>
@@ -1029,6 +1030,25 @@ export function SettingsView() {
               )}
             </div>
           )}
+        </Sub>
+        <Sub title="Backups">
+          <Note>Every change Harv makes is backed up first, so Undo can bring it back. Older backups are deleted, oldest first.</Note>
+          <Slider
+            label="Keep for"
+            value={settings.backupDays}
+            min={7}
+            max={180}
+            unit=" days"
+            onChange={(backupDays) => updateSettings({ backupDays })}
+          />
+          <Slider
+            label="At most"
+            value={settings.backupMaxGb}
+            min={1}
+            max={50}
+            unit=" GB"
+            onChange={(backupMaxGb) => updateSettings({ backupMaxGb })}
+          />
         </Sub>
         <ProtectedFolders />
       </Group>

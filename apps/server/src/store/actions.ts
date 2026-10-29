@@ -97,6 +97,12 @@ export class ActionStore {
     );
   }
 
+  /** Backups that were cleaned up: their actions keep their log line but lose Undo. */
+  forgetBackups(dirs: string[]): void {
+    const stmt = this.db.prepare('UPDATE actions SET backup_dir = NULL WHERE backup_dir = ?');
+    for (const dir of dirs) stmt.run(dir);
+  }
+
   /** Newest first; green (read-only) calls are left out unless asked for. */
   recent(limit = 50, includeGreen = false): ActionEntry[] {
     const rows = this.db

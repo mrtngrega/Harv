@@ -872,6 +872,34 @@ export function pathsInCommand(command: string, cwd = WORKSPACE): string[] {
   return [...out];
 }
 
+/** Programs that can change a whole folder at once: delete, move or rename it, mirror into it, reset it. */
+const FOLDER_CHANGERS =
+  /^(rm|rmdir|rd|del|erase|remove-item|ri|mv|move|move-item|mi|ren|rename|rename-item|rni|robocopy|xcopy|rsync|shred|git)$/i;
+
+/**
+ * What a backup really needs of an action's targets. Folders in the temp folder are scratch. A folder is copied
+ * whole only when a shell command can change it as a whole (`rm -r x`, `mv x y`, `robocopy … x /mir`,
+ * `git clean` in it): looking into one, or making something inside it, copied all of it before (the
+ * whole Projects folder for a "check the repo", a 142 MB Temp folder for a listing). What a command
+ * creates there is still noted (a path that doesn't exist yet), so Undo removes it.
+ */
+export function backupTargets(targets: string[], command?: string, cwd = WORKSPACE): string[] {
+  const segments = command ? splitCommand(command).map((s) => words(s).map(unquote)) : [];
+  return targets.filter((target) => {
+    if (!statSync(target, { throwIfNoEntry: false })?.isDirectory()) return true;
+    // A folder in the temp folder is scratch (a file there may still be worth an Undo).
+    if (isTempDir(target)) return false;
+    if (command === undefined) return true;
+    const full = fullPath(target, cwd).toLowerCase();
+    return segments.some(
+      (ws) =>
+        FOLDER_CHANGERS.test((ws[0] ?? '').replace(/\.exe$/i, '')) &&
+        (ws[0]!.toLowerCase() !== 'git' || /^(clean|reset|checkout|restore|stash|rm|mv)$/i.test(ws[1] ?? '')) &&
+        ws.slice(1).some((w) => !w.startsWith('-') && fullPath(w, cwd).toLowerCase() === full),
+    );
+  });
+}
+
 /** `start notepad`, `Start-Process https://…`, `explorer C:\…`: opening an app, page or document. */
 function isOpenApp(segment: string): boolean {
   const [first = '', ...rest] = words(segment).map(unquote);

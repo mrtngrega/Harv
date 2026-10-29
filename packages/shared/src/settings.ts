@@ -25,6 +25,10 @@ export interface HarvSettings {
   confirmYellow: boolean;
   /** "Don't ask again" rules from approval cards: commands like "npm install" or "remove-item" that run without a card (backed up, with Undo). */
   allowRules: string[];
+  /** Backups (for Undo) older than this many days are deleted (the user's wish, 2026-10-29). */
+  backupDays: number;
+  /** All backups together stay under this many GB: the oldest go first. */
+  backupMaxGb: number;
 
   // Look
   /** Subtle animations on (off = everything still). */
@@ -107,6 +111,8 @@ export const DEFAULT_SETTINGS: HarvSettings = {
   askRisky: false,
   confirmYellow: false,
   allowRules: [],
+  backupDays: 30,
+  backupMaxGb: 5,
   motion: true,
   accent: ACCENTS[0],
   backgroundBlur: 9,
