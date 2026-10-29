@@ -435,13 +435,15 @@ export function ChatPanel() {
   }, [active?.lines.length, lastText, waiting.length, lastLine?.kind]);
 
   // The message box grows with what's typed (up to its max height).
+  // Measured again when its width changes: a draft that came in while the window was hidden (the phone
+  // typing, docs/PLAN.md §6q) was measured at zero width, every letter on its own line.
   useLayoutEffect(() => {
     const el = inputRef.current;
-    if (!el) return;
+    if (!el || el.clientWidth === 0) return;
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
     el.style.overflowY = el.scrollHeight > el.clientHeight ? 'auto' : 'hidden';
-  }, [draft, nonChat]);
+  }, [draft, nonChat, inputWidth]);
 
   const send = (e: FormEvent) => {
     e.preventDefault();

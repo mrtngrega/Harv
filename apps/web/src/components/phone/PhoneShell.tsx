@@ -15,28 +15,35 @@ import { startVoiceHere } from './VoiceBar.tsx';
 type Sheet = 'history' | 'stats' | null;
 
 /**
- * The height iOS really shows: with the keyboard up, Safari keeps the page tall and slides it up, so the
- * input lands under the keyboard or the page scrolls. Sizing to the visual viewport keeps the input just
- * above the keyboard.
+ * The part of the screen iOS really shows. With the keyboard up, Safari keeps the page tall and slides
+ * the view up over it; the app follows that view (its top and height) instead of fighting it: scrolling
+ * the page back made it shake while typing, and a stale height left a blank strip at the bottom.
  */
-function useVisibleHeight(): number | null {
-  const [h, setH] = useState<number | null>(() => window.visualViewport?.height ?? null);
+function useVisibleArea(): { top: number; height: number } | null {
+  const read = () => {
+    const vv = window.visualViewport;
+    return vv ? { top: vv.offsetTop, height: vv.height } : null;
+  };
+  const [area, setArea] = useState(read);
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
+    let frame = 0;
     const update = () => {
-      setH(vv.height);
-      // Safari scrolls the (pinned) page to show the focused input: undo it.
-      if (window.scrollY) window.scrollTo(0, 0);
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setArea(read()));
     };
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
+    window.addEventListener('orientationchange', update);
     return () => {
+      cancelAnimationFrame(frame);
       vv.removeEventListener('resize', update);
       vv.removeEventListener('scroll', update);
+      window.removeEventListener('orientationchange', update);
     };
   }, []);
-  return h;
+  return area;
 }
 
 export function PhoneShell() {
@@ -45,7 +52,7 @@ export function PhoneShell() {
   const [device, setDevice] = useState('');
   const [target, setTarget] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
-  const height = useVisibleHeight();
+  const area = useVisibleArea();
   const [pendingOpen, setPendingOpen] = useState<OpenRequest | null>(null);
   const { activeId } = useChat();
   const { connected } = useConnection();
@@ -93,9 +100,9 @@ export function PhoneShell() {
     // Pinned to the screen (no page to scroll or bounce), sized to what the keyboard leaves visible.
     <div
       className="fixed inset-x-0 top-0 flex flex-col gap-2 px-2 pt-[max(8px,env(safe-area-inset-top))] pb-[max(6px,env(safe-area-inset-bottom))]"
-      style={{ height: height ? `${height}px` : '100dvh' }}
+      style={area ? { top: area.top, height: area.height } : { height: '100dvh' }}
     >
-      <header className="glass relative flex items-center gap-1 rounded-2xl px-1.5 py-1 select-none">
+      <header className="glass relative z-30 flex items-center gap-1 rounded-2xl px-1.5 py-1 select-none">
         <button
           type="button"
           onClick={() => setSheet('history')}

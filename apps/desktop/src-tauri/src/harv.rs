@@ -171,7 +171,36 @@ pub fn boot(app: AppHandle) {
             log("showing the dashboard");
             let _ = window.navigate(Url::parse(DASHBOARD).expect("dashboard url"));
         }
+        keep_dashboard(&app);
     });
+}
+
+/// The window must stay on the dashboard: a page reload (WebKit restarting it, Harv restarting
+/// while it loaded) can leave it on the starting page or a failed load. While Harv is up, the
+/// window goes back to the dashboard by itself (twice on the notebook, 2026-10-29).
+fn keep_dashboard(app: &AppHandle) {
+    loop {
+        std::thread::sleep(Duration::from_secs(5));
+        if !is_up() {
+            continue;
+        }
+        let Some(window) = app.get_webview("main") else {
+            continue;
+        };
+        let on_dashboard = window
+            .url()
+            .map(|u| u.port() == Some(DASHBOARD_PORT))
+            .unwrap_or(false);
+        if !on_dashboard {
+            log("the window left the dashboard: showing it again");
+            let _ = window.navigate(Url::parse(DASHBOARD).expect("dashboard url"));
+        } else {
+            // A failed load keeps the address but has no dashboard in it.
+            let _ = window.eval(format!(
+                "if (!document.getElementById('root')) location.replace('{DASHBOARD}')"
+            ));
+        }
+    }
 }
 
 /// Restarts Harv in the background; the dashboard reconnects by itself.

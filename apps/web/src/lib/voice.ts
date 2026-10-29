@@ -34,6 +34,9 @@ type Recognition = {
 };
 
 function recognitionClass(): (new () => Recognition) | null {
+  // On the iPhone, Safari's recognition asked for permission and then froze the Home Screen app
+  // (2026-10-29): the keyboard's own dictation mic does the listening there instead.
+  if (/iPhone|iPad|iPod/.test(navigator.userAgent)) return null;
   const w = window as unknown as { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition };
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
