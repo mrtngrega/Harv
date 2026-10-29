@@ -2,7 +2,7 @@ import { AUTO_FALLBACK, type Attachment, type ChatUsage, type RouteDecision, typ
 import type { RouteStore } from '../store/routes.ts';
 import { classify as haikuClassify } from './classifier.ts';
 import { asksForWork, instantRules, isFollowUp, parseOverride } from './rules.ts';
-import { atLeast, pickFor, stepUp, tag, type Classification, type Pick } from './table.ts';
+import { atLeast, pickFor, stepUp, struggleStep, tag, type Classification, type Pick } from './table.ts';
 
 type Classify = (text: string, files: Attachment[], context?: string, title?: string) => Promise<Classification | null>;
 
@@ -144,6 +144,18 @@ export class Router {
     const why = `you asked to try harder (was ${tag(from)})`;
     s.task = { pick: up, why, at: Date.now() };
     return this.record(tabId, up, 'harder', why);
+  }
+
+  /**
+   * A reply is struggling (tests failing, tool calls failing in a row): one step up mid-reply, at most
+   * up to STRUGGLE_CEILING. The task keeps the new pick, so its follow-ups don't drop back down.
+   */
+  struggling(tabId: string, from: Pick, why: string): RouteDecision | null {
+    const up = struggleStep(from);
+    if (!up) return null;
+    const reason = `↑ stepped up from ${tag(from)}: ${why}`;
+    this.state(tabId).task = { pick: up, why: reason, at: Date.now() };
+    return this.record(tabId, up, 'stepup', reason);
   }
 
   /** Logs a turn the user picked the model for (manual mode), so Harv's stats count every turn. */

@@ -81,6 +81,8 @@ const CONTINUE_PROMPT =
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
+/** How often AUTO may step a struggling reply up (each one step on the ladder). */
+const MAX_STEPS = 2;
 /** A chat used here this recently isn't closed by the other device's layout. */
 const RECENT_USE_MS = 10 * 60 * 1000;
 /** How long after applying the other device's layout a dashboard save can't drop its tabs. */
@@ -261,6 +263,10 @@ export class ChatManager {
         this.meter.turnStarted();
         this.tags.set(msg.tabId, { tag: `${msg.model.split(' ')[0]!.toLowerCase()}·${msg.effort}`, reason: msg.reason });
         break;
+      case 'chat.stepped':
+        // The rest of the reply is tagged with what it runs at now.
+        this.tags.set(msg.tabId, { tag: `${msg.model.split(' ')[0]!.toLowerCase()}·${msg.effort}`, reason: msg.reason });
+        break;
       case 'chat.assistant':
         save({ kind: 'harv', text: msg.text, ...this.tags.get(msg.tabId) });
         this.replies.get(msg.tabId)?.push(msg.text);
@@ -415,6 +421,7 @@ export class ChatManager {
           this.meter.rateLimit(info);
           if (info.status === 'rejected') this.limited.add(tabId);
         },
+        onStruggle: (why) => void this.stepUp(tabId, why),
         onEnded: () => {
           // The next message starts a new session (resuming this conversation) instead of vanishing into a dead one.
           if (this.sessions.get(tabId) === session) this.sessions.delete(tabId);
@@ -830,6 +837,8 @@ export class ChatManager {
 
   /** Shows "thinking" while the router's classifier runs. */
   private routing = new Set<string>();
+  /** Each tab's running reply: whether AUTO may step it up, how often it did, and its pick now. */
+  private stepping = new Map<string, { auto: boolean; steps: number; pick: { model: string; effort: EffortLevel } }>();
   /** Tabs whose user pressed Stop while the router was still picking: their turn never starts. */
   private stopped = new Set<string>();
   private setRouting(tabId: string, on: boolean) {
@@ -842,6 +851,8 @@ export class ChatManager {
     const { model, effort } = decision;
     const session = this.session(tabId, model, effort);
     this.lastRun.set(tabId, { model, effort });
+    // AUTO's own picks may step up if the reply struggles; the user's picks and /opus-style overrides never change.
+    this.stepping.set(tabId, { auto: auto && decision.source !== 'override', steps: 0, pick: { model, effort } });
     this.emit({ type: 'chat.started', tabId, model: this.modelName(model), effort, auto, reason: decision.reason });
     try {
       const mark = await session.send(content, model, effort, raw);
@@ -850,6 +861,28 @@ export class ChatManager {
       this.emit({ type: 'chat.error', tabId, message: `Couldn’t send: ${(err as Error).message}` });
       this.emit({ type: 'chat.done', tabId, ok: false, stopped: false });
     }
+  }
+
+  /**
+   * The reply is struggling (tests failing, tool calls failing in a row): AUTO moves it one step up the
+   * ladder mid-reply, at most MAX_STEPS times and never past opus·xhigh (docs/PLAN.md §5; the user's
+   * wish 2026-10-29: quality over saving usage). The tag and its reason say so.
+   */
+  private async stepUp(tabId: string, why: string): Promise<void> {
+    const turn = this.stepping.get(tabId);
+    const session = this.sessions.get(tabId);
+    if (!turn?.auto || turn.steps >= MAX_STEPS || !session?.busy) return;
+    const decision = this.router.struggling(tabId, turn.pick, why);
+    if (!decision) return;
+    turn.steps += 1;
+    turn.pick = { model: decision.model, effort: decision.effort };
+    try {
+      await session.retune(decision.model, decision.effort);
+    } catch {
+      return;
+    }
+    this.lastRun.set(tabId, turn.pick);
+    this.emit({ type: 'chat.stepped', tabId, model: this.modelName(decision.model), effort: decision.effort, reason: decision.reason });
   }
 
   async stop(tabId: string): Promise<void> {

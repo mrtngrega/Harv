@@ -145,7 +145,9 @@ function ChatLineView({ line, onHarder }: { line: Line; onHarder?: () => void })
             <span className={`text-ok ${showTimes ? '-ml-2' : ''}`}>harv ›</span>
             {line.tag && showTags && (
               <span title={line.reason} className="cursor-help text-[11px] text-faint">
-                [{line.tag}]
+                {/* ↑: AUTO stepped up mid-reply because it was struggling (the reason says from what and why). */}[
+                {line.reason?.startsWith('↑') && <span className="text-accent">↑ </span>}
+                {line.tag}]
               </span>
             )}
             {line.streaming && line.text === '' && <Thinking />}

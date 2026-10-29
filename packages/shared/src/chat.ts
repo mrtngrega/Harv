@@ -65,7 +65,8 @@ export const HISTORY_QUERY_MAX = 200;
 export const AUTO_FALLBACK = { model: 'sonnet', effort: 'medium' } as const satisfies { model: string; effort: EffortLevel };
 
 /** How a turn's model·effort was chosen. */
-export type RouteSource = 'manual' | 'override' | 'rule' | 'classifier' | 'followup' | 'harder' | 'fallback' | 'command' | 'background';
+export type RouteSource =
+  'manual' | 'override' | 'rule' | 'classifier' | 'followup' | 'harder' | 'stepup' | 'fallback' | 'command' | 'background';
 
 /** The model·effort a turn runs at, and why. */
 export interface RouteDecision {
@@ -191,6 +192,8 @@ export type ChatClientMessage =
 export type ChatServerMessage =
   /** A turn began; `model`/`effort` are what actually runs (AUTO resolved). */
   | { type: 'chat.started'; tabId: string; model: string; effort: EffortLevel; auto: boolean; reason: string }
+  /** AUTO stepped up mid-reply (it was struggling): the rest of the reply runs at this model·effort. */
+  | { type: 'chat.stepped'; tabId: string; model: string; effort: EffortLevel; reason: string }
   | { type: 'chat.delta'; tabId: string; text: string }
   /** Tokens Claude has written this turn so far (estimated while a message streams, exact after it), for the status line. */
   | { type: 'chat.progress'; tabId: string; outputTokens: number }

@@ -281,6 +281,18 @@ export function applyChatEvent(msg: ChatServerMessage): void {
       });
       break;
     }
+    case 'chat.stepped': {
+      // AUTO stepped up mid-reply: the reply in progress (and what follows) shows the new model·effort.
+      const tag = `${msg.model.split(' ')[0]!.toLowerCase()}·${msg.effort}`;
+      const { reason } = msg;
+      updateTab(msg.tabId, (t) => ({
+        ...t,
+        tag,
+        reason,
+        lines: t.lines.map((l) => (l.id === t.currentId && l.kind === 'harv' ? { ...l, tag, reason } : l)),
+      }));
+      break;
+    }
     case 'chat.delta':
       updateTab(msg.tabId, (t) => ({ ...withCurrent(t, (text) => text + msg.text), activity: undefined }));
       break;

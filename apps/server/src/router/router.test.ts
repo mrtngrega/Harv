@@ -222,3 +222,28 @@ describe('router fixes (2026-10-24)', () => {
     expect(next.decision.reason).toMatch(/try harder on 2 similar tasks/);
   });
 });
+
+describe('stepping up a struggling reply (2026-10-29)', () => {
+  it('goes one step up the ladder and says from what and why', () => {
+    const { router } = newRouter();
+    const up = router.struggling('s', { model: 'sonnet', effort: 'medium' }, 'the tests failed');
+    expect(up).toMatchObject({ model: 'sonnet', effort: 'high', source: 'stepup' });
+    expect(up!.reason).toBe('↑ stepped up from sonnet·medium: the tests failed');
+  });
+
+  it("never climbs past opus·xhigh by itself (max and Fable stay the user's)", () => {
+    const { router } = newRouter();
+    expect(router.struggling('s', { model: 'opus', effort: 'high' }, 'x')).toMatchObject({ model: 'opus', effort: 'xhigh' });
+    expect(router.struggling('s', { model: 'opus', effort: 'xhigh' }, 'x')).toBeNull();
+    expect(router.struggling('s', { model: 'opus', effort: 'max' }, 'x')).toBeNull();
+  });
+
+  it("the task keeps the higher pick, so a follow-up doesn't drop back", async () => {
+    const { router, classify } = newRouter();
+    await router.route('f', 'fix the failing build in my project please', []);
+    router.struggling('f', { model: 'sonnet', effort: 'medium' }, 'the build failed');
+    (classify as ReturnType<typeof vi.fn>).mockClear();
+    const next = await router.route('f', 'ok go on', []);
+    expect(next.decision).toMatchObject({ model: 'sonnet', effort: 'high' });
+  });
+});

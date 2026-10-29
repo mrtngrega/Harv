@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { query, type Query, type SDKMessage, type SDKRateLimitInfo, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ChatServerMessage, EffortLevel, Project, SlashCommandInfo } from '@harv/shared';
+import { StruggleWatch } from '../router/struggle.ts';
 import type { SafetyGate } from '../safety/gate.ts';
 import type { ChatStore } from '../store/chats.ts';
 import type { ContentBlockParam } from './attachments.ts';
@@ -31,6 +32,8 @@ export interface SessionHooks {
   onChainEnd?: (uuid: string) => void;
   /** The Claude process is gone (it crashed, quit, or was refused): this session takes no more messages. */
   onEnded?: () => void;
+  /** The reply is struggling (tests failing, tool calls failing in a row): AUTO may step up mid-reply. */
+  onStruggle?: (why: string) => void;
 }
 
 /** Where one of the user's messages sits in the Claude conversation, for rewinding to before it. */
@@ -77,6 +80,8 @@ export class ChatSession {
   private closed = false;
   /** The Claude process is gone; nothing more can be sent. */
   private ended = false;
+  /** Watches this reply's tool results for a struggle (AUTO's step-up mid-reply). */
+  private struggle = new StruggleWatch();
   private started = false;
   /** The memories this session knows about (its system prompt, plus notes since). */
   private memory = memorySnapshot();
@@ -172,6 +177,7 @@ export class ChatSession {
     }
     this.stopping = false;
     this.said = false;
+    this.struggle.reset();
     this.turnTokens = 0;
     this.streamChars = 0;
     this.thinkingTokens = 0;
@@ -216,6 +222,19 @@ export class ChatSession {
    * Ends the session. Background shells and agents it started are stopped first: closing
    * Claude Code alone left them running (on Windows its child processes outlive it).
    */
+  /** Switches model and effort mid-reply (AUTO stepping up): the next request of this reply uses them. */
+  async retune(model: string, effort: EffortLevel): Promise<void> {
+    if (this.closed || this.ended) return;
+    if (model !== this.model) {
+      await this.q.setModel(model);
+      this.model = model;
+    }
+    if (effort !== this.effort) {
+      await this.q.applyFlagSettings({ effortLevel: effort });
+      this.effort = effort;
+    }
+  }
+
   close(): void {
     this.closed = true;
     const running = this.taskTracker.list().filter((t) => t.status === 'running');
@@ -344,6 +363,17 @@ export class ChatSession {
         if (msg.parent_tool_use_id) return;
         if (msg.uuid) this.chainEnd = msg.uuid;
         const content = msg.message.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block.type !== 'tool_result') continue;
+            const output =
+              typeof block.content === 'string'
+                ? block.content
+                : (block.content ?? []).map((part) => (part.type === 'text' ? part.text : '')).join('\n');
+            const why = this.struggle.toolResult(block.tool_use_id, block.is_error === true, output);
+            if (why) this.hooks.onStruggle?.(why);
+          }
+        }
         const text = typeof content === 'string' ? content : '';
         const output = [...text.matchAll(LOCAL_OUTPUT)].map((m) => m[1]!.replace(ANSI, '').trim()).filter(Boolean);
         if (output.length) this.say(output.join('\n\n'));
@@ -396,9 +426,13 @@ export class ChatSession {
         }
         let text = '';
         let usedTool = false;
+        const stuck = this.struggle.said(msg.message.content.map((block) => (block.type === 'text' ? block.text : '')).join(' '));
+        if (stuck) this.hooks.onStruggle?.(stuck);
         for (const block of msg.message.content) {
           if (block.type === 'text') text += block.text;
           if (block.type === 'tool_use') {
+            const command = (block.input as { command?: unknown } | undefined)?.command;
+            this.struggle.toolUse(block.id, typeof command === 'string' ? command : undefined);
             usedTool = true;
             if (MEMORY_TOOLS.includes(block.name)) this.usedMemoryTool = true;
             this.toolName = block.name.replace(/^mcp__harv__/, '');

@@ -51,6 +51,15 @@ export function stepUp(p: Pick, allowFable = false): Pick | null {
   return ladder.find((step) => score(step) > score(p)) ?? null;
 }
 
+/** The highest AUTO climbs to by itself when a reply struggles; opus·max and Fable stay the user's (Try harder). */
+export const STRUGGLE_CEILING: Pick = { model: 'opus', effort: 'xhigh' };
+
+/** The next step for a struggling reply, or null at the ceiling. */
+export function struggleStep(p: Pick): Pick | null {
+  const up = stepUp(p);
+  return up && score(up) <= score(STRUGGLE_CEILING) ? up : null;
+}
+
 /** The higher of two picks. */
 export const atLeast = (p: Pick, floor: Pick): Pick => (score(p) >= score(floor) ? p : floor);
 

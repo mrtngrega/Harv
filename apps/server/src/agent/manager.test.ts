@@ -81,6 +81,11 @@ class FakeSession {
   }
   async stopTask() {}
 
+  retuned: { model: string; effort: EffortLevel }[] = [];
+  async retune(model: string, effort: EffortLevel) {
+    this.retuned.push({ model, effort });
+  }
+
   /** The Claude process dies under the session (a crash, a refusal). */
   die() {
     if (this.busy) this.emit({ type: 'chat.done', tabId: this.tabId, ok: false, stopped: false });
@@ -880,5 +885,52 @@ describe('test pass fixes (2026-10-29)', () => {
     expect(meter.snapshot().queued).toBe(1);
     await chats.rewind('rq', 0);
     expect(meter.snapshot().queued).toBe(0);
+  });
+});
+
+describe('AUTO steps up a struggling reply (2026-10-29)', () => {
+  it('moves an AUTO reply one step up, twice at most, and tags the rest of it', async () => {
+    const { chats, store, sent } = setup();
+    await chats.send('up', 'run my project tests and fix whatever fails', 'auto', 'medium');
+    const s = FakeSession.all.get('up')!;
+    const first = s.sent.at(-1)!;
+    s.hooks.onStruggle!('the tests failed');
+    await settle();
+    expect(s.retuned).toHaveLength(1);
+    const stepped = sent.filter((m) => m.type === 'chat.stepped');
+    expect(stepped).toHaveLength(1);
+    expect(stepped[0]!.type === 'chat.stepped' && stepped[0]!.reason).toMatch(/^↑ stepped up from .+: the tests failed$/);
+    s.hooks.onStruggle!('2 tool calls failed in a row');
+    s.hooks.onStruggle!('the tests failed');
+    await settle();
+    expect(s.retuned).toHaveLength(2);
+    // The reply's line carries the new tag and the reason.
+    s.reply('fixed');
+    s.finish();
+    const line = store.snapshot('up')!.lines.findLast((l) => l.kind === 'harv')!;
+    expect(line.tag).toBe(`${s.retuned[1]!.model}·${s.retuned[1]!.effort}`);
+    expect(line.reason).toMatch(/^↑/);
+    expect(first).toBeDefined();
+  });
+
+  it("never changes the user's own pick or an /opus-style override", async () => {
+    const { chats } = setup();
+    await chats.send('man', 'run the tests', 'sonnet', 'medium');
+    FakeSession.all.get('man')!.hooks.onStruggle!('the tests failed');
+    await chats.send('ovr', '/haiku run the tests', 'auto', 'medium');
+    FakeSession.all.get('ovr')!.hooks.onStruggle!('the tests failed');
+    await settle();
+    expect(FakeSession.all.get('man')!.retuned).toEqual([]);
+    expect(FakeSession.all.get('ovr')!.retuned).toEqual([]);
+  });
+
+  it('does nothing once the reply has finished', async () => {
+    const { chats } = setup();
+    await chats.send('done', 'run my project tests and fix whatever fails', 'auto', 'medium');
+    const s = FakeSession.all.get('done')!;
+    s.finish();
+    s.hooks.onStruggle!('the tests failed');
+    await settle();
+    expect(s.retuned).toEqual([]);
   });
 });
