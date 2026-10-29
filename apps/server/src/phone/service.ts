@@ -60,6 +60,8 @@ export class PhoneService {
   private refreshing: Promise<void> | null = null;
   /** Chats whose current turn came from a phone: their end is pushed. */
   private phoneTurns = new Set<string>();
+  /** Chats whose turn Siri's request is waiting for (/api/phone/ask). */
+  private asking = new Set<string>();
   /** Phone windows in front right now (no push while one is). */
   private visible = new Set<object>();
   private sockets = new Map<string, Set<() => void>>();
@@ -179,6 +181,8 @@ export class PhoneService {
 
   /** Every dashboard event passes here: some become a push. */
   observe(msg: ServerMessage) {
+    // Siri is still waiting for this turn: it says the answer itself, so no push.
+    if (msg.type === 'chat.done' && this.asking.has(msg.tabId)) return void this.phoneTurns.delete(msg.tabId);
     const note = noteFor(msg, (tab) => this.phoneTurns.has(tab), this.deps.title);
     if (msg.type === 'chat.done') this.phoneTurns.delete(msg.tabId);
     if (!note || this.visible.size) return;
@@ -364,8 +368,14 @@ export class PhoneService {
       if (!text) return reply.code(400).send({ reply: 'I didn’t catch that.' });
       const tab = this.deps.phoneTab();
       this.markPhoneTurn(tab);
-      const answer = await this.deps.ask(tab, text, [], ASK_WAIT_MS);
-      // Answered in time: Siri already said it, no push needed.
+      this.asking.add(tab);
+      let answer: Awaited<ReturnType<PhoneDeps['ask']>>;
+      try {
+        answer = await this.deps.ask(tab, text, [], ASK_WAIT_MS);
+      } finally {
+        this.asking.delete(tab);
+      }
+      // Answered in time: Siri already said it, no push needed (a longer one pushes when it's done).
       if (answer.done) this.phoneTurns.delete(tab);
       return { reply: answer.reply.replace(/[*_`#>]/g, '').slice(0, 2000), done: answer.done };
     });

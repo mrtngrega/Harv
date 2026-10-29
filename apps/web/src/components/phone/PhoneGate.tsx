@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { coverBoot, liftBoot } from '../../lib/boot.ts';
 import type { PhoneState } from '@harv/shared';
 import { askPairing, isIos, makePasskey, phoneState, registerWorker, sendCode, standalone, unlock } from '../../lib/phone.ts';
-import { onSocketClosed, pauseSocket, resumeSocket, sendMessage, startSocket } from '../../lib/socket.ts';
+import { onConnectionChange, onSocketClosed, pauseSocket, resumeSocket, sendMessage, startSocket } from '../../lib/socket.ts';
 
 // The phone's way in (docs/PLAN.md §6q): add to Home Screen → pair with a code shown on the
 // computer → make the Face ID passkey → unlock with Face ID each time. Only then the dashboard.
@@ -11,6 +11,12 @@ type Stage = 'loading' | 'install' | 'pair' | 'code' | 'passkey' | 'locked' | 'o
 
 /** Hidden this long, the app locks itself (Face ID again when it comes back). */
 const LOCK_AFTER_HIDDEN_MS = 5 * 60_000;
+
+// Harv pushes only while no phone window is on screen: it hears so on every (re)connection, not only
+// when the app is hidden or shown again (else an open app still got notifications).
+onConnectionChange((connected) => {
+  if (connected) sendMessage({ type: 'phone.visible', visible: document.visibilityState === 'visible' });
+});
 
 export function PhoneGate({ children }: { children: ReactNode }) {
   const [stage, setStage] = useState<Stage>('loading');
