@@ -55,6 +55,8 @@ export interface SessionStart {
 
 /** What a local command like /context or /usage printed (it comes back as a user message). */
 const LOCAL_OUTPUT = /<local-command-std(?:out|err)>([\s\S]*?)<\/local-command-std(?:out|err)>/g;
+/** Claude Code confirming a model or effort change. */
+const SETTING_CONFIRM = /^(Set model to|Set effort (level )?to|Effort (level )?set to)\b/i;
 // eslint-disable-next-line no-control-regex -- terminal colour codes start with ESC
 const ANSI = /\x1b\[[0-9;]*m/g;
 
@@ -82,6 +84,8 @@ export class ChatSession {
   private ended = false;
   /** Watches this reply's tool results for a struggle (AUTO's step-up mid-reply). */
   private struggle = new StruggleWatch();
+  /** This reply was stepped up (retune): Claude Code's "Set model to…" note isn't shown. */
+  private retuned = false;
   private started = false;
   /** The memories this session knows about (its system prompt, plus notes since). */
   private memory = memorySnapshot();
@@ -178,6 +182,7 @@ export class ChatSession {
     this.stopping = false;
     this.said = false;
     this.struggle.reset();
+    this.retuned = false;
     this.turnTokens = 0;
     this.streamChars = 0;
     this.thinkingTokens = 0;
@@ -225,6 +230,7 @@ export class ChatSession {
   /** Switches model and effort mid-reply (AUTO stepping up): the next request of this reply uses them. */
   async retune(model: string, effort: EffortLevel): Promise<void> {
     if (this.closed || this.ended) return;
+    this.retuned = true;
     if (model !== this.model) {
       await this.q.setModel(model);
       this.model = model;
@@ -375,7 +381,10 @@ export class ChatSession {
           }
         }
         const text = typeof content === 'string' ? content : '';
-        const output = [...text.matchAll(LOCAL_OUTPUT)].map((m) => m[1]!.replace(ANSI, '').trim()).filter(Boolean);
+        const output = [...text.matchAll(LOCAL_OUTPUT)]
+          .map((m) => m[1]!.replace(ANSI, '').trim())
+          // Claude Code confirms a mid-reply step-up ("Set model to sonnet…"); the tag already says so.
+          .filter((line) => line && !(this.retuned && SETTING_CONFIRM.test(line)));
         if (output.length) this.say(output.join('\n\n'));
         return;
       }
