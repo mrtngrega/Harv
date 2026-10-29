@@ -1,6 +1,6 @@
 # Harv: build plan
 
-Status (2026-10-29): the report is empty. Done today (§6y): the deep test pass of everything (4 testers: backend, code review, the app on the PC, the notebook) and all 16 findings fixed (a bad message no longer crashes the server, DNS-rebinding Host check, secrets reached by wildcards/variables/recursive searches blocked, green readers that write lose green, PowerShell/.NET sends caught, dead sessions dropped, Stop during routing, rewind clears the limit queue, error boundaries, line breaks, tab and placeholder fixes, sync backoff); a startup cover so the app never shows the UI loading; backups cleaned after 30 days / over 5 GB and no longer copying whole folders; the PC's app reinstalled (it predated the browser). Still not built: §6t item 1 (Windows-MCP desktop control), item 2 (other apps), item 5 (car radio), voice (§6s B5), M11 phone (§6q), M10d hub; the user picks the order.
+Status (2026-10-29, evening): building §6q, Harv on the phone and by voice (decided today). Planned §6z, the LED strips (two Tapo L900-5 on TPAP firmware; Step 0 feasibility test first), not built. Earlier (2026-10-29): the report was empty. Done today (§6y): the deep test pass of everything (4 testers: backend, code review, the app on the PC, the notebook) and all 16 findings fixed (a bad message no longer crashes the server, DNS-rebinding Host check, secrets reached by wildcards/variables/recursive searches blocked, green readers that write lose green, PowerShell/.NET sends caught, dead sessions dropped, Stop during routing, rewind clears the limit queue, error boundaries, line breaks, tab and placeholder fixes, sync backoff); a startup cover so the app never shows the UI loading; backups cleaned after 30 days / over 5 GB and no longer copying whole folders; the PC's app reinstalled (it predated the browser). Still not built: §6t item 1 (Windows-MCP desktop control), item 2 (other apps), item 5 (car radio), voice (§6s B5), M11 phone (§6q), M10d hub; the user picks the order.
 
 Status (2026-10-28, evening): the report is empty. Built today (§6v): Harv's terminal tools, scrolling up during a reply, the Dolphin layout for the Linux explorer, the notebook's idle GPU (3 s stats). Image generation through the Gemini website built (§6w; full quality, signed in on both devices). Harv's shared browser built (§6x; a tab in the app over real web views, Harv's browser tools). Still not built: §6t item 1 (Windows-MCP desktop control), item 2 (other apps: Discord bot, email, calendar, Spotify), item 5 (Harv in the car radio), voice (§6s B5), M11 phone (§6q), M10d hub; the user picks the order.
 
@@ -417,17 +417,24 @@ The user: "i cant attach folders in harv, maybe it should work like in claude co
 - **Drops stay with the page** (`dragDropEnabled: false` in `tauri.conf.json`): with Tauri taking drops, HTML5 drag and drop inside the page (tab reordering, the explorer's drags) stops working on Windows. The cost: a file dropped from Explorer/Dolphin arrives without its path (uploaded as a copy, like in a browser), and a dropped folder gets a note pointing at ATTACH › Folder…, `@` or Send to chat. Possible later: WebView2's `postMessageWithAdditionalObjects` gives dropped files' real paths on Windows.
 - A reference names a path on the device where it was attached: synced to the other device it's only a note there.
 
-## 6q. Harv on the phone (M11, planned 2026-10-26, not built)
+## 6q. Harv on the phone and by voice (M11 + §6s B5, planned 2026-10-26, decided 2026-10-29, building)
 
-The user asked for Harv on their iPhone 13, "fully functional like on a computer". Decided:
+The user asked for Harv on their iPhone 13, "fully functional like on a computer", and on 2026-10-29: "i want to control harv on my pc or notebook from my phone, i also want to control it via voice from my phone", plus sending photos and files from the phone to Harv.
 
-- **The phone is a window into the PC's Harv, not its own Harv.** The Agent SDK / Claude Code can't run on iOS, and the work (files, terminal, projects, sensors) is on the PC anyway. When the PC is off, the phone can use the notebook's Harv instead (a device picker).
-- **No App Store app:** a native iOS app needs a Mac to build and a paid Apple developer account (or re-signing every 7 days). Instead the dashboard becomes an installable web app (PWA): Safari › Share › Add to Home Screen gives a full-screen Harv icon, no Safari bars.
-- **Reaching it: Tailscale only** (already on the PC and notebook; the Tailscale app goes on the phone). `tailscale serve` gives the dashboard an HTTPS address that only the user's own devices can reach, while Harv itself keeps listening on localhost only. Never `tailscale funnel` (public internet), never opening a port: within the terms, it's still one person's Harv.
-- **Locking it:** "Phone access" in Settings, off by default. Turning it on pairs the phone once (a code shown on the PC) and asks for Face ID through a passkey each time the app opens. The server accepts the `ts.net` origin only from paired devices; Settings lists them with Revoke. Approval cards work from the phone (red actions included, behind Face ID).
-- **A phone layout** (below `sm`): chat first, full width; tabs as a swipeable strip; history and stats as slide-in sheets; the stats panel's narrow mode as a top bar; attachments from Photos/Files/camera; terminal and file explorer usable but secondary.
-- **Notifications:** iOS web push for home-screen apps (iOS 16.4+): a reply finished, an approval waiting, usage and watchdog warnings. Free (Apple's push service, no Anthropic billing); the push carries only a short title, never chat content.
-- **Limits:** the PC (or notebook) must be on and awake; no Siri or share-sheet integration without a native app.
+**The user's answers (2026-10-29):** keep the no-costs rule (so no real phone calls: a phone number from Twilio, Bland AI and the like bills per minute, and Bland's voice on the call isn't Harv anyway); phone and voice follow **the same rules as a chat** (no extra cards); no Apple Watch; CarPlay and the car radio later; the extras (automations, PC control from the phone…) after the basics; sending photos and files from the phone is part of the basics.
+
+**Decided:**
+- **The phone is a window into the PC's or the notebook's Harv**, not its own Harv: the Agent SDK can't run on iOS, and the work is on the computers. No App Store app (a Mac and a paid developer account): the dashboard is an installable web app (Safari › Share › Add to Home Screen).
+- **Reaching it: Tailscale only.** `tailscale serve --https=443 http://127.0.0.1:5173` on each device gives `https://<device>.<tailnet>.ts.net`, reachable only inside the user's tailnet; Harv itself keeps listening on localhost only. Never `tailscale funnel`, never an opened port. Settings › Phone › **Phone access** (per device, off by default) turns `serve` on and off. One-time needs: HTTPS certificates on in the tailnet's DNS page (the user), and on Linux `sudo tailscale set --operator=$USER` (the user). The phone app switches between the PC and the notebook (each is paired on its own; the other device's address comes from live sync's peers, never from the tailnet list, which also holds a machine that isn't the user's).
+- **Who gets in** (requests whose Host is this device's ts.net name): the Origin must be that name too, `Tailscale-User-Login` (set by `serve`) must be this device's owner, and the request needs a **paired phone** (a random device cookie, stored hashed in `~/.harv/phones.json`) with a **fresh Face ID unlock** (a passkey, WebAuthn through `@simplewebauthn`; the unlock lasts while the app is in use, 30 minutes idle at most). Pairing: the phone asks, the PC shows a 6-digit code as a toast, it's typed on the phone (5 tries, 5 minutes), then the phone makes its passkey. Settings lists the phones with Revoke. The pairing and unlock routes are the only ones open before that. Vite's `server.fs.allow` is narrowed to the dashboard's own code, so nothing else of the repo (like `harv_report.md`) is served over the tailnet.
+- **A phone layout** (below `sm`): chat first, full width; tabs as a swipeable strip; history and stats as slide-in sheets; the narrow stats as a top bar; attachments from Photos, Files and the camera; terminal and explorer usable but secondary.
+- **Notifications:** web push for home-screen apps (iOS 16.4+, Apple's push service, free): a reply finished while the app wasn't in front, usage and watchdog warnings, a scheduled task ran, and "Harv wants to talk". VAPID keys in `~/.harv/vapid.json`, subscriptions per phone; a push carries a short title only, never chat content.
+- **Siri and the share sheet (Shortcuts, free, no app):** each phone gets a **Shortcut token** (Settings › Phone, shown once, revocable). "Hey Siri, Harv": the Shortcut dictates, posts the text to `POST /api/phone/ask` (Bearer token) and speaks the answer; the turn runs in a **Phone** chat, told to answer in a few spoken sentences without Markdown; a turn still running after ~45 s answers "still on it" and pushes when it's done. "Send to Harv" in the share sheet posts photos, files, links or text to `POST /api/phone/share` (with an optional message): the file goes to `~/.harv/workspace/phone/`, into the Phone chat (as a message when there's text, else as its draft's attachment) and a toast on the computers. Siri also works in CarPlay, so this is the car answer for now. Settings › Phone has the step-by-step Shortcut setup.
+- **Live voice in the app:** a talk button: listen (Safari's speech recognition; the keyboard's dictation as the fallback), send, speak the reply sentence by sentence while it streams (speech synthesis), listen again; a tap stops it. Same chat, same rules; the turn is told it's spoken. Better voices (Whisper and Piper/Kokoro on the 3060 Ti) and talking at the desk come later.
+- **"Harv calls you":** Harv's `phone_notify` tool pushes to the user's phones (it's the user, so the sending check doesn't ask); with `talk` the tap opens that chat in voice mode and Harv says it. Free stand-in for a ringing call; a Discord voice channel with Harv's own bot is the later option (§6t item 2).
+- **Every voice turn counts against the Pro limits** like a typed one.
+- **Later:** Wake-on-LAN (needs a device on the home network that's always on: the hub, M10d), the extras (automations like "arrive home → lights on", PC sleep/lock/screenshot from the phone, phone battery/location/Focus to Harv), CarPlay and the car radio, local voices, Discord voice.
+- **Not possible from a web app:** reading SMS, calls or other apps' notifications; a ringing call (CallKit is native only).
 
 ## 6s. Everything claude.ai and Claude Code can do (planned 2026-10-27, not built)
 
@@ -440,7 +447,7 @@ The user: "i keep discovering things that harv cant do but claude.ai or claude c
 2. **Images inline:** pictures Harv makes or reads (a chart from Python, a screenshot, `design/car-golf.png`) shown in the chat instead of a path.
 3. **Files as cards:** a file Harv creates (docx, xlsx, pdf, zip) shows as a card with Open / Show in folder.
 4. **Rich text:** math (KaTeX), syntax-highlighted code with a Copy button, Mermaid diagrams in replies.
-5. **Voice:** talk to Harv and hear it answer (later; details when we build it).
+5. **Voice:** talk to Harv and hear it answer: decided 2026-10-29, see §6q (Siri Shortcuts, live voice in the phone app).
 
 **C. What Claude Code has that Harv doesn't handle:**
 1. **AskUserQuestion:** Claude Code's multiple-choice question picker. Harv refuses the tool today; it needs a question card (options, Other, multi-select) that answers the tool.
@@ -535,3 +542,29 @@ The user's report note: "deep thorough test of the whole app, everything we buil
 - **Not tested in the app:** a killed session (the kill was refused by Claude Code's permission check), rewind past a limit-queued message (needs a real limit), sync with a locked keyring.
 - **Rule for dev sessions:** keep the notebook awake for 5 h at the start (`kde-inhibit`, memory `feedback-notebook-awake`).
 
+
+## 6z. The LED strips (M12, planned 2026-10-29, not built)
+
+The user's report note: "i have an led strip connected to my phone via wifi, can you connect it to harv?"
+
+**What's there (LAN scan, 2026-10-29):** the strip isn't on the phone, it's on the home Wi-Fi; the phone's Tapo app only talks to it. Two TP-Link **Tapo L900-5 (EU)** controllers answer TP-Link's discovery (UDP 20002) at `192.168.1.41` and `192.168.1.42` (HTTP on port 80, `device_type: SMART.TAPOBULB`). Their firmware uses TP-Link's new **TPAP** encryption (`encrypt_type: TPAP`, `lv: 2`, SPAKE2+ handshake), not the older KLAP. Local control signs in with the user's **Tapo account email and password** (free, nothing to do with Claude credentials).
+
+**The catch:** python-kasa (the usual library, also behind Home Assistant) has **no TPAP in any release yet**: 0.12.0 (2026-10-25) says it "did not make it". It's in unmerged PRs (#1592 the real implementation, #1706 only the config check; issue #1590). The L900 on firmware 1.4.3 is a known casualty (home-assistant-tapo-p100 #968).
+
+**Step 0: a feasibility test (before building anything).** python-kasa from PR #1592 in a scratch Python 3.14 venv; against one strip: read its state, then one on/off toggle. Outcomes:
+- works → Harv uses it, pinned to that commit, until a release has TPAP;
+- doesn't → our own TPAP client in TypeScript, ported from the PR (more work; future firmware may break it);
+- last resort → TP-Link's unofficial cloud API (free, slower, keeps getting restricted).
+If none works, stop and tell the user before building.
+
+**Step 1: Harv's side.**
+- **Server:** `apps/server/src/devices/lights.ts` (a small Python helper behind it if the library is the route). Strips are found by discovery each start (no fixed IPs); state is cached and refreshed every ~30 s while the dashboard is open. The Tapo login lives in `~/.harv/devices.json`, read only by the server, never by the model, never in the repo, cleaned on read like `settings.json`; added to `protectedPaths`/`SENSITIVE_PATHS` so no chat tool can read it.
+- **Tools** (`chatTools.ts`): `lights_list`, `lights_set` (on/off, brightness, colour, colour temperature; one strip, several, or all) and `lights_effect` (the strip's built-in effects). Green in the gate (harmless), with `classify.test.ts` cases. Scheduled tasks (§6s C4) work with it for free: "every day at 21:00 warm 20%".
+- **Dashboard:** a Lights card in the stats panel (on/off, brightness, colour swatch, in the narrow mode a row per strip) and Settings › Devices (the Tapo login, strip names, rescan).
+- **Tests:** a fake strip for the module and the tools, the gate rule, then driven in the app (persona/dev rule: unit tests alone don't count).
+
+**Optional extras (the user picks):** flash amber on a usage or watchdog warning, a soft pulse when a long reply finishes, colour following CPU/GPU temperature while gaming.
+
+**Open questions for the user:** the Tapo login (typed into Settings, not a chat); are .41 and .42 two strips, and their names (desk, bed…); which extras; should the notebook control them too (only on the home Wi-Fi; the login would then sync sealed, like the sync key's other secrets, or be entered there too).
+
+**Sources:** python-kasa issue #1590, PRs #1592 and #1706, CHANGELOG 0.12.0; home-assistant-tapo-p100 #968.
