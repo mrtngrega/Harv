@@ -78,7 +78,7 @@ export function PhoneShell() {
               onChange={(e) => e.target.value && location.assign(e.target.value)}
               className="min-w-0 truncate bg-transparent text-[11px] text-faint outline-none"
             >
-              <option value="">{device} ▾</option>
+              <option value="">{device}</option>
               {others.map((o) => (
                 <option key={o.url} value={o.url}>
                   {o.name}
