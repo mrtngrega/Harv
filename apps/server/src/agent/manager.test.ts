@@ -80,6 +80,13 @@ class FakeSession {
     return [];
   }
   async stopTask() {}
+
+  /** The Claude process dies under the session (a crash, a refusal). */
+  die() {
+    if (this.busy) this.emit({ type: 'chat.done', tabId: this.tabId, ok: false, stopped: false });
+    this.busy = false;
+    this.hooks.onEnded?.();
+  }
 }
 
 vi.mock('./session.ts', () => ({ ChatSession: FakeSession }));
@@ -92,7 +99,7 @@ const { RouteStore } = await import('../store/routes.ts');
 const { Router } = await import('../router/router.ts');
 const { UsageMeter } = await import('../usage/meter.ts');
 
-function setup() {
+function setup(classify: () => Promise<null> = async () => null) {
   const sent: ChatServerMessage[] = [];
   const store = new ChatStore(':memory:');
   const routes = new RouteStore(':memory:');
@@ -105,7 +112,7 @@ function setup() {
   const chats = new ChatManager(
     store,
     gate,
-    new Router(routes, async () => null),
+    new Router(routes, classify),
     meter,
     (m) => sent.push(m as ChatServerMessage),
     () => {},
@@ -834,5 +841,44 @@ describe('scheduled tasks (docs/PLAN.md §6s C4)', () => {
     await chats.runScheduled({ tabId: 'gone', title: 'Check build', prompt: 'Is it green?' }, false);
     expect(store.title('gone')).toBe('Check build');
     expect(store.openChats().some((c) => c.id === 'gone')).toBe(true);
+  });
+});
+
+describe('test pass fixes (2026-10-29)', () => {
+  it('a dead Claude session is dropped, so the next message starts a new one instead of hanging', async () => {
+    const { chats } = setup();
+    await chats.send('dead', 'hello', 'sonnet', 'medium');
+    const first = FakeSession.all.get('dead')!;
+    first.die();
+    await chats.send('dead', 'still there?', 'sonnet', 'medium');
+    const second = FakeSession.all.get('dead')!;
+    expect(second).not.toBe(first);
+    expect(second.sent.at(-1)!.content).toBe('still there?');
+  });
+
+  it('Stop while AUTO is still picking the model drops the turn', async () => {
+    let pick!: (v: null) => void;
+    const { chats, sent } = setup(() => new Promise<null>((r) => (pick = r)));
+    const sending = chats.send('stopr', 'write me a long essay', 'auto', 'medium');
+    await settle();
+    await chats.stop('stopr');
+    pick(null);
+    await sending;
+    expect(FakeSession.all.get('stopr')?.sent ?? []).toHaveLength(0);
+    expect(sent.some((m) => m.type === 'chat.done' && m.tabId === 'stopr' && m.stopped)).toBe(true);
+  });
+
+  it('rewinding past a message queued for the limit reset takes it out of the queue', async () => {
+    const { chats, meter, store } = setup();
+    await chats.send('rq', 'first', 'sonnet', 'medium');
+    store.setSession('rq', 'session-rq');
+    FakeSession.all.get('rq')!.reply('one');
+    FakeSession.all.get('rq')!.finish();
+    await settle();
+    meter.pause(Date.now() + 60_000);
+    await chats.send('rq', 'queued one', 'sonnet', 'medium');
+    expect(meter.snapshot().queued).toBe(1);
+    await chats.rewind('rq', 0);
+    expect(meter.snapshot().queued).toBe(0);
   });
 });

@@ -415,6 +415,10 @@ export class ChatManager {
           this.meter.rateLimit(info);
           if (info.status === 'rejected') this.limited.add(tabId);
         },
+        onEnded: () => {
+          // The next message starts a new session (resuming this conversation) instead of vanishing into a dead one.
+          if (this.sessions.get(tabId) === session) this.sessions.delete(tabId);
+        },
         onResumeFailed: () => {
           // The old Claude transcript is gone; the next message starts a fresh session.
           this.sessions.delete(tabId);
@@ -744,6 +748,7 @@ export class ChatManager {
     this.gate.setTurn(tabId, message);
     // "thinking" from routing until the session has the message, so the status pill doesn't blink idle in between.
     this.setRouting(tabId, true);
+    this.stopped.delete(tabId);
     try {
       if (choice === 'auto') {
         // A new chat's title is just its first message, not a name worth keeping.
@@ -764,6 +769,10 @@ export class ChatManager {
             ? { model: override.model ?? choice, effort: override.effort ?? effort, source: 'override', reason: 'you asked for it' }
             : { model: choice, effort, source: 'manual', reason: 'your pick' };
         this.router.manual(tabId, decision);
+      }
+      if (this.stopped.delete(tabId)) {
+        this.emit({ type: 'chat.done', tabId, ok: false, stopped: true });
+        return;
       }
       await this.run(tabId, decision, choice === 'auto', files.length ? buildContent(tabId, note + text, files) : note + text);
     } finally {
@@ -821,6 +830,8 @@ export class ChatManager {
 
   /** Shows "thinking" while the router's classifier runs. */
   private routing = new Set<string>();
+  /** Tabs whose user pressed Stop while the router was still picking: their turn never starts. */
+  private stopped = new Set<string>();
   private setRouting(tabId: string, on: boolean) {
     if (on) this.routing.add(tabId);
     else this.routing.delete(tabId);
@@ -842,6 +853,8 @@ export class ChatManager {
   }
 
   async stop(tabId: string): Promise<void> {
+    // Pressed while AUTO is still picking the model: the turn is dropped once it's picked.
+    if (this.routing.has(tabId)) this.stopped.add(tabId);
     const dropped = this.dequeueTab(tabId);
     if (dropped)
       this.emit({ type: 'chat.notice', tabId, message: `Removed ${dropped === 1 ? 'the queued message' : `${dropped} queued messages`}.` });
@@ -882,6 +895,8 @@ export class ChatManager {
     }
     const target = this.store.rewindTarget(tabId, fromEnd);
     if (!target) return;
+    // Work waiting for a plan reset (a queued message, a "continue") comes after the line going back: it goes too.
+    this.dequeueTab(tabId);
     const sessionId = this.store.getSession(tabId);
     let files: string;
     if (target.uuid && target.session && target.session === sessionId) {

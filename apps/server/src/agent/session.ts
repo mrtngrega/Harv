@@ -29,6 +29,8 @@ export interface SessionHooks {
   onAutoTurn?: () => void;
   /** A turn ended: the last entry of the conversation so far, where a later rewind can resume. */
   onChainEnd?: (uuid: string) => void;
+  /** The Claude process is gone (it crashed, quit, or was refused): this session takes no more messages. */
+  onEnded?: () => void;
 }
 
 /** Where one of the user's messages sits in the Claude conversation, for rewinding to before it. */
@@ -73,6 +75,8 @@ export class ChatSession {
   private q: Query;
   private stopping = false;
   private closed = false;
+  /** The Claude process is gone; nothing more can be sent. */
+  private ended = false;
   private started = false;
   /** The memories this session knows about (its system prompt, plus notes since). */
   private memory = memorySnapshot();
@@ -157,6 +161,7 @@ export class ChatSession {
    * Returns where the message sits in the conversation, for a later rewind.
    */
   async send(content: string | ContentBlockParam[], model: string, effort: EffortLevel, raw = false): Promise<TurnMark> {
+    if (this.closed || this.ended) throw new Error('this Claude session has ended');
     if (model !== this.model) {
       await this.q.setModel(model);
       this.model = model;
@@ -277,17 +282,22 @@ export class ChatSession {
   }
 
   private async consume() {
+    let resumeFailed = false;
     try {
       for await (const msg of this.q) this.handle(msg);
     } catch (err) {
       if (this.resume && !this.started) {
+        resumeFailed = true;
         this.hooks.onResumeFailed();
       } else if (!this.closed) {
         this.emit({ type: 'chat.error', tabId: this.tabId, message: `Claude session ended: ${(err as Error).message}` });
       }
     } finally {
+      this.ended = true;
       if (this.busy) this.emit({ type: 'chat.done', tabId: this.tabId, ok: false, stopped: this.stopping });
       this.setBusy(false);
+      // A dead session left in place swallowed every later message (the tab stayed "thinking").
+      if (!resumeFailed) this.hooks.onEnded?.();
     }
   }
 
