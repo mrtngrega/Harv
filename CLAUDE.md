@@ -56,7 +56,7 @@ Harv runs only on the user's Claude subscription, which reaches Claude through t
 - Don't create logon tasks or other autostart entries yourself. The only one is the app's Settings › App › "Open Harv when I log in" (off by default, the user's switch).
 - It must run as admin to read sensors.
 - http.sys still listens on all addresses, so an inbound firewall rule, "Harv: block remote access to LibreHardwareMonitor (8085)", blocks the network. Keep it.
-- The PC has Hamachi and Tailscale adapters, so never expose ports beyond localhost. The one exception (the user's OK, 2026-10-27): live sync's port 4318, on the Tailscale address only, with a firewall rule for Tailscale addresses only (`scripts/live-firewall.ps1`).
+- The PC has Hamachi and Tailscale adapters, so never expose ports beyond localhost. The one exception (the user's OK, 2026-10-27): live sync's port 4318, on the Tailscale address only, with a firewall rule for Tailscale addresses only (`scripts/live-firewall.ps1`). And the phone (the user's plan, 2026-10-29, `docs/PLAN.md` §6q): `tailscale serve` (HTTPS inside the tailnet, no opened port, never Funnel), only while the user's own Settings › Phone access switch is on; don't turn that switch on yourself.
 
 ## Terms
 
