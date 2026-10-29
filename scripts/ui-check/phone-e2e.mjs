@@ -19,7 +19,11 @@ const seen = [];
 pc.on('message', (raw) => {
   const m = JSON.parse(String(raw));
   seen.push(m);
-  for (const w of [...waiters]) if (w.test(m)) (waiters.splice(waiters.indexOf(w), 1), w.resolve(m));
+  for (const w of [...waiters]) {
+    if (!w.test(m)) continue;
+    waiters.splice(waiters.indexOf(w), 1);
+    w.resolve(m);
+  }
 });
 const next = (test, ms = 15000) =>
   new Promise((resolve, reject) => {
