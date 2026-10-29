@@ -16,6 +16,8 @@ import type { SyncStore } from './store.ts';
 
 /** How often Harv pulls and pushes (docs/PLAN.md §6m: a minute or two of latency). */
 const INTERVAL_MS = 2 * 60 * 1000;
+/** Between tries once syncs keep failing. */
+const BACKOFF_MS = 10 * 60_000;
 /** After a finished reply: push soon, but let a burst of lines settle first. */
 const SOON_MS = 10 * 1000;
 /** Events per chunk file. */
@@ -174,6 +176,9 @@ export class SyncEngine {
   private repo: SyncRepo;
   private keyPath: string;
   private timer?: NodeJS.Timeout;
+  /** Syncs that failed in a row, and when the last one started (for the backoff). */
+  private failures = 0;
+  private lastTry = 0;
   private soonTimer?: NodeJS.Timeout;
   private busy = false;
   private running: Promise<void> | null = null;
@@ -244,7 +249,11 @@ export class SyncEngine {
 
   /** Syncs now and every 2 minutes. */
   start(): void {
-    this.timer = setInterval(() => void this.tick(), INTERVAL_MS);
+    this.timer = setInterval(() => {
+      // Failing again and again (no network, a locked keyring): try every 10 minutes instead of every 2.
+      if (this.failures >= 3 && Date.now() - this.lastTry < BACKOFF_MS) return;
+      void this.tick();
+    }, INTERVAL_MS);
     this.timer.unref();
     void this.tick();
   }
@@ -335,6 +344,7 @@ export class SyncEngine {
   }
 
   private async runNow(): Promise<void> {
+    this.lastTry = Date.now();
     this.busy = true;
     this.publish();
     try {
@@ -362,9 +372,11 @@ export class SyncEngine {
       this.db.prune(written);
       this.db.set('lastSync', Date.now());
       this.lastError = undefined;
+      this.failures = 0;
       this.hooks.synced?.();
     } catch (err) {
       this.lastError = (err as Error).message;
+      this.failures++;
       this.hooks.log('Sync failed', { error: this.lastError });
     } finally {
       this.busy = false;
@@ -702,10 +714,11 @@ export class SyncEngine {
           }
         } finally {
           this.liveBlobs = null;
+          // Even when an event fails partway, the dashboards hear about what was applied before it.
+          this.db.set(`peer:${from}`, { ...known, name: batch.device.name, lastChange: last || undefined, live: Date.now() });
+          this.emitChanges(changes, settings);
+          this.publish();
         }
-        this.db.set(`peer:${from}`, { ...known, name: batch.device.name, lastChange: last || undefined, live: Date.now() });
-        this.emitChanges(changes, settings);
-        this.publish();
       }
       return seal(key, `live-ack/${this.id}/${from}`, { cursor });
     });

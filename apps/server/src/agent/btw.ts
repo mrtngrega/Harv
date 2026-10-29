@@ -27,7 +27,23 @@ export async function sideQuestion(question: string, model: string, chat: ChatCo
       persistSession: false,
       maxTurns: 2,
       includePartialMessages: false,
-      hooks: {},
+      // Refused by a hook too: canUseTool is only asked when Claude Code's own rules don't already
+      // allow a tool, and plain reads usually are. Without the gate's hooks nothing would check them.
+      hooks: {
+        PreToolUse: [
+          {
+            hooks: [
+              async () => ({
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse' as const,
+                  permissionDecision: 'deny' as const,
+                  permissionDecisionReason: 'No tools for a /btw side question: answer from what you already know.',
+                },
+              }),
+            ],
+          },
+        ],
+      },
       canUseTool: async () => ({
         behavior: 'deny',
         message: 'No tools for a /btw side question: answer now, briefly, from what you already know (say so if you would need to look).',
