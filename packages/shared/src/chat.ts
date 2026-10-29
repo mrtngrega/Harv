@@ -58,6 +58,9 @@ export type ModelChoice = 'auto' | (string & {});
 /** From this context size the chat's context label suggests /fresh (the user's pick, 2026-10-25). */
 export const FRESH_HINT_TOKENS = 200_000;
 
+/** The longest history search the server runs (SQLite refuses very long LIKE patterns). */
+export const HISTORY_QUERY_MAX = 200;
+
 /** What AUTO runs when the router can't decide (e.g. the classifier failed). */
 export const AUTO_FALLBACK = { model: 'sonnet', effort: 'medium' } as const satisfies { model: string; effort: EffortLevel };
 

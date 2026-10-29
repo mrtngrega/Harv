@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useProjects } from '../lib/useHarvSocket.ts';
-import type { HistoryItem, Project } from '@harv/shared';
+import { HISTORY_QUERY_MAX, type HistoryItem, type Project } from '@harv/shared';
 import { chat, useChat, useHistory } from '../lib/chatStore.ts';
 
 const DAY = 86_400_000;
@@ -155,6 +155,7 @@ export function HistorySidebar() {
       <input
         id="history-search"
         type="search"
+        maxLength={HISTORY_QUERY_MAX}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         placeholder="search chats…"

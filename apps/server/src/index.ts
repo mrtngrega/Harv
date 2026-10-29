@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { basename, join } from 'node:path';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
-import { HARV_VERSION, MAX_ATTACHMENT_BYTES, SERVER_PORT, terminalId, type ClientMessage, type ServerMessage } from '@harv/shared';
+import { HARV_VERSION, HISTORY_QUERY_MAX, MAX_ATTACHMENT_BYTES, SERVER_PORT, terminalId, type ClientMessage, type ServerMessage } from '@harv/shared';
 import { isValidTab, saveAttachment } from './agent/attachments.ts';
 import { loadCatalog } from './agent/catalog.ts';
 import { findTab, type OpenTab } from './agent/chatTools.ts';
@@ -63,6 +63,12 @@ ensureHarvHome();
 /** Sent in hello: the dashboard asks "continue or new session?" once per server start. */
 const STARTED_AT = Date.now();
 const app = Fastify({ logger: { level: 'info' } });
+
+// Harv runs without auto-restart, so a stray error must be logged, never the end of the server.
+process.on('uncaughtException', (err) => app.log.error({ err: err.message, stack: err.stack }, 'Uncaught error'));
+process.on('unhandledRejection', (reason) =>
+  app.log.error({ err: reason instanceof Error ? reason.message : String(reason) }, 'Unhandled rejection'),
+);
 await app.register(websocket);
 
 if (removed.length > 0) {
@@ -77,7 +83,11 @@ const ALLOWED_ORIGINS = new Set([
   'http://127.0.0.1:5173',
   'http://localhost:5173',
 ]);
+// DNS rebinding: a page on evil.example can point its name at 127.0.0.1 and then make "same-origin"
+// requests here. Its requests still carry its own name in Host, so only Harv's own names get in.
+const ALLOWED_HOSTS = new Set([...ALLOWED_ORIGINS].map((o) => new URL(o).host));
 app.addHook('onRequest', async (req, reply) => {
+  if (!ALLOWED_HOSTS.has((req.headers.host ?? '').toLowerCase())) return reply.code(403).send({ error: 'Forbidden host' });
   const origin = req.headers.origin;
   if (origin && !ALLOWED_ORIGINS.has(origin)) return reply.code(403).send({ error: 'Forbidden origin' });
   // A plain <img> or link from another site sends no Origin, but browsers mark it. Only the dashboard itself may read files.
@@ -382,6 +392,7 @@ app.get<{ Querystring: { path?: string; q?: string } }>('/api/files/search', asy
 app.get<{ Querystring: { path?: string } }>('/api/files/props', async (req, reply) => {
   const path = cleanPath(req.query.path);
   if (!path) return reply.code(400).send({ error: 'Bad path' });
+  if (isSensitivePath(path)) return reply.code(403).send({ error: SENSITIVE });
   try {
     return properties(path);
   } catch {
@@ -521,6 +532,16 @@ app.get('/ws', { websocket: true }, (socket) => {
     } catch {
       return;
     }
+    if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') return;
+    // One bad message must never take Harv down (it doesn't restart by itself): log it and go on.
+    try {
+      handle(msg);
+    } catch (err) {
+      app.log.error({ err: (err as Error).message, type: msg.type }, 'A dashboard message failed');
+    }
+  });
+
+  function handle(msg: ClientMessage) {
     switch (msg.type) {
       case 'ping':
         send({ type: 'harv.status', status: chats.status, detail: chats.statusDetail });
@@ -561,7 +582,7 @@ app.get('/ws', { websocket: true }, (socket) => {
         terminals.close(terminalId(msg.tabId));
         break;
       case 'chat.rename':
-        chats.rename(msg.tabId, msg.title);
+        if (typeof msg.title === 'string') chats.rename(msg.tabId, msg.title);
         break;
       case 'schedule.cancel':
         scheduler.cancel(String(msg.id));
@@ -617,16 +638,19 @@ app.get('/ws', { websocket: true }, (socket) => {
         terminals.resize(msg.id, msg.cols, msg.rows);
         break;
       case 'settings.update':
+        if (!msg.patch || typeof msg.patch !== 'object') break;
         broadcast({ type: 'settings', settings: updateSettings(msg.patch) });
         break;
       case 'sync.now':
         void sync.now();
         break;
-      case 'history.search':
-        send({ type: 'history', items: chats.history(msg.query), query: msg.query });
+      case 'history.search': {
+        const query = typeof msg.query === 'string' ? msg.query.slice(0, HISTORY_QUERY_MAX) : '';
+        send({ type: 'history', items: chats.history(query), query });
         break;
+      }
     }
-  });
+  }
 });
 
 app.addHook('onClose', async () => {

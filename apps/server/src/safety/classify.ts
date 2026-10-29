@@ -5,6 +5,7 @@ import type { Tier } from '@harv/shared';
 import { IS_WINDOWS } from '../platform.ts';
 import { fullPath, isHarvData, isInside, isProgramDir, isSystemDir, isTempDir, loadSettings, WORKSPACE } from './paths.ts';
 import { BROWSER_TOOLS, browserSends, classifyBrowser } from './browser.ts';
+import { reachesSecret } from './secrets.ts';
 
 /** How the OS folders are named in reasons. */
 const SYSTEM_FOLDER = IS_WINDOWS ? 'the Windows folder' : "the system's own folders";
@@ -500,8 +501,19 @@ export function scriptSends(command: string): boolean {
  */
 export function sendsData(command: string): boolean {
   if (sendsElsewhere(command)) return true;
-  if (/send-mailmessage|\b(invoke-webrequest|invoke-restmethod|iwr|irm)\b.*-method\s+['"]?(post|put|patch|delete)\b/i.test(command))
+  if (/send-mailmessage/i.test(command)) return true;
+  // PowerShell's web cmdlets (and their aliases: PowerShell 5.1's curl and wget are Invoke-WebRequest).
+  // Parameters may be shortened (`-Met Post`) or joined with a colon (`-Method:Post`); a body is data sent.
+  if (
+    /\b(invoke-webrequest|invoke-restmethod|iwr|irm|curl|wget)\b/i.test(command) &&
+    /\s-met\w*(\s+|:)['"]?(post|put|patch|delete)\b|\s-(bo|bod|body|inf\w*|form)\b|\s-in(?=\s)/i.test(command)
+  )
     return true;
+  // .NET uploads (WebClient, HttpClient), BITS uploads, raw sockets, and input fed to a remote shell.
+  if (/\.upload(string|file|data|values)(taskasync|async)?\s*\(|\.(post|put|patch|send)async\s*\(|-transfertype\s+upload/i.test(command))
+    return true;
+  if (/(^|[\s;|&(])(nc|ncat|netcat|socat)(\.exe)?\s/i.test(command)) return true;
+  if (/\|\s*ssh\b/i.test(command) || splitCommand(command).some((s) => /^ssh\b/i.test(s) && /\s<\s*\S/.test(s))) return true;
   return splitCommand(command).some((segment) => {
     const ws = words(segment).map(unquote);
     const at = ws.findIndex((w) => /(^|[^\w-])(curl|wget)(\.exe)?$/i.test(w));
@@ -971,12 +983,32 @@ function isReadOnlyGh(args: string[]): boolean {
 function isGreenSegment(segment: string): boolean {
   const ws = words(segment).map(unquote);
   const first = (ws[0] ?? '').toLowerCase();
-  if (first === 'git')
-    return GREEN_GIT.has((ws[1] ?? '').toLowerCase()) && !/\s-(d|D|m|M)\b|--delete|set-url|\badd\b|\bremove\b/.test(segment);
+  if (first === 'git') {
+    const sub = (ws[1] ?? '').toLowerCase();
+    if (!GREEN_GIT.has(sub) || /\s-(d|D|m|M)\b|--delete|set-url|\b(add|remove|rename|prune|set-head|set-branches|update)\b/.test(segment))
+      return false;
+    // `git diff --output=f` writes a file.
+    if (/\s--output\b/.test(segment)) return false;
+    // `git branch x` / `git tag x` make one: only listing is reading.
+    if (sub === 'branch' || sub === 'tag')
+      return (
+        ws.slice(2).every((w) => w.startsWith('-')) &&
+        !(sub === 'branch' ? /\s-(c|C|f|u)\b/ : /\s-(a|s|u|f|e)\b/).test(segment) &&
+        !/--(copy|force|annotate|sign|edit|set-upstream\S*|unset-upstream)/.test(segment)
+      );
+    return true;
+  }
+  // Read-only programs with options that write a file or run another program.
+  if (first === 'sort') return !/\s(-o\S*|--output\S*)/.test(segment);
+  if (first === 'uniq') return ws.slice(1).filter((w) => !w.startsWith('-')).length <= 1;
+  if (first === 'rg') return !/\s--pre(-glob)?\b/.test(segment);
+  if (first === 'tree') return !/\s-o\b/.test(segment);
+  if (first === 'ss') return !/\s(-K|--kill)\b/.test(segment);
+  if (first === 'hostname') return ws.slice(1).every((w) => w.startsWith('-') && !/^(-F|--file)$/.test(w));
   if (first === 'nvidia-smi')
     return !/\s-(pl|r|ac|lgc|pm|rac)\b|--(power-limit|gpu-reset|applications-clocks|lock-gpu-clocks)/i.test(segment);
   if (first === 'ipconfig') return !/\/(release|renew)/i.test(segment);
-  if (first === 'find') return !/-(delete|exec|execdir|ok|fprint)/.test(segment);
+  if (first === 'find') return !/-(delete|exec|execdir|ok|fprint|fls)/.test(segment);
   // Logs: reading only (`--vacuum-*`, `--rotate`, `--flush` delete or move them).
   if (first === 'journalctl') return !/--(vacuum|rotate|flush|relinquish|sync|setup-keys|update-catalog)/.test(segment);
   // `ip addr`, `ip route`: showing only, never `add`/`del`/`set`/`flush`.
@@ -1070,7 +1102,8 @@ function classifyCommandAsIs(command: string, description: string, ctx: Classify
   }
   // Heredoc bodies are scripts or data: the shell rules below read only the shell lines around them.
   const { shell, bodies } = ctx.shell === 'powershell' ? { shell: command, bodies: [] } : splitHeredocs(command);
-  if (mentionsSecret(shell) || bodies.some((b) => scriptPaths(b.text).some(isSensitivePath))) {
+  const parts = splitCommand(shell).map((segment) => words(segment).map(unquote));
+  if (mentionsSecret(shell) || reachesSecret(parts, cwd) || bodies.some((b) => scriptPaths(b.text).some(isSensitivePath))) {
     return verdict('blocked', 'Blocked: it touches files that may hold credentials or secrets.', summary);
   }
 

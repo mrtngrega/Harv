@@ -79,6 +79,8 @@ describe('ChatStore', () => {
     s.ensureChat('b', '100 done');
     s.addLine('b', { kind: 'you', text: 'x' });
     expect(s.history('100%').map((h) => h.id)).toEqual(['a']);
+    // A huge query (SQLite refuses LIKE patterns over 50 kB) is cut, never thrown.
+    expect(() => s.history('a'.repeat(100_000))).not.toThrow();
   });
 
   it('leaves chats without messages out of history (tabs used only for their terminal or files)', () => {

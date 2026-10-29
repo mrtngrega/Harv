@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { IS_WINDOWS, osPath } from '../platform.ts';
+import { isSensitivePath } from '../safety/classify.ts';
 import type { FileEntry, FilePlaces, FolderListing, PathSuggestion } from '@harv/shared';
 
 // The file explorer tab. These are the user's own clicks in their own dashboard
@@ -150,6 +151,8 @@ export function suggestPaths(query: string, limit = 30): PathSuggestion[] {
   const out: PathSuggestion[] = [];
   for (const name of picked) {
     const path = osPath.join(dir, name);
+    // Keys and logins aren't offered to attach (Harv couldn't read them anyway).
+    if (isSensitivePath(path)) continue;
     const st = statSync(path, { throwIfNoEntry: false });
     if (!st) continue;
     out.push({ path, name, folder: st.isDirectory(), size: st.isDirectory() ? 0 : st.size });

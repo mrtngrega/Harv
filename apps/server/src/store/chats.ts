@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import type { ChatSnapshot, HistoryItem, LineKind, Project, StoredLine } from '@harv/shared';
+import { HISTORY_QUERY_MAX, type ChatSnapshot, type HistoryItem, type LineKind, type Project, type StoredLine } from '@harv/shared';
 import type { SyncEvent } from '../sync/events.ts';
 
 type LineEvent = Extract<SyncEvent, { t: 'line' }>;
@@ -416,7 +416,8 @@ export class ChatStore {
    * terminal or file explorer (saved when renamed or put in a project) stays out.
    */
   history(query = ''): HistoryItem[] {
-    const q = query.trim();
+    // SQLite refuses LIKE patterns over 50 kB; nobody searches with more than a line anyway.
+    const q = String(query).trim().slice(0, HISTORY_QUERY_MAX);
     type Row = { id: string; title: string; updated_at: number; open: number; match: string | null; project_id: string | null };
     const rows = q
       ? (this.db
