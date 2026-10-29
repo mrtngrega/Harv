@@ -3,7 +3,7 @@
 // read from this computer's dashboard connection), makes its passkey, opens the phone layout,
 // tries the sheets and Settings, makes a Shortcut token, shares a picture, optionally asks Siri's
 // endpoint one question (--ask, one small model turn), then removes the test phone again.
-//   node scripts/ui-check/phone-e2e.mjs [--ask] [--keep]
+//   node scripts/ui-check/phone-e2e.mjs [--ask] [--share] [--other] [--app] [--keep]
 // Needs: Settings › Phone access on, HTTPS certificates on in the tailnet.
 import { createRequire } from 'node:module';
 import { launch } from './cdp.mjs';
@@ -75,6 +75,20 @@ await sleep(4000);
 const opened = await phone.eval('!!document.querySelector("[data-tab]") || !!document.querySelector("#harv-cmd")');
 console.log('dashboard open after Face ID:', opened);
 await step('4-open');
+// The computer switch: its menu must sit above the chat, not under its frosted glass.
+if (await phone.eval('!!document.querySelector("button[aria-haspopup=menu][aria-label=\\"Which computer\\"]")')) {
+  await phone.click('button[aria-haspopup="menu"][aria-label="Which computer"]');
+  await sleep(400);
+  const onTop = await phone.eval(`(() => {
+    const m = document.querySelector('[role=menu][aria-label="Which computer"]');
+    const r = m.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return m.contains(hit);
+  })()`);
+  console.log('device menu on top:', onTop);
+  await step('4b-devices');
+  await phone.click('button[aria-haspopup="menu"][aria-label="Which computer"]');
+}
 
 // Every open tab, the way the phone shows it (chats the app shows in its browser, terminals, Settings…): nothing may break.
 const broke = () => phone.eval('/Something in Harv’s window broke|Couldn’t show the/.test(document.body.innerText)');
@@ -149,12 +163,15 @@ const token = await phone.eval('[...document.querySelectorAll("code")].map(c => 
 console.log('shortcut token made:', !!token);
 await step('8-token');
 
-// The share sheet's request, as a Shortcut would send it: a small PNG, no note.
+// The share sheet's request, as a Shortcut would send it: a small PNG, no note. It lands in the phone chat's
+// draft on every window, so only with --share.
+if (process.argv.includes('--share')) {
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const share = await fetch(`${url}/api/phone/share?name=test-photo`, { method: 'POST', headers: { authorization: token, 'content-type': 'image/png' }, body: png });
 console.log('share:', share.status, await share.text());
 const shared = await next((m) => m.type === 'phone.shared').catch(() => null);
 console.log('shared into the phone chat draft:', shared?.attachments?.map((a) => a.name));
+}
 const bad = await fetch(`${url}/api/phone/ask`, { method: 'POST', headers: { authorization: 'Bearer wrong', 'content-type': 'application/json' }, body: '{"text":"hi"}' });
 console.log('ask with a wrong token:', bad.status);
 
