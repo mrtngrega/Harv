@@ -18,9 +18,11 @@ export default defineConfig({
     // Over the tailnet, only the dashboard's own code may be served, never the rest of the repo
     // (harv_report.md, .env…): the dashboard, the shared package and the installed packages.
     fs: { allow: [at('.'), at('../../packages/shared'), at('../../node_modules')] },
+    // changeOrigin stays false: the server must see the real Host (the phone's ts.net name gets the phone's
+    // checks). Vite's short `'/api': server` form sets it true, which made phone requests look local.
     proxy: {
-      '/api': server,
-      '/ws': { target: server, ws: true },
+      '/api': { target: server, changeOrigin: false },
+      '/ws': { target: server, ws: true, changeOrigin: false },
     },
   },
 });

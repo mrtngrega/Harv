@@ -104,6 +104,8 @@ app.addHook('onRequest', async (req, reply) => {
     return;
   }
   if (!ALLOWED_HOSTS.has(host)) return reply.code(403).send({ error: 'Forbidden host' });
+  // Came through `tailscale serve` but names a local host (a proxy that rewrote Host): never treat it as the PC's own dashboard.
+  if (req.headers['tailscale-user-login'] || req.headers['x-forwarded-for']) return reply.code(403).send({ error: 'Forbidden' });
   const origin = req.headers.origin;
   if (origin && !ALLOWED_ORIGINS.has(origin)) return reply.code(403).send({ error: 'Forbidden origin' });
   // A plain <img> or link from another site sends no Origin, but browsers mark it. Only the dashboard itself may read files.
