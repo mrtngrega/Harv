@@ -23,16 +23,17 @@ mkdirSync(SHOTS, { recursive: true });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function launch({ width = 1500, height = 900, port = 9333 } = {}) {
+export async function launch({ width = 1500, height = 900, port = 9333, args = [], profile = 'chrome-profile' } = {}) {
   const chrome = spawn(
     CHROME,
     [
       '--headless=new',
       `--remote-debugging-port=${port}`,
-      `--user-data-dir=${join(OUT, 'chrome-profile')}`,
+      `--user-data-dir=${join(OUT, profile)}`,
       `--window-size=${width},${height}`,
       '--no-first-run',
       '--no-default-browser-check',
+      ...args,
       'about:blank',
     ],
     { stdio: 'ignore' },
