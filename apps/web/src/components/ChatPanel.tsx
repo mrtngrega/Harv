@@ -697,7 +697,7 @@ export function ChatPanel() {
           </Suspense>
         ) : (
           <div className={`relative flex min-h-0 flex-1 ${preview ? 'flex-col gap-2 pb-2 lg:flex-row lg:pr-2' : ''}`}>
-            {scrolledUp === activeId && (
+            {scrolledUp !== null && scrolledUp === activeId && (
               <button
                 type="button"
                 onClick={toBottom}

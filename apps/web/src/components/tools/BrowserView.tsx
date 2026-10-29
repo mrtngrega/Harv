@@ -163,8 +163,9 @@ export function BrowserView() {
         )}
       </div>
 
-      {/* The app's web view sits exactly here. */}
-      <div ref={area} className="relative min-h-0 flex-1 bg-black/20">
+      {/* The app's web view sits exactly here. It's a square native view CSS can't clip, so it keeps
+          clear of the panel's rounded bottom corners (it covered them). */}
+      <div ref={area} className="relative mx-2 mt-2 mb-2 min-h-0 flex-1 bg-black/20">
         {!pages.length && <p className="m-auto p-6 text-center text-muted">No page open. Press + or type an address.</p>}
       </div>
     </div>
