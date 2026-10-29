@@ -39,10 +39,6 @@ export interface PhoneState {
   unlocked: boolean;
   /** This computer's name, for the screens. */
   device: string;
-  /** The user's other Harv devices the phone can switch to: this Harv forwards to them (one app, one Face ID). */
-  others: { id: string; name: string; online: boolean }[];
-  /** The device the phone controls right now (null = this one). */
-  target: string | null;
 }
 
 export type PhoneServerMessage =

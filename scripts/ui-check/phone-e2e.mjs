@@ -3,7 +3,7 @@
 // read from this computer's dashboard connection), makes its passkey, opens the phone layout,
 // tries the sheets and Settings, makes a Shortcut token, shares a picture, optionally asks Siri's
 // endpoint one question (--ask, one small model turn), then removes the test phone again.
-//   node scripts/ui-check/phone-e2e.mjs [--ask] [--share] [--other] [--app] [--keep]
+//   node scripts/ui-check/phone-e2e.mjs [--ask] [--share] [--app] [--keep]
 // Needs: Settings › Phone access on, HTTPS certificates on in the tailnet.
 import { createRequire } from 'node:module';
 import { launch } from './cdp.mjs';
@@ -42,14 +42,22 @@ if (!access.serving || !access.url) {
 const url = access.url;
 console.log('phone address', url);
 
-const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1';
+const IPHONE =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1';
 const phone = await launch({ width: 390, height: 844, port: 9339, profile: 'phone-profile' });
 await phone.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 3, mobile: true });
 await phone.send('Emulation.setUserAgentOverride', { userAgent: IPHONE, platform: 'iPhone' });
 await phone.send('Emulation.setTouchEmulationEnabled', { enabled: true });
 await phone.send('WebAuthn.enable');
 await phone.send('WebAuthn.addVirtualAuthenticator', {
-  options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+  options: {
+    protocol: 'ctap2',
+    transport: 'internal',
+    hasResidentKey: true,
+    hasUserVerification: true,
+    isUserVerified: true,
+    automaticPresenceSimulation: true,
+  },
 });
 const text = () => phone.eval('document.body.innerText');
 const step = async (name) => console.log(`${name}: ${await phone.shot(`phone-${name}`)}`);
@@ -79,21 +87,6 @@ await sleep(4000);
 const opened = await phone.eval('!!document.querySelector("[data-tab]") || !!document.querySelector("#harv-cmd")');
 console.log('dashboard open after Face ID:', opened);
 await step('4-open');
-// The computer switch: its menu must sit above the chat, not under its frosted glass.
-if (await phone.eval('!!document.querySelector("button[aria-haspopup=menu][aria-label=\\"Which computer\\"]")')) {
-  await phone.click('button[aria-haspopup="menu"][aria-label="Which computer"]');
-  await sleep(400);
-  const onTop = await phone.eval(`(() => {
-    const m = document.querySelector('[role=menu][aria-label="Which computer"]');
-    const r = m.getBoundingClientRect();
-    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-    return m.contains(hit);
-  })()`);
-  console.log('device menu on top:', onTop);
-  await step('4b-devices');
-  await phone.click('button[aria-haspopup="menu"][aria-label="Which computer"]');
-}
-
 // Every open tab, the way the phone shows it (chats the app shows in its browser, terminals, Settings…): nothing may break.
 const broke = () => phone.eval('/Something in Harv’s window broke|Couldn’t show the/.test(document.body.innerText)');
 const tabIds = await phone.eval('[...document.querySelectorAll("[data-tab]")].map(t => t.dataset.tab)');
@@ -106,27 +99,6 @@ for (const id of tabIds) {
   }
 }
 console.log(`tabs checked: ${tabIds.length}, broken: ${(await broke()) ? 'yes' : 'none at the end'}`);
-
-// The other computer through this one (--other): the app switches inside itself, no new address.
-if (process.argv.includes('--other')) {
-  const state = await phone.eval('fetch("/api/phone/state").then(r => r.json())');
-  const other = state.others[0];
-  console.log('other computers:', JSON.stringify(state.others));
-  if (other) {
-    await phone.eval(`fetch("/api/phone/target", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ device: "${other.id}" }) })`);
-    await phone.goto(url);
-    await sleep(3000);
-    const paths = await phone.eval('fetch("/api/paths?q=/").then(r => r.json()).then(j => j.slice(0, 3).map(p => p.path)).catch(e => String(e))');
-    console.log(`controlling ${other.name}: folders`, JSON.stringify(paths), '| connected:', await phone.eval('!/offline/.test(document.querySelector("header")?.innerText ?? "")'));
-    console.log('header:', (await phone.eval('document.querySelector("header")?.innerText ?? ""')).replace(/\s+/g, ' '));
-    await step('9-other');
-    await phone.eval('fetch("/api/phone/target", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ device: null }) })');
-    await phone.goto(url);
-    await sleep(2500);
-    const back = await phone.eval('fetch("/api/paths?q=C:/").then(r => r.json()).then(j => j.slice(0, 2).map(p => p.path)).catch(e => String(e))');
-    console.log('back on this computer: folders', JSON.stringify(back));
-  }
-}
 
 // One Harv, not one per window: a tab opened or closed on the phone shows up in the app (read only, port 9444).
 if (process.argv.includes('--app')) {
@@ -143,7 +115,11 @@ if (process.argv.includes('--app')) {
   if (added) {
     await phone.eval(`document.querySelector('[data-tab="${added}"] button[aria-label^="Close"]')?.click()`);
     await sleep(1500);
-    console.log('closed on the phone, gone in the app:', !(await appTabs()).includes(added), `(app tabs ${before.length} → ${(await appTabs()).length})`);
+    console.log(
+      'closed on the phone, gone in the app:',
+      !(await appTabs()).includes(added),
+      `(app tabs ${before.length} → ${(await appTabs()).length})`,
+    );
   }
   await app.close();
 }
@@ -170,13 +146,24 @@ await step('8-token');
 // The share sheet's request, as a Shortcut would send it: a small PNG, no note. It lands in the phone chat's
 // draft on every window, so only with --share.
 if (process.argv.includes('--share')) {
-const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
-const share = await fetch(`${url}/api/phone/share?name=test-photo`, { method: 'POST', headers: { authorization: token, 'content-type': 'image/png' }, body: png });
-console.log('share:', share.status, await share.text());
-const shared = await next((m) => m.type === 'phone.shared').catch(() => null);
-console.log('shared into the phone chat draft:', shared?.attachments?.map((a) => a.name));
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const share = await fetch(`${url}/api/phone/share?name=test-photo`, {
+    method: 'POST',
+    headers: { authorization: token, 'content-type': 'image/png' },
+    body: png,
+  });
+  console.log('share:', share.status, await share.text());
+  const shared = await next((m) => m.type === 'phone.shared').catch(() => null);
+  console.log(
+    'shared into the phone chat draft:',
+    shared?.attachments?.map((a) => a.name),
+  );
 }
-const bad = await fetch(`${url}/api/phone/ask`, { method: 'POST', headers: { authorization: 'Bearer wrong', 'content-type': 'application/json' }, body: '{"text":"hi"}' });
+const bad = await fetch(`${url}/api/phone/ask`, {
+  method: 'POST',
+  headers: { authorization: 'Bearer wrong', 'content-type': 'application/json' },
+  body: '{"text":"hi"}',
+});
 console.log('ask with a wrong token:', bad.status);
 
 if (process.argv.includes('--ask')) {

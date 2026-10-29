@@ -1,9 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer, request, type IncomingMessage, type Server } from 'node:http';
-import type { Socket } from 'node:net';
 import { IS_WINDOWS } from '../platform.ts';
-import { RELAY_HEADER, RELAY_PREFIX, relayOk, serveRelayHttp, serveRelayWs } from '../phone/relay.ts';
 import type { SyncEngine } from './engine.ts';
 
 // Live sync over Tailscale (M10c, docs/PLAN.md §6m): when both devices are on, each change goes
@@ -145,11 +143,6 @@ export class LiveLink {
       return false;
     }
     this.server = createServer((req, res) => void this.handle(req, res));
-    // The phone's dashboard connection, forwarded by the other Harv.
-    this.server.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
-      if (!req.url?.startsWith(`${RELAY_PREFIX}/`)) return void socket.destroy();
-      void this.relayAllowed(req).then((ok) => (ok ? serveRelayWs(req, socket, head) : socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')));
-    });
     await new Promise<void>((resolve, reject) => {
       this.server!.once('error', reject);
       this.server!.listen(this.port, ip, () => resolve());
@@ -183,18 +176,8 @@ export class LiveLink {
     return ok;
   }
 
-  /** A phone's request, forwarded by the user's other Harv (docs/PLAN.md §6q): same account and the sync key's proof. */
-  private async relayAllowed(req: IncomingMessage): Promise<boolean> {
-    const ip = req.socket.remoteAddress;
-    return inTailnet(ip) && (await this.isMine(ip!)) && relayOk(this.engine.syncKey(), req.headers[RELAY_HEADER] as string | undefined);
-  }
-
   private async handle(req: IncomingMessage, res: import('node:http').ServerResponse) {
     const ip = req.socket.remoteAddress;
-    if (req.url?.startsWith(`${RELAY_PREFIX}/`)) {
-      if (!(await this.relayAllowed(req))) return void res.writeHead(403).end();
-      return serveRelayHttp(req, res);
-    }
     if (req.method !== 'POST' || req.url !== '/live') return void res.writeHead(404).end();
     if (!inTailnet(ip) || !(await this.isMine(ip!))) return void res.writeHead(403).end();
     try {

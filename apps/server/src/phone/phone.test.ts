@@ -3,7 +3,6 @@ import type { ServerMessage } from '@harv/shared';
 import { checkPhone, cookie, DEVICE_COOKIE, parseCookies, UNLOCK_COOKIE, type PhoneContext, type PhoneRequest } from './access.ts';
 import { cleanName, PAIR_MS, PAIR_TRIES, PhoneStore, UNLOCK_IDLE_MS } from './phones.ts';
 import { noteFor } from './push.ts';
-import { forwardHeaders, localHeaders, relayOk, relayProof } from './relay.ts';
 import { parseStatus, servesDashboard } from './tailnet.ts';
 
 const HOST = 'homepc.tail85d08b.ts.net';
@@ -191,41 +190,6 @@ describe('tailscale', () => {
     expect(servesDashboard(JSON.stringify(cfg), HOST)).toBe(true);
     expect(servesDashboard('{}', HOST)).toBe(false);
     expect(servesDashboard('not json', HOST)).toBe(false);
-  });
-});
-
-describe('one app for both computers (the relay)', () => {
-  const key = Buffer.alloc(32, 7);
-  it('trusts only a fresh proof made with the sync key', () => {
-    const now = 1_800_000_000_000;
-    const proof = relayProof(key, now);
-    expect(relayOk(key, proof, now + 5_000)).toBe(true);
-    expect(relayOk(Buffer.alloc(32, 8), proof, now)).toBe(false);
-    expect(relayOk(key, proof, now + 10 * 60_000)).toBe(false);
-    expect(relayOk(key, `${now}.forged`, now)).toBe(false);
-    expect(relayOk(null, proof, now)).toBe(false);
-    expect(relayOk(key, undefined, now)).toBe(false);
-  });
-
-  it('never passes on the phone’s cookies or Tailscale’s headers, and arrives as the other computer’s own dashboard', () => {
-    const sent = forwardHeaders(
-      {
-        host: HOST,
-        cookie: 'harv_phone=secret',
-        origin: `https://${HOST}`,
-        'tailscale-user-login': OWNER,
-        'x-forwarded-for': '100.1.2.3',
-        'content-type': 'application/json',
-      },
-      'p',
-    );
-    expect(sent).toEqual({ 'content-type': 'application/json', 'x-harv-relay': 'p' });
-    expect(localHeaders({ ...sent, host: '100.81.213.75:4318' })).toEqual({
-      'content-type': 'application/json',
-      host: '127.0.0.1:4317',
-      origin: 'http://127.0.0.1:5173',
-      'sec-fetch-site': 'same-origin',
-    });
   });
 });
 
