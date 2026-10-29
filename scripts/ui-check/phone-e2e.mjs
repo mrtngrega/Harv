@@ -89,6 +89,27 @@ for (const id of tabIds) {
 }
 console.log(`tabs checked: ${tabIds.length}, broken: ${(await broke()) ? 'yes' : 'none at the end'}`);
 
+// The other computer through this one (--other): the app switches inside itself, no new address.
+if (process.argv.includes('--other')) {
+  const state = await phone.eval('fetch("/api/phone/state").then(r => r.json())');
+  const other = state.others[0];
+  console.log('other computers:', JSON.stringify(state.others));
+  if (other) {
+    await phone.eval(`fetch("/api/phone/target", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ device: "${other.id}" }) })`);
+    await phone.goto(url);
+    await sleep(3000);
+    const paths = await phone.eval('fetch("/api/paths?q=/").then(r => r.json()).then(j => j.slice(0, 3).map(p => p.path)).catch(e => String(e))');
+    console.log(`controlling ${other.name}: folders`, JSON.stringify(paths), '| connected:', await phone.eval('!/offline/.test(document.querySelector("header")?.innerText ?? "")'));
+    console.log('header:', (await phone.eval('document.querySelector("header")?.innerText ?? ""')).replace(/\s+/g, ' '));
+    await step('9-other');
+    await phone.eval('fetch("/api/phone/target", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ device: null }) })');
+    await phone.goto(url);
+    await sleep(2500);
+    const back = await phone.eval('fetch("/api/paths?q=C:/").then(r => r.json()).then(j => j.slice(0, 2).map(p => p.path)).catch(e => String(e))');
+    console.log('back on this computer: folders', JSON.stringify(back));
+  }
+}
+
 // One Harv, not one per window: a tab opened or closed on the phone shows up in the app (read only, port 9444).
 if (process.argv.includes('--app')) {
   const { attach } = await import('./cdp.mjs');
