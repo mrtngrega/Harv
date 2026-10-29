@@ -33,7 +33,16 @@ export function PhoneGate({ children }: { children: ReactNode }) {
         pauseSocket();
         setStage(s.needsPasskey ? 'passkey' : s.paired ? 'locked' : 'pair');
       }
-    } catch {
+    } catch (err) {
+      const why = (err as Error).message;
+      // Harv answered but doesn't let phones in (its Phone access is off): say so, it's not "offline".
+      setError(
+        /Phone access is off/.test(why)
+          ? 'This computer’s Harv doesn’t let phones in yet: turn on Settings › Phone › “Open Harv from my phone” on it.'
+          : /Tailscale account/.test(why)
+            ? 'This phone’s Tailscale is signed in with a different account than the computer.'
+            : '',
+      );
       setStage('offline');
     }
   }, []);
@@ -92,8 +101,15 @@ export function PhoneGate({ children }: { children: ReactNode }) {
 
         {stage === 'offline' && (
           <>
-            <p className="text-muted">Can’t reach Harv. Check that the computer is on, Harv is running, and Tailscale is on here.</p>
+            {!error && (
+              <p className="text-muted">Can’t reach Harv. Check that the computer is on, Harv is running, and Tailscale is on here.</p>
+            )}
             <Button onClick={() => void check()}>Try again</Button>
+            {document.referrer && !document.referrer.startsWith(location.origin) && (
+              <button type="button" className="self-start text-xs text-faint underline" onClick={() => history.back()}>
+                Back to the other computer
+              </button>
+            )}
           </>
         )}
 
@@ -177,9 +193,26 @@ export function PhoneGate({ children }: { children: ReactNode }) {
         )}
 
         {!needsInstall && stage === 'locked' && (
-          <Button busy={busy} onClick={() => void run(async () => (await unlock(), check()))}>
-            Unlock with Face ID
-          </Button>
+          <>
+            <Button busy={busy} onClick={() => void run(async () => (await unlock(), check()))}>
+              Unlock with Face ID
+            </Button>
+            {/* The passkey never got saved on the phone (or was deleted): pair again, with a new code from the computer. */}
+            {error && (
+              <button
+                type="button"
+                className="self-start text-xs text-faint underline"
+                onClick={() =>
+                  void run(async () => {
+                    await askPairing();
+                    setStage('code');
+                  })
+                }
+              >
+                Face ID keeps failing? Pair this phone again
+              </button>
+            )}
+          </>
         )}
 
         {error && <p className="text-warn">{error}</p>}

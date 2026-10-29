@@ -212,8 +212,10 @@ function hydrate(chats: ChatSnapshot[], ui?: UiState) {
  * tab takes its place in the order, and the drafts are the same. Saved chats open and close
  * through chat.opened / chat.removed, which come first. Which tab shows stays this device's.
  */
-export function syncLayout(ui: SharedUi): void {
+export function syncLayout(ui: SharedUi, windows?: Pick<UiState, 'tools' | 'views'>): void {
   store.set((s) => {
+    // Another window of this same Harv (docs/PLAN.md §6q): each chat's open tools and view too.
+    if (windows) s = { ...s, tools: windows.tools, views: windows.views };
     let tabs = s.tabs.filter((t) => t.stored || t.busy || ui.blanks.includes(t.id));
     for (const id of ui.blanks) if (!tabs.some((t) => t.id === id)) tabs.push({ ...blankTab(), id });
     const rank = (id: string) => {
@@ -508,7 +510,7 @@ onServerMessage((msg) => {
       return { ...rest, stored: true, ...(msg.projectId ? { projectId: msg.projectId } : {}) };
     });
   } else if (msg.type === 'ui.synced') {
-    if (restored) syncLayout(msg.ui);
+    if (restored) syncLayout(msg.ui, msg.windows);
   } else if (msg.type === 'term.show') {
     // Harv runs something in this chat's terminal: show it there (the chat's log is one click away in ≡).
     if (store.get().tabs.some((t) => t.id === msg.tabId)) chat.setView(msg.tabId, 'terminal');

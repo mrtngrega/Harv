@@ -236,3 +236,13 @@ html.see-through body {
 .katex {
   font-size: 1.05em;
 }
+
+/* iPhone/iPad (docs/PLAN.md §6q): Safari zooms the page into any text field under 16px when it's
+   tapped, which blew up the harv> line. At least 16px there, and only on iOS. */
+@supports (-webkit-touch-callout: none) {
+  input,
+  textarea,
+  select {
+    font-size: max(16px, 1em);
+  }
+}

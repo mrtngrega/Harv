@@ -841,11 +841,24 @@ describe('scheduled tasks (docs/PLAN.md §6s C4)', () => {
     expect(last.text).toBe('[Scheduled task "Morning news", late: it was due while Harv was off] Tell me the news');
   });
 
-  it('makes a new chat when the old one is gone', async () => {
-    const { chats, store } = setup();
+  it('makes a new chat when the old one is gone, and every window shows it', async () => {
+    const { chats, store, sent } = setup();
     await chats.runScheduled({ tabId: 'gone', title: 'Check build', prompt: 'Is it green?' }, false);
     expect(store.title('gone')).toBe('Check build');
     expect(store.openChats().some((c) => c.id === 'gone')).toBe(true);
+    // A new chat starts open in the store: the dashboards must still be told (the phone chat wasn't, 2026-10-29).
+    expect(sent.some((m) => m.type === 'chat.opened' && m.chat.id === 'gone')).toBe(true);
+  });
+});
+
+describe('the phone chat (docs/PLAN.md §6q)', () => {
+  it('opens in every window when the share sheet or Siri starts it', () => {
+    const { chats, sent } = setup();
+    chats.ensureOpen('phone-x', 'Phone');
+    expect(sent.filter((m) => m.type === 'chat.opened' && m.chat.id === 'phone-x')).toHaveLength(1);
+    // Already open: no second tab.
+    chats.ensureOpen('phone-x', 'Phone');
+    expect(sent.filter((m) => m.type === 'chat.opened' && m.chat.id === 'phone-x')).toHaveLength(1);
   });
 });
 

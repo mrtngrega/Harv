@@ -53,7 +53,7 @@ import {
   saveUpload,
   search,
 } from './tools/fileOps.ts';
-import type { FileOp } from '@harv/shared';
+import type { FileOp, UiState } from '@harv/shared';
 import { IS_WINDOWS, PLATFORM } from './platform.ts';
 import { TerminalManager } from './tools/terminal.ts';
 import { startWatchdog } from './watchdog/monitor.ts';
@@ -719,10 +719,21 @@ app.get('/ws', { websocket: true }, (socket, req) => {
         if (error) send({ type: 'project.error', message: error });
         break;
       }
-      case 'ui.save':
+      case 'ui.save': {
+        const shared = ({ order, blanks, drafts, attachments, tools, views }: UiState) =>
+          JSON.stringify({ order, blanks, drafts, attachments, tools, views });
+        const before = shared(loadUi());
         saveUi(chats.keepRemoteTabs(msg.state));
+        const after = loadUi();
+        // The other windows of this Harv (the phone, the app, a browser) show the same tabs: one Harv, not one per window.
+        if (shared(after) !== before) {
+          const { order, blanks, drafts, attachments, tools, views } = after;
+          for (const other of clients)
+            if (other !== send) other({ type: 'ui.synced', ui: { order, blanks, drafts, attachments }, windows: { tools, views } });
+        }
         live.soon();
         break;
+      }
       case 'term.attach': {
         try {
           const replay = terminals.attach(msg.id, cleanPath(msg.cwd) ?? undefined);

@@ -131,5 +131,9 @@ export type ToolServerMessage =
   | { type: 'term.exit'; id: string; code: number }
   /** Harv runs something in a chat's terminal (terminal_run): the dashboard shows that terminal. */
   | { type: 'term.show'; tabId: string }
-  /** The other device's tabs and drafts are newer: the dashboard shows them (its own tab and tools stay). */
-  | { type: 'ui.synced'; ui: SharedUi };
+  /**
+   * The other device's tabs and drafts are newer: the dashboard shows them (its own tab and tools stay).
+   * `windows`: from another window of this same Harv (the phone and the app, docs/PLAN.md §6q), which
+   * also share each chat's tools and views; which tab shows stays each window's own.
+   */
+  | { type: 'ui.synced'; ui: SharedUi; windows?: Pick<UiState, 'tools' | 'views'> };

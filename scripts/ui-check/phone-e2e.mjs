@@ -89,6 +89,26 @@ for (const id of tabIds) {
 }
 console.log(`tabs checked: ${tabIds.length}, broken: ${(await broke()) ? 'yes' : 'none at the end'}`);
 
+// One Harv, not one per window: a tab opened or closed on the phone shows up in the app (read only, port 9444).
+if (process.argv.includes('--app')) {
+  const { attach } = await import('./cdp.mjs');
+  const app = await attach({ port: 9444 });
+  const appTabs = () => app.eval('[...document.querySelectorAll("[data-tab]")].map(t => t.dataset.tab)');
+  const before = await appTabs();
+  await phone.click('button[aria-label="New chat"]');
+  await sleep(1500);
+  const phoneNow = await phone.eval('[...document.querySelectorAll("[data-tab]")].map(t => t.dataset.tab)');
+  const added = phoneNow.find((id) => !tabIds.includes(id));
+  const appAfterAdd = await appTabs();
+  console.log('new tab on the phone reached the app:', !!added && appAfterAdd.includes(added));
+  if (added) {
+    await phone.eval(`document.querySelector('[data-tab="${added}"] button[aria-label^="Close"]')?.click()`);
+    await sleep(1500);
+    console.log('closed on the phone, gone in the app:', !(await appTabs()).includes(added), `(app tabs ${before.length} → ${(await appTabs()).length})`);
+  }
+  await app.close();
+}
+
 await phone.click('button[aria-label="Chat history"]');
 await sleep(600);
 await step('5-history');

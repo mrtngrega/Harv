@@ -235,7 +235,10 @@ export class PhoneService {
     app.post<{ Body: { code?: string } }>('/api/phone/pair/finish', async (req, reply) => {
       if (!this.isPhoneHost(req.headers.host ?? '')) return { ok: false, left: 0 };
       const name = this.phones.pairingName ?? 'Phone';
+      // Pairing again (its passkey got lost): the phone's old entry goes once the new one exists.
+      const old = this.phones.byDevice(parseCookies(req.headers.cookie)[DEVICE_COOKIE]);
       const done = this.phones.finishPairing(String(req.body?.code ?? ''));
+      if (done.ok && old) this.revoke(old.id);
       if (!done.ok) {
         if (done.left === 0) this.deps.broadcast({ type: 'phone.paired', name, ok: false });
         return { ok: false, left: done.left };

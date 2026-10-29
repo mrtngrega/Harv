@@ -1065,8 +1065,10 @@ export class ChatManager {
   /** A chat the server starts by itself (the phone chat): made if new and open as a tab, without taking the focus. */
   ensureOpen(tabId: string, title: string): void {
     const known = this.store.exists(tabId);
+    // Asked before ensureChat: a chat it makes is already open, and the dashboards must still hear of it.
+    const wasOpen = this.store.openChats().some((c) => c.id === tabId);
     this.store.ensureChat(tabId, title);
-    if (!this.store.openChats().some((c) => c.id === tabId)) {
+    if (!wasOpen) {
       this.store.setOpen(tabId, true);
       const chat = this.store.snapshot(tabId);
       if (chat) this.broadcast({ type: 'chat.opened', chat, focus: false });
@@ -1118,14 +1120,7 @@ export class ChatManager {
 
   async runScheduled(task: { tabId: string; title: string; prompt: string }, late: boolean): Promise<void> {
     const { tabId } = task;
-    const known = this.store.exists(tabId);
-    if (!known) this.store.ensureChat(tabId, task.title);
-    if (!this.store.openChats().some((c) => c.id === tabId)) {
-      this.store.setOpen(tabId, true);
-      const chat = this.store.snapshot(tabId);
-      if (chat) this.broadcast({ type: 'chat.opened', chat, focus: false });
-    }
-    if (!known) this.publishHistory();
+    this.ensureOpen(tabId, task.title);
     const when = late ? ', late: it was due while Harv was off' : '';
     const message = `[Scheduled task "${task.title}"${when}] ${task.prompt}`;
     // Busy: it waits its turn like a typed message (and shows when it runs).
