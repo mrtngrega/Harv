@@ -128,17 +128,20 @@ export function PhoneShell() {
 
       {sheet && (
         <div className="fixed inset-0 z-40 flex" role="dialog" aria-label={sheet === 'history' ? 'Chat history' : 'System and plan'}>
-          <button type="button" aria-label="Close" onClick={() => setSheet(null)} className="absolute inset-0 bg-black/50" />
+          <button type="button" aria-label="Close" onClick={() => setSheet(null)} className="absolute inset-0 bg-black/60" />
           <div
             className={`animate-fade-in relative flex h-full w-[86%] max-w-[380px] flex-col pt-[max(8px,env(safe-area-inset-top))] pb-[max(8px,env(safe-area-inset-bottom))] ${
               sheet === 'history' ? 'mr-auto pl-2' : 'ml-auto pr-2'
             }`}
           >
-            {sheet === 'history' ? (
-              <HistorySidebar sheet onClose={() => setSheet(null)} />
-            ) : (
-              <StatsPanel sheet onClose={() => setSheet(null)} />
-            )}
+            {/* A solid ground under the glass: the chat behind mustn't show through a sheet. */}
+            <div className="flex min-h-0 flex-1 flex-col rounded-2xl bg-[rgb(12_18_26/0.94)]">
+              {sheet === 'history' ? (
+                <HistorySidebar sheet onClose={() => setSheet(null)} />
+              ) : (
+                <StatsPanel sheet onClose={() => setSheet(null)} />
+              )}
+            </div>
           </div>
         </div>
       )}

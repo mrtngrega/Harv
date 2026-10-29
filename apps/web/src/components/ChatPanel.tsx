@@ -18,7 +18,7 @@ import { StatusLine } from './StatusLine.tsx';
 import { TaskStrip } from './TaskStrip.tsx';
 import { matchCommands, SlashMenu } from './SlashMenu.tsx';
 import { atToken, insideFolder, PathMenu, usePathSuggestions, withoutToken } from './PathMenu.tsx';
-import { SpecialTab, TOOL_ICONS, ViewMenu } from './tools/TabParts.tsx';
+import { shownView, SpecialTab, TOOL_ICONS, ViewMenu } from './tools/TabParts.tsx';
 import { addReference, lastPart, setDraftText, updatePending, useDrafts, useDraftTexts } from '../lib/drafts.ts';
 import { desktop, inApp } from '../lib/desktop.ts';
 import { ErrorBoundary, retryImport } from './ErrorBoundary.tsx';
@@ -282,7 +282,7 @@ export function ChatPanel() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const active = tabs.find((t) => t.id === activeId) ?? null;
   /** The active chat's log, or one of its tools (the view menu). */
-  const view = active ? (views[active.id] ?? 'chat') : 'chat';
+  const view = active ? shownView(views[active.id]) : 'chat';
   /** Settings or a tool is showing: no chat input or attachments. */
   const nonChat = inSettings || view !== 'chat';
   // The long hints only where they fit on one line: the box's own width, not the window's (side panels take room).
@@ -614,9 +614,9 @@ export function ChatPanel() {
                         ▣
                       </span>
                     )}
-                    {views[t.id] && views[t.id] !== 'chat' && (
+                    {shownView(views[t.id]) !== 'chat' && (
                       <span aria-hidden="true" className="flex-none text-accent">
-                        {TOOL_ICONS[views[t.id]!]}
+                        {TOOL_ICONS[shownView(views[t.id])]}
                       </span>
                     )}
                     <span className="truncate">{t.title}</span>

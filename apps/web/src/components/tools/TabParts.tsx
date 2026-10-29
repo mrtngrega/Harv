@@ -71,6 +71,14 @@ const VIEWS: { view: ChatView; label: string }[] = [
 ];
 
 /**
+ * What a chat shows here. The layout is shared by every window, and the browser exists only in the
+ * app: a chat the app shows in its browser shows its log in a browser or on the phone.
+ */
+export function shownView(view: ChatView | undefined): ChatView {
+  return !view || (view === 'browser' && !inApp) ? 'chat' : view;
+}
+
+/**
  * The small menu at the right of the chat bar: switches the active chat between
  * its log and its tools (file explorer, terminal). Each chat has its own.
  */
@@ -79,13 +87,13 @@ export function ViewMenu({ tabId }: { tabId: string }) {
   const { list: projects } = useProjects();
   const projectId = tabs.find((t) => t.id === tabId)?.projectId;
   const project = projects.find((p) => p.id === projectId);
-  const view = views[tabId] ?? 'chat';
+  const view = shownView(views[tabId]);
   const open = tools[tabId] ?? [];
   const [shown, setShown] = useState(false);
   const [at, setAt] = useState({ left: 0, top: 0 });
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
-  const current = VIEWS.find((v) => v.view === view)!;
+  const current = VIEWS.find((v) => v.view === view) ?? VIEWS[0]!;
 
   // The browser's pages are windows of their own: they step aside while the menu is open over them.
   useEffect(() => {

@@ -72,19 +72,33 @@ await sleep(1500);
 await step('3-passkey');
 await phone.click('button', 'Set up Face ID');
 await sleep(4000);
-const opened = await phone.eval('!!document.querySelector("#harv-cmd")');
+const opened = await phone.eval('!!document.querySelector("[data-tab]") || !!document.querySelector("#harv-cmd")');
 console.log('dashboard open after Face ID:', opened);
 await step('4-open');
+
+// Every open tab, the way the phone shows it (chats the app shows in its browser, terminals, Settings…): nothing may break.
+const broke = () => phone.eval('/Something in Harv’s window broke|Couldn’t show the/.test(document.body.innerText)');
+const tabIds = await phone.eval('[...document.querySelectorAll("[data-tab]")].map(t => t.dataset.tab)');
+for (const id of tabIds) {
+  await phone.eval(`document.querySelector('[data-tab="${id}"]')?.click()`);
+  await sleep(700);
+  if (await broke()) {
+    console.log(`BROKEN in tab ${id}`);
+    await step(`broken-${id.slice(0, 8)}`);
+  }
+}
+console.log(`tabs checked: ${tabIds.length}, broken: ${(await broke()) ? 'yes' : 'none at the end'}`);
 
 await phone.click('button[aria-label="Chat history"]');
 await sleep(600);
 await step('5-history');
-await phone.click('button[aria-label="Close"]');
+await phone.eval('document.querySelector("[role=dialog] button[aria-label=Close]").click()');
 await phone.click('button[aria-label="System and plan"]');
 await sleep(600);
 await step('6-stats');
-await phone.click('button[aria-label="Close"]');
-await phone.click('button[aria-label="Settings"]');
+await phone.eval('document.querySelector("[role=dialog] button[aria-label=Close]").click()');
+// The header's gear (the tab bar has a "Settings" tab too).
+await phone.eval('document.querySelector("header button[aria-label=Settings]").click()');
 await sleep(1000);
 await phone.eval('[...document.querySelectorAll("h2")].find(h => h.textContent === "Phone")?.scrollIntoView()');
 await step('7-settings');
