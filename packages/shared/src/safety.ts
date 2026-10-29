@@ -22,6 +22,18 @@ export interface ActionEntry {
   result?: string;
 }
 
+/** One backup as Settings › Safety › Backups lists it (`GET /api/backups`). */
+export interface BackupInfo {
+  /** The folder name inside ~/.harv/backups (what `POST /api/backups/keep` takes). */
+  name: string;
+  at: number;
+  bytes: number;
+  /** What was backed up. */
+  originals: string[];
+  /** Kept forever: the cleanup never deletes it. */
+  kept: boolean;
+}
+
 /** One of Claude's multiple-choice questions (Claude Code's AskUserQuestion). */
 export interface QuestionItem {
   question: string;

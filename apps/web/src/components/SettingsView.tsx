@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { cancelSchedule, useSchedules, whenText } from '../lib/scheduleStore.ts';
 import { useChat } from '../lib/chatStore.ts';
-import { ACCENTS, COMPACT_ROWS, DEFAULT_SETTINGS, WARN_CHOICES, type CompactRow, type HarvSettings } from '@harv/shared';
+import { ACCENTS, COMPACT_ROWS, DEFAULT_SETTINGS, WARN_CHOICES, type BackupInfo, type CompactRow, type HarvSettings } from '@harv/shared';
 import { comboOf, desktop, inApp, type AppSettings, type UpdateInfo } from '../lib/desktop.ts';
 import { ago } from '../lib/format.ts';
 import {
@@ -551,6 +551,80 @@ function Projects() {
   );
 }
 
+const sizeText = (bytes: number) =>
+  bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
+
+/** This device's backups, biggest first, with "keep forever" (the cleanup skips kept ones; the user's wish for the car radio backup). */
+function BackupList() {
+  const [backups, setBackups] = useState<BackupInfo[] | null>(null);
+  const [all, setAll] = useState(false);
+  const load = () =>
+    void fetch('/api/backups')
+      .then((r) => r.json() as Promise<{ backups: BackupInfo[] }>)
+      .then((r) => setBackups(r.backups))
+      .catch(() => setBackups([]));
+  useEffect(load, []);
+  const keep = (name: string, kept: boolean) =>
+    void fetch('/api/backups/keep', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, keep: kept }),
+    })
+      .catch(() => {})
+      .finally(load);
+  if (!backups) return null;
+  const total = backups.reduce((sum, b) => sum + b.bytes, 0);
+  const kept = backups.filter((b) => b.kept);
+  const bySize = [...backups].sort((a, b) => b.bytes - a.bytes);
+  const shown = all ? bySize : [...kept, ...bySize.filter((b) => !b.kept).slice(0, 5)];
+  const date = (ms: number) => new Date(ms).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const what = (b: BackupInfo) => {
+    const first = b.originals[0]?.split(/[\\/]/).filter(Boolean).at(-1) ?? 'backup';
+    return b.originals.length > 1 ? `${first} +${b.originals.length - 1}` : first;
+  };
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Note>
+        {backups.length} on this device, {sizeText(total)}
+        {kept.length > 0 && `; ${kept.length} kept forever (${sizeText(kept.reduce((s, b) => s + b.bytes, 0))}, not counted in the limit)`}.
+        Keep one and it’s never deleted.
+      </Note>
+      {shown.length > 0 && (
+        <ul className="m-0 flex max-h-72 list-none flex-col gap-1 overflow-y-auto p-0 text-xs">
+          {shown.map((b) => (
+            <li key={b.name} className="flex min-w-0 items-center gap-2 rounded-lg bg-black/15 py-1 pr-1 pl-2.5">
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate" title={b.originals.join('\n')}>
+                  {what(b)}
+                </span>
+                <span className="truncate text-[11px] text-faint">
+                  {date(b.at)} · {sizeText(b.bytes)}
+                </span>
+              </span>
+              <button
+                type="button"
+                aria-pressed={b.kept}
+                title={b.kept ? 'Kept forever. Click to let the cleanup delete it when it’s old.' : 'Keep this backup forever'}
+                onClick={() => keep(b.name, !b.kept)}
+                className={`flex-none cursor-pointer rounded border px-2 py-0.5 text-[11px] hover:bg-white/10 ${
+                  b.kept ? 'border-accent/60 text-accent' : 'border-line text-muted'
+                }`}
+              >
+                {b.kept ? 'kept' : 'keep'}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {backups.length > shown.length || all ? (
+        <button type="button" onClick={() => setAll(!all)} className="cursor-pointer self-start text-[11px] text-muted hover:text-ink">
+          {all ? 'show fewer' : `show all ${backups.length}`}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 /** Harv's scheduled tasks on this device: what runs when, in which chat, and Cancel. */
 function ScheduledTasks() {
   const tasks = useSchedules();
@@ -1049,6 +1123,7 @@ export function SettingsView() {
             unit=" GB"
             onChange={(backupMaxGb) => updateSettings({ backupMaxGb })}
           />
+          <BackupList />
         </Sub>
         <ProtectedFolders />
       </Group>

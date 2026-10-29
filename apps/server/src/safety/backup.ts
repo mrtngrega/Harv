@@ -1,5 +1,6 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import type { BackupInfo } from '@harv/shared';
 import { BACKUPS_DIR } from './paths.ts';
 
 // Before Harv changes or deletes user files they're copied to
@@ -139,16 +140,51 @@ function folderBytes(path: string): number {
   return readdirSync(path).reduce((sum, name) => sum + folderBytes(join(path, name)), 0);
 }
 
+/** A backup marked "keep forever" (Settings › Safety › Backups) has this file; the cleanup never deletes it. */
+const KEEP_FILE = 'keep';
+
+const isKept = (dir: string) => existsSync(join(dir, KEEP_FILE));
+
+/** Every backup, newest first. */
+export function listBackups(root = BACKUPS_DIR): BackupInfo[] {
+  if (!existsSync(root)) return [];
+  return readdirSync(root)
+    .filter((name) => statSync(join(root, name), { throwIfNoEntry: false })?.isDirectory())
+    .map((name) => {
+      const dir = join(root, name);
+      return {
+        name,
+        at: backupTime(dir),
+        bytes: folderBytes(dir),
+        originals: readBackup(dir)?.entries?.map((e) => e.original) ?? [],
+        kept: isKept(dir),
+      };
+    })
+    .sort((a, b) => b.at - a.at);
+}
+
+/** Marks a backup to keep forever, or gives it back to the cleanup. False when there's no such backup. */
+export function keepBackup(name: string, keep: boolean, root = BACKUPS_DIR): boolean {
+  // Only a plain folder name inside the backups folder, never a path somewhere else.
+  if (!/^[\w-]+$/.test(name)) return false;
+  const dir = join(root, name);
+  if (!statSync(dir, { throwIfNoEntry: false })?.isDirectory()) return false;
+  if (keep) writeFileSync(join(dir, KEEP_FILE), `Kept forever from Settings, ${new Date().toISOString()}`);
+  else rmSync(join(dir, KEEP_FILE), { force: true });
+  return true;
+}
+
 /**
  * Deletes backups older than `days`, then the oldest ones while all of them together are over
  * `maxBytes` (the user's wish: backups don't pile up forever). Their actions lose Undo; the log stays.
+ * Kept backups are never deleted and don't count toward `maxBytes`.
  */
 export function pruneBackups(days: number, maxBytes: number, now = Date.now(), root = BACKUPS_DIR): PruneResult {
   const result: PruneResult = { removed: [], freedBytes: 0, keptBytes: 0 };
   if (!existsSync(root)) return result;
   const all = readdirSync(root)
     .map((name) => join(root, name))
-    .filter((dir) => statSync(dir, { throwIfNoEntry: false })?.isDirectory())
+    .filter((dir) => statSync(dir, { throwIfNoEntry: false })?.isDirectory() && !isKept(dir))
     .map((dir) => ({ dir, at: backupTime(dir), bytes: folderBytes(dir) }))
     .sort((a, b) => a.at - b.at);
   let total = all.reduce((sum, b) => sum + b.bytes, 0);

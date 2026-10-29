@@ -32,7 +32,7 @@ import { ChatStore } from './store/chats.ts';
 import { RouteStore } from './store/routes.ts';
 import { UsageMeter } from './usage/meter.ts';
 import { loadSettings, updateSettings, workDir } from './settings.ts';
-import { pruneBackups } from './safety/backup.ts';
+import { keepBackup, listBackups, pruneBackups } from './safety/backup.ts';
 import { applySharedUi, loadUi, resetUi, saveUi, sharedUi } from './ui.ts';
 import { BrowserHost } from './tools/browserHost.ts';
 import { GeminiImages, GeminiProblem } from './tools/gemini.ts';
@@ -476,6 +476,15 @@ app.post<{ Querystring: { dir?: string; name?: string } }>('/api/files/upload', 
 
 // Lets the dashboard retry starting the sensors (e.g. after the UAC prompt was declined).
 app.post('/api/sensors/start', async () => ({ result: await ensureLhmRunning() }));
+// Settings › Safety › Backups: every backup, and "keep forever" (the cleanup skips kept ones).
+app.get('/api/backups', async () => ({ backups: listBackups() }));
+app.post('/api/backups/keep', async (req, reply) => {
+  const { name, keep } = (req.body ?? {}) as { name?: unknown; keep?: unknown };
+  if (typeof name !== 'string' || typeof keep !== 'boolean' || !keepBackup(name, keep)) {
+    return reply.code(400).send({ error: 'No such backup' });
+  }
+  return { ok: true };
+});
 // Settings › This computer › Pictures: Gemini in a window on Harv's profile, to sign in once.
 app.post('/api/gemini/signin', async (_req, reply) => {
   try {

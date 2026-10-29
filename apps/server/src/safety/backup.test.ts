@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { pruneBackups } from './backup.ts';
+import { keepBackup, listBackups, pruneBackups } from './backup.ts';
 import { backupTargets } from './classify.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'harv-backups-'));
@@ -41,6 +41,34 @@ describe('backup cleanup', () => {
     expect(done.removed).toEqual([a]);
     expect(done.removed).not.toContain(b);
     expect(done.keptBytes).toBeLessThanOrEqual(4.5 * 1024 * 1024);
+  });
+
+  it('never deletes a kept backup, and it doesn’t count toward the cap', () => {
+    const dir = join(root, 'kept');
+    const radio = backup(dir, new Date(now - 90 * DAY), 3);
+    const old = backup(dir, new Date(now - 40 * DAY), 1);
+    const recent = backup(dir, new Date(now - 1 * DAY), 1);
+    const name = radio.split(/[\\/]/).at(-1)!;
+    expect(keepBackup(name, true, dir)).toBe(true);
+    const done = pruneBackups(30, 2 * 1024 * 1024, now, dir);
+    expect(done.removed).toEqual([old]);
+    expect(existsSync(radio)).toBe(true);
+    expect(existsSync(recent)).toBe(true);
+    expect(listBackups(dir).map((b) => [b.name, b.kept])).toEqual([
+      [recent.split(/[\\/]/).at(-1), false],
+      [name, true],
+    ]);
+    // Given back to the cleanup, it goes on the next run.
+    expect(keepBackup(name, false, dir)).toBe(true);
+    expect(pruneBackups(30, 2 * 1024 * 1024, now, dir).removed).toEqual([radio]);
+  });
+
+  it('keep only takes a backup folder’s own name', () => {
+    const dir = join(root, 'names');
+    backup(dir, new Date(now), 0);
+    expect(keepBackup('..', true, dir)).toBe(false);
+    expect(keepBackup('../age', true, dir)).toBe(false);
+    expect(keepBackup('missing', true, dir)).toBe(false);
   });
 
   it('does nothing when there are no backups yet', () => {
