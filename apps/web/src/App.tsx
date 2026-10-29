@@ -26,7 +26,14 @@ export function App() {
   const zoom = uiScale / 100;
   // The starting cover goes once the hello (settings, photo version) and the layout are in.
   const [hydrated, setHydrated] = useState(() => getChatState().hydrated);
-  useEffect(() => (hydrated ? undefined : subscribeChat(() => getChatState().hydrated && setHydrated(true))), [hydrated]);
+  useEffect(() => {
+    if (hydrated) return;
+    const check = () => getChatState().hydrated && setHydrated(true);
+    // The layout may have come in between the first render and this effect: check now too, or that change is missed
+    // (the notebook did, every start, and the cover waited for its 8 s fallback).
+    check();
+    return subscribeChat(check);
+  }, [hydrated]);
   const known = version !== undefined;
   useEffect(() => {
     if (!hydrated || !known) return;
