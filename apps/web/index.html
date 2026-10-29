@@ -9,8 +9,71 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23141B23'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='monospace' font-size='18' font-weight='700' fill='%23A8C8E8'%3EH%3C/text%3E%3C/svg%3E"
     />
     <title>Harv</title>
+    <style>
+      /* The boot cover: the app's starting page (apps/desktop/splash), shown from the first frame
+         until the dashboard has its settings, layout, fonts and photo (lib/boot.ts), so nothing
+         is seen loading. */
+      html,
+      body {
+        background: #0a1018;
+      }
+      /* Only an installed Plex, like the starting page: the dashboard's own copy loading
+         later mustn't change the cover's text. */
+      @font-face {
+        font-family: 'Harv Boot';
+        src: local('IBM Plex Mono'), local('IBMPlexMono');
+      }
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-items: center;
+        background: #0a1018;
+        color: #7d8c9c;
+        font:
+          13px 'Harv Boot',
+          ui-monospace,
+          Consolas,
+          'DejaVu Sans Mono',
+          monospace;
+        user-select: none;
+        transition: opacity 0.2s ease;
+      }
+      #boot div {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+      }
+      #boot b {
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        color: #a8c8e8;
+      }
+      #boot span {
+        animation: boot-pulse 1.4s ease-in-out infinite;
+      }
+      @keyframes boot-pulse {
+        50% {
+          opacity: 0.3;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot span {
+          animation: none;
+        }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot" data-tauri-drag-region>
+      <div data-tauri-drag-region>
+        <b data-tauri-drag-region>[HARV]</b>
+        <p style="margin: 0" data-tauri-drag-region>starting<span>…</span></p>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

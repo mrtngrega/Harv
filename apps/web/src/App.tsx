@@ -1,9 +1,11 @@
-import { useEffect, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { dragWindow, Header } from './components/Header.tsx';
 import { HistorySidebar } from './components/HistorySidebar.tsx';
 import { ChatPanel } from './components/ChatPanel.tsx';
 import { StatsPanel } from './components/StatsPanel.tsx';
 import { Toasts } from './components/Toasts.tsx';
+import { revealWhenReady } from './lib/boot.ts';
+import { getChatState, subscribeChat } from './lib/chatStore.ts';
 import { desktop, inApp } from './lib/desktop.ts';
 import { useBackground, useConnection, useSettings } from './lib/useHarvSocket.ts';
 
@@ -22,6 +24,15 @@ export function App() {
   // Before the server says, try the photo anyway; after a removal, show the plain ground colour.
   const photo = version === null ? undefined : `url(/api/background${version ? `?v=${version}` : ''})`;
   const zoom = uiScale / 100;
+  // The starting cover goes once the hello (settings, photo version) and the layout are in.
+  const [hydrated, setHydrated] = useState(() => getChatState().hydrated);
+  useEffect(() => (hydrated ? undefined : subscribeChat(() => getChatState().hydrated && setHydrated(true))), [hydrated]);
+  const known = version !== undefined;
+  useEffect(() => {
+    if (!hydrated || !known) return;
+    const shown = !clear && !plain && version !== null;
+    revealWhenReady(shown ? `/api/background${version ? `?v=${version}` : ''}` : null, motion);
+  }, [hydrated, known, version, clear, plain, motion]);
 
   return (
     <div
