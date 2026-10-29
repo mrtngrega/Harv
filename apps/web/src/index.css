@@ -246,3 +246,16 @@ html.see-through body {
     font-size: max(16px, 1em);
   }
 }
+
+/* The phone (docs/PLAN.md §6q): the app is pinned to the screen (PhoneShell), so the page itself never
+   scrolls or rubber-bands, and nothing sticks out under it. */
+html.phone,
+html.phone body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+html.phone body {
+  position: fixed;
+  inset: 0;
+}

@@ -854,11 +854,15 @@ export function ChatPanel() {
 
         {!nonChat && isPhone && <VoiceBar />}
         {!nonChat && (
-          <form onSubmit={send} className="relative flex items-end gap-2.5 pt-1 pr-3 pb-2.5 pl-5">
+          <form
+            onSubmit={send}
+            // The phone's line is narrow: small gaps and buttons, so the text gets the room (docs/PLAN.md §6q).
+            className={`relative flex items-end ${isPhone ? 'gap-1.5 pt-1 pr-2 pb-2 pl-3' : 'gap-2.5 pt-1 pr-3 pb-2.5 pl-5'}`}
+          >
             {menuItems.length > 0 && <SlashMenu items={menuItems} index={menuAt} onPick={(c) => pickCommand(c.name)} />}
             {pathItems.length > 0 && <PathMenu items={pathItems} index={pathAt} onPick={(p) => pickPath(p)} />}
             <label htmlFor="harv-cmd" className="pb-3 leading-5 font-semibold text-accent">
-              harv&gt;
+              {isPhone ? '›' : 'harv>'}
             </label>
             <textarea
               ref={inputRef}
@@ -999,7 +1003,9 @@ export function ChatPanel() {
                     ? 'Attach files or folders by path, or upload a copy (or type @ in the line)'
                     : 'Attach files (or drop them on the chat, or paste a screenshot); type @ to point Harv at a file or folder by path'
                 }
-                className="min-h-11 cursor-pointer rounded-[10px] border border-[rgb(220_232_245/0.2)] bg-white/5 px-3.5 text-xs hover:bg-white/10"
+                className={`min-h-11 cursor-pointer rounded-[10px] border border-[rgb(220_232_245/0.2)] bg-white/5 text-xs hover:bg-white/10 ${
+                  isPhone ? 'min-w-11 px-0 text-base' : 'px-3.5'
+                }`}
               >
                 +<span className="hidden sm:inline"> ATTACH</span>
               </button>
@@ -1010,17 +1016,21 @@ export function ChatPanel() {
                 type="button"
                 onClick={() => chat.stop(active.id)}
                 title="Stop (Esc)"
-                className="min-h-11 cursor-pointer rounded-[10px] bg-warn px-4 text-xs font-semibold text-[#0f1620]"
+                aria-label="Stop"
+                className={`min-h-11 cursor-pointer rounded-[10px] bg-warn text-xs font-semibold text-[#0f1620] ${isPhone ? 'min-w-11 px-0' : 'px-4'}`}
               >
-                STOP ■
+                {isPhone ? '■' : 'STOP ■'}
               </button>
             ) : (
               <button
                 type="submit"
                 disabled={uploading}
-                className="min-h-11 cursor-pointer rounded-[10px] bg-accent px-4 text-xs font-semibold text-[#0f1620] disabled:cursor-wait disabled:opacity-60"
+                aria-label="Send"
+                className={`min-h-11 cursor-pointer rounded-[10px] bg-accent text-xs font-semibold text-[#0f1620] disabled:cursor-wait disabled:opacity-60 ${
+                  isPhone ? 'min-w-11 px-0 text-base' : 'px-4'
+                }`}
               >
-                RUN ⏎
+                {isPhone ? '↑' : 'RUN ⏎'}
               </button>
             )}
           </form>

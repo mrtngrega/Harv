@@ -600,6 +600,15 @@ export class SyncEngine {
     writeFileSync(file, seal(key, `${this.id}/live.hrv`, want));
   }
 
+  /** The sync key (only the user's own Harvs have it): proves forwarded phone requests (docs/PLAN.md §6q). */
+  syncKey(): Buffer | null {
+    try {
+      return loadKey(this.keyPath);
+    } catch {
+      return null;
+    }
+  }
+
   /** The other devices' live addresses, from the repo. */
   livePeers(): (LiveAddress & { id: string })[] {
     if (!this.enabled) return [];

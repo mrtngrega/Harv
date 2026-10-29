@@ -55,6 +55,9 @@ export async function unlock(): Promise<void> {
 
 export const lockPhone = () => call('/api/phone/lock', {});
 
+/** Control another of the user's computers (this Harv forwards to it), or this one again with null. */
+export const controlDevice = (device: string | null) => call('/api/phone/target', { device });
+
 /** A new Shortcut token (Siri, the share sheet); the old one stops working. */
 export const newShortcutToken = () => call<{ token: string; url: string }>('/api/phone/shortcut', {});
 

@@ -101,6 +101,8 @@ app.addHook('onRequest', async (req, reply) => {
   // The phone address (`tailscale serve`, docs/PLAN.md §6q) has its own, stricter check: a paired phone with Face ID.
   if (!ALLOWED_HOSTS.has(host) && phone?.isPhoneHost(host)) {
     if (!phone.check(req, reply)) return reply;
+    // The phone controls the user's other computer: its dashboard goes there (phone/relay.ts).
+    if (phone.forward(req, reply)) return reply;
     return;
   }
   if (!ALLOWED_HOSTS.has(host)) return reply.code(403).send({ error: 'Forbidden host' });
@@ -274,9 +276,17 @@ phone = new PhoneService({
   enabled: () => loadSettings().phoneAccess,
   deviceName: deviceLabel,
   peers: () => {
-    const names = new Map(sync.status().peers.map((p) => [p.id, p.name]));
-    return sync.livePeers().map((p) => ({ name: names.get(p.id) ?? 'Other device', ip: p.ip }));
+    const known = new Map(sync.status().peers.map((p) => [p.id, p]));
+    return sync.livePeers().map((p) => ({
+      id: p.id,
+      name: known.get(p.id)?.name ?? p.name ?? 'Other device',
+      ip: p.ip,
+      port: p.port,
+      // Talked live within the last two minutes: it's on.
+      live: Date.now() - (known.get(p.id)?.live ?? 0) < 120_000,
+    }));
   },
+  syncKey: () => sync.syncKey(),
   broadcast,
   log: (message) => app.log.warn(message),
   phoneTab: () => `phone-${sync.status().device.id}`,

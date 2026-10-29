@@ -13,7 +13,13 @@ import { HARV_HOME } from '../paths.ts';
 import { checkPhone, cookie, DEVICE_COOKIE, isPhoneHost, parseCookies, UNLOCK_COOKIE, type PhoneContext } from './access.ts';
 import { PhoneStore } from './phones.ts';
 import { noteFor, PhonePush, type PushNote } from './push.ts';
-import { nameOf, serving, setServe, tailnetSelf, type TailnetSelf } from './tailnet.ts';
+import { forwardHttp, forwardWs, relayProof } from './relay.ts';
+import { serving, setServe, tailnetSelf, type TailnetSelf } from './tailnet.ts';
+
+/** Which of the user's computers the phone controls (a peer's device id); unset = this one. Not a secret. */
+const TARGET_COOKIE = 'harv_target';
+/** How often a forwarded connection checks that the phone's Face ID unlock is still alive. */
+const RELAY_CHECK_MS = 30_000;
 
 // Harv on the phone (docs/PLAN.md §6q): keeps `tailscale serve` in step with Settings › Phone,
 // checks every request that comes in on the phone address, and serves pairing, Face ID, push,
@@ -30,8 +36,10 @@ export interface PhoneDeps {
   enabled: () => boolean;
   /** This computer's name for the phone's screens. */
   deviceName: () => string;
-  /** The other Harv devices (live sync peers): name and tailnet address. */
-  peers: () => { name: string; ip: string }[];
+  /** The other Harv devices (live sync peers): id, name and live-sync address. */
+  peers: () => { id: string; name: string; ip: string; port: number; live: boolean }[];
+  /** The sync key, for the proof on forwarded requests (relay.ts). */
+  syncKey: () => Buffer | null;
   broadcast: (msg: ServerMessage) => void;
   log: (msg: string) => void;
   /** The phone chat's id on this device. */
@@ -144,6 +152,47 @@ export class PhoneService {
     return true;
   }
 
+  /** The other computer this request should go to (the phone picked it), if any and it's known. */
+  private targetOf(req: FastifyRequest) {
+    const id = parseCookies(req.headers.cookie)[TARGET_COOKIE];
+    return id ? this.deps.peers().find((p) => p.id === id) : undefined;
+  }
+
+  /**
+   * After the access check: the phone controls the other computer, so the dashboard's requests and
+   * its WebSocket go there (relay.ts). Pairing, Face ID, push and Siri stay here. True = forwarded.
+   */
+  forward(req: FastifyRequest, reply: FastifyReply): boolean {
+    const path = req.url.split('?')[0] ?? '';
+    if (path.startsWith('/api/phone/') || !(path === '/ws' || path.startsWith('/api/'))) return false;
+    const peer = this.targetOf(req);
+    const key = peer && this.deps.syncKey();
+    const phoneId = phoneOf(req);
+    if (!peer || !key || !phoneId) return false;
+    void reply.hijack();
+    const proof = relayProof(key);
+    if (path !== '/ws') {
+      forwardHttp(req.raw, reply.raw, peer, proof);
+      return true;
+    }
+    const socket = req.raw.socket;
+    const unlock = parseCookies(req.headers.cookie)[UNLOCK_COOKIE];
+    forwardWs(req.raw, socket, Buffer.alloc(0), peer, proof);
+    // Like a direct connection: it ends when the unlock does (30 minutes idle) or the phone is removed.
+    let used = Date.now();
+    socket.on('data', () => {
+      if (Date.now() - used < RELAY_CHECK_MS) return;
+      used = Date.now();
+      this.phones.session(unlock);
+    });
+    const timer = setInterval(() => {
+      if (this.phones.peekSession(unlock) !== phoneId) socket.destroy();
+    }, RELAY_CHECK_MS);
+    const detach = this.attachSocket(phoneId, () => socket.destroy());
+    socket.on('close', () => (clearInterval(timer), detach()));
+    return true;
+  }
+
   /** A phone's live dashboard connection, closed when it's revoked. */
   attachSocket(phoneId: string, close: () => void): () => void {
     const set = this.sockets.get(phoneId) ?? new Set();
@@ -198,16 +247,8 @@ export class PhoneService {
       unlocked: !!phone?.passkey && this.phones.session(cookies[UNLOCK_COOKIE]) === phone.id,
       device: this.deps.deviceName(),
       others: [],
+      target: null,
     };
-  }
-
-  private async others(): Promise<{ name: string; url: string }[]> {
-    const out: { name: string; url: string }[] = [];
-    for (const peer of this.deps.peers()) {
-      const host = await nameOf(peer.ip);
-      if (host) out.push({ name: peer.name, url: `https://${host}` });
-    }
-    return out;
   }
 
   routes(app: FastifyInstance) {
@@ -221,8 +262,20 @@ export class PhoneService {
 
     app.get('/api/phone/state', async (req) => {
       const state = this.state(req);
-      if (state.unlocked) state.others = await this.others();
+      if (state.unlocked) {
+        state.others = this.deps.peers().map((p) => ({ id: p.id, name: p.name, online: p.live }));
+        state.target = this.targetOf(req)?.id ?? null;
+      }
       return state;
+    });
+
+    // The phone switches computer: from now on its dashboard requests go there (or back here with null).
+    app.post<{ Body: { device?: string | null } }>('/api/phone/target', async (req, reply) => {
+      phoneId(req);
+      const id = req.body?.device ?? null;
+      if (id && !this.deps.peers().some((p) => p.id === id)) return reply.code(400).send({ error: 'Not one of your Harv devices' });
+      void reply.header('set-cookie', id ? cookie(TARGET_COOKIE, id, DEVICE_MAX_AGE_S) : cookie(TARGET_COOKIE, '', 0));
+      return { ok: true };
     });
 
     app.post<{ Body: { name?: string } }>('/api/phone/pair/start', async (req) => {

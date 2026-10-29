@@ -235,6 +235,13 @@ export class PhoneStore {
     return s.phoneId;
   }
 
+  /** Like `session`, but only looks: it doesn't count as use (for a forwarded connection's periodic check). */
+  peekSession(secret: string | undefined): string | null {
+    if (!secret) return null;
+    const s = this.sessions.get(hashSecret(secret));
+    return s && this.now() - s.last <= UNLOCK_IDLE_MS && this.get(s.phoneId) ? s.phoneId : null;
+  }
+
   /** Ends a phone's unlock sessions (the app locked itself). */
   lock(phoneId: string) {
     for (const [key, s] of this.sessions) if (s.phoneId === phoneId) this.sessions.delete(key);

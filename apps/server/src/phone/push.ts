@@ -48,6 +48,12 @@ export function noteFor(msg: ServerMessage, phoneTurn: (tabId: string) => boolea
         tabId: msg.tabId,
         tag: `done-${msg.tabId}`,
       };
+    // Harv waits for the user (approve, answer, a plan): the phone is how they hear of it away from the computer.
+    case 'approval.request': {
+      const a = msg.approval;
+      const title = a.kind === 'question' ? 'Harv has a question' : a.kind === 'plan' ? 'Harv’s plan is ready' : 'Harv needs your OK';
+      return { title, body: `${a.summary}`.slice(0, 140), tabId: a.tabId, tag: `approval-${a.id}` };
+    }
     case 'usage.warning':
       return {
         title: `Claude ${msg.warning.label} at ${msg.warning.percent}%`,
