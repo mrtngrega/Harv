@@ -14,22 +14,6 @@ import { startVoiceHere } from './VoiceBar.tsx';
 
 type Sheet = 'history' | 'stats' | null;
 
-const standalone =
-  (navigator as Navigator & { standalone?: boolean }).standalone === true || matchMedia('(display-mode: standalone)').matches;
-
-/**
- * The whole screen's height. The Home Screen app covers the screen, but iOS reports its height without
- * the status bar (47 px short on an iPhone 13), which left a blank strip at the bottom; the screen's own
- * size doesn't have that bug.
- */
-function fullHeight(): number {
-  const inner = window.innerHeight;
-  if (!standalone || !screen.height) return inner;
-  const landscape = window.innerWidth > inner;
-  const screenH = landscape ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
-  return Math.max(inner, screenH);
-}
-
 /** What the keyboard takes at least, so a toolbar showing or hiding doesn't count as one. */
 const KEYBOARD_MIN = 120;
 
@@ -37,14 +21,13 @@ const KEYBOARD_MIN = 120;
  * The part of the screen iOS really shows. With the keyboard up, Safari keeps the page tall and slides
  * the view up over it; the app follows that view (its top and height) instead of fighting it: scrolling
  * the page back made it shake while typing, and a stale height left a blank strip at the bottom.
- * Without the keyboard the app takes the whole screen (see fullHeight).
+ * The page's own height (the layout viewport) doesn't change with the keyboard, so it tells them apart.
  */
 function useVisibleArea(): { top: number; height: number; keyboard: boolean } | null {
   const read = () => {
     const vv = window.visualViewport;
-    const full = fullHeight();
-    document.documentElement.style.setProperty('--phone-h', `${full}px`);
     if (!vv) return null;
+    const full = document.documentElement.clientHeight || window.innerHeight;
     const keyboard = full - vv.height > KEYBOARD_MIN;
     return keyboard ? { top: vv.offsetTop, height: vv.height, keyboard } : { top: 0, height: full, keyboard };
   };
