@@ -9,15 +9,48 @@ const MAX_MS = 8000;
 const PHOTO_MS = 3000;
 
 let lifted = false;
+let fallback = 0;
 
+// Hidden rather than removed: the phone puts it back over the dashboard after Face ID (coverBoot).
 function lift(motion: boolean) {
   if (lifted) return;
   lifted = true;
+  window.clearTimeout(fallback);
   const el = document.getElementById('boot');
   if (!el) return;
-  if (!motion) return el.remove();
+  const hide = () => {
+    if (lifted) el.style.display = 'none';
+  };
+  if (!motion) {
+    hide();
+    return;
+  }
   el.style.opacity = '0';
-  window.setTimeout(() => el.remove(), 250);
+  window.setTimeout(hide, 250);
+}
+
+/** The phone's pairing and Face ID screens show without the cover. */
+export function liftBoot() {
+  lift(false);
+}
+
+/**
+ * The phone, once unlocked: the cover goes back over the dashboard until it's ready, as on the
+ * computer (the glass showed blue for a moment while the settings and the photo came in).
+ */
+export function coverBoot() {
+  if (!lifted) return;
+  lifted = false;
+  const el = document.getElementById('boot');
+  if (el) {
+    // At once, not faded in (the fade is for going).
+    el.style.transition = 'none';
+    el.style.display = '';
+    el.style.opacity = '1';
+    void el.offsetHeight;
+    el.style.transition = '';
+  }
+  fallback = fallback = window.setTimeout(() => lift(true), MAX_MS);
 }
 
 /** Resolves when the photo is loaded and decoded (or failed, or took too long). */
@@ -38,4 +71,4 @@ export function revealWhenReady(photo: string | null, motion: boolean) {
     .then(() => lift(motion));
 }
 
-window.setTimeout(() => lift(true), MAX_MS);
+fallback = window.setTimeout(() => lift(true), MAX_MS);

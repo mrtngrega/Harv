@@ -14,10 +14,7 @@ import './lib/desktop.ts';
 
 // On the phone (docs/PLAN.md §6q) the connection waits for pairing and Face ID.
 if (!isPhone) startSocket();
-else {
-  document.getElementById('boot')?.remove();
-  document.documentElement.classList.add('phone');
-}
+else document.documentElement.classList.add('phone');
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

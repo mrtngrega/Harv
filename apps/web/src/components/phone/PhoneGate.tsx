@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { coverBoot, liftBoot } from '../../lib/boot.ts';
 import type { PhoneState } from '@harv/shared';
 import { askPairing, isIos, makePasskey, phoneState, registerWorker, sendCode, standalone, unlock } from '../../lib/phone.ts';
 import { onSocketClosed, pauseSocket, resumeSocket, sendMessage, startSocket } from '../../lib/socket.ts';
@@ -80,6 +81,13 @@ export function PhoneGate({ children }: { children: ReactNode }) {
       setBusy(false);
     }
   };
+
+  // The boot cover stays while connecting and over the dashboard until it's ready (App lifts it);
+  // the pairing and Face ID screens show without it.
+  useLayoutEffect(() => {
+    if (stage === 'open') coverBoot();
+    else if (stage !== 'loading') liftBoot();
+  }, [stage]);
 
   if (stage === 'open') return <>{children}</>;
 
