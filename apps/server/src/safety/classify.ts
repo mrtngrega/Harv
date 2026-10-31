@@ -78,6 +78,9 @@ export const HARV_TOOLS = [
   'mcp__harv__list_projects',
   'mcp__harv__project_status',
   'mcp__harv__harv_db',
+  // The user's own light strip (docs/PLAN.md §6z): harmless.
+  'mcp__harv__lights_list',
+  'mcp__harv__lights_set',
   'mcp__harv__start_project',
   'mcp__harv__open_project',
   'mcp__harv__schedule_task',

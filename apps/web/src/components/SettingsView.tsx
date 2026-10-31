@@ -16,6 +16,7 @@ import {
   useSettings,
   useSync,
 } from '../lib/useHarvSocket.ts';
+import { lights, useLights } from '../lib/lights.ts';
 
 const ACCENT_NAMES: Record<string, string> = {
   '#A8C8E8': 'Ice blue',
@@ -989,6 +990,70 @@ function TapoLogin() {
   );
 }
 
+/** Settings › Devices: the light helper, and which of the lights on the Wi-Fi Harv controls (docs/PLAN.md §6z). */
+function LightsSettings() {
+  const status = useLights();
+  const [busy, setBusy] = useState<string | null>(null);
+  useEffect(() => {
+    if (status?.setup === 'ready' && !status.found.length) lights.scan();
+  }, [status?.setup, status?.found.length]);
+  if (!status) return null;
+  const install = async () => {
+    setBusy('Installing…');
+    try {
+      await fetch('/api/devices/setup', { method: 'POST' });
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <Sub title="Your lights">
+      {status.setup === 'missing' ? (
+        <>
+          <Note>
+            Harv needs a small helper on this computer to talk to Tapo lights (python-kasa with TP-Link’s new encryption, the version
+            reviewed on 31 Oct). It installs into Harv’s own folder, once per computer.
+          </Note>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className={BUTTON}
+              disabled={!!busy || status.setupCommand === 'installing'}
+              onClick={() => void install()}
+            >
+              {status.setupCommand === 'installing' ? 'Installing…' : 'Install'}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <Note>Lights on this Wi-Fi, found without signing in to any. Harv only ever talks to the ones you switch on here.</Note>
+          {status.found.length === 0 && <Note>None found yet.</Note>}
+          {status.found.map((f) => {
+            const light = status.lights.find((l) => l.id === f.id);
+            return (
+              <div key={f.id} className="flex flex-col gap-1">
+                <Toggle
+                  on={f.chosen}
+                  label={light && light.name !== f.id ? `${light.name} (${f.model})` : `${f.model} at ${f.ip}`}
+                  hint={f.refused ? 'It refused your Tapo login (another account?), so Harv leaves it alone.' : f.id}
+                  onChange={(on) => lights.choose(f.id, on)}
+                />
+              </div>
+            );
+          })}
+          <div className="flex items-center gap-3">
+            <button type="button" className={BUTTON} onClick={() => lights.scan()}>
+              Find lights
+            </button>
+          </div>
+        </>
+      )}
+      {status.problem && <Note warn>{status.problem}</Note>}
+    </Sub>
+  );
+}
+
 /** The photo: preview, choose, remove. */
 function PhotoPicker() {
   const { version } = useBackground();
@@ -1449,6 +1514,7 @@ export function SettingsView() {
       {!isPhone && (
         <Group title="Devices" hint="Smart-home devices Harv controls.">
           <TapoLogin />
+          <LightsSettings />
         </Group>
       )}
 

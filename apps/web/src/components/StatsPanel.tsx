@@ -5,6 +5,7 @@ import { useMetrics, useSettings, useUsage } from '../lib/useHarvSocket.ts';
 import { Bar, barColor } from './stats/parts.tsx';
 import { PlanDetails } from './stats/PlanDetails.tsx';
 import { StatsDetails } from './stats/StatsDetails.tsx';
+import { LightsCard, LightsCompact } from './stats/LightsCard.tsx';
 
 interface CompactItem {
   id: RowId;
@@ -88,6 +89,7 @@ export function StatsPanel({ sheet = false, onClose }: { sheet?: boolean; onClos
         {plan.map((item) => (
           <CompactRow key={item.id} item={item} />
         ))}
+        <LightsCompact />
       </aside>
     );
   }
@@ -111,6 +113,7 @@ export function StatsPanel({ sheet = false, onClose }: { sheet?: boolean; onClos
         </button>
       </div>
       {metrics ? <StatsDetails m={metrics} /> : <p className="m-0 p-2 text-xs text-muted">Waiting for sensors…</p>}
+      <LightsCard />
       <PlanDetails usage={usage} />
     </aside>
   );

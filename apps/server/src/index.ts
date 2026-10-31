@@ -38,6 +38,8 @@ import { applySharedUi, loadUi, resetUi, saveUi, sharedUi } from './ui.ts';
 import { BrowserHost } from './tools/browserHost.ts';
 import { GeminiImages, GeminiProblem } from './tools/gemini.ts';
 import { DeviceStore } from './devices/store.ts';
+import { LightsService } from './devices/lights.ts';
+import { lightTools } from './devices/tools.ts';
 import { HarvBrowser } from './tools/harvBrowser.ts';
 import { cleanPath, listFolder, openWithDefault, places, previewType, suggestPaths } from './tools/files.ts';
 import {
@@ -242,6 +244,7 @@ const sync = new SyncEngine(
     projectState: (project, device, unsaved) => chats.peerProjectState(project, device, unsaved),
     fileWritten: (root, path) => {
       if (root === 'home' && BACKGROUND.test(path)) broadcast({ type: 'background', version: backgroundVersion() });
+      if (root === 'home' && path === 'devices.json') void lights.refresh();
     },
   },
   undefined,
@@ -254,7 +257,13 @@ const sync = new SyncEngine(
       Object.fromEntries(store.projects().flatMap((p) => (existsSync(p.path) ? [[p.name, claudeMemoryDir(p.path)]] : []))),
     folders: {
       workspace: { dir: WORKSPACE, accept: () => true },
-      home: { dir: HARV_HOME, accept: (rel) => BACKGROUND.test(rel), beforeWrite: removeBackground, shallow: true },
+      // The background photo, and devices.json (the Tapo login and chosen lights, docs/PLAN.md §6z), sealed with the sync key.
+      home: {
+        dir: HARV_HOME,
+        accept: (rel) => BACKGROUND.test(rel) || rel === 'devices.json',
+        beforeWrite: (rel) => BACKGROUND.test(rel) && removeBackground(),
+        shallow: true,
+      },
     },
     ui: sharedUi,
   },
@@ -300,6 +309,14 @@ onSettingsChange((before, after) => {
 // Harv's generate_image: pictures from the Gemini website on Harv's own Chrome profile (docs/PLAN.md §6w).
 const gemini = new GeminiImages();
 const devices = new DeviceStore();
+// The user's Tapo light strip (docs/PLAN.md §6z): read every 30 s while a dashboard is open.
+const lights = new LightsService(devices, {
+  broadcast: (status) => broadcast({ type: 'lights', status }),
+  log: (message) => app.log.warn(message),
+  watchers: () => clients.size,
+});
+lights.start();
+chats.lights = lightTools(lights);
 chats.images = {
   async generate(prompt, images) {
     try {
@@ -531,6 +548,11 @@ app.post('/api/backups/keep', async (req, reply) => {
 });
 // Settings › Devices: the Tapo account login for the user's lights (docs/PLAN.md §6z). The password goes in, never out.
 app.get('/api/devices', async () => devices.summary());
+// Settings › Devices › Install: the light helper's venv with the reviewed python-kasa (once per computer).
+app.post('/api/devices/setup', async () => {
+  void lights.install().then(() => lights.scan());
+  return { ok: true };
+});
 app.post('/api/devices/tapo', async (req, reply) => {
   const { email, password } = (req.body ?? {}) as { email?: unknown; password?: unknown };
   if (email === null) {
@@ -541,6 +563,7 @@ app.post('/api/devices/tapo', async (req, reply) => {
     return reply.code(400).send({ error: 'Type the email and password of your Tapo account.' });
   }
   devices.setTapo({ email, password });
+  void lights.refresh();
   return devices.summary();
 });
 // Settings › This computer › Pictures: Gemini in a window on Harv's profile, to sign in once.
@@ -707,6 +730,22 @@ app.get('/ws', { websocket: true }, (socket, req) => {
         break;
       case 'schedule.cancel':
         scheduler.cancel(String(msg.id));
+        break;
+      case 'lights.get':
+        send({ type: 'lights', status: lights.status() });
+        void lights.refresh();
+        break;
+      case 'lights.scan':
+        void lights.scan();
+        break;
+      case 'lights.choose':
+        if (typeof msg.id === 'string') void lights.choose(msg.id, msg.chosen === true);
+        break;
+      case 'lights.set':
+        if (typeof msg.id === 'string' && msg.change && typeof msg.change === 'object')
+          void lights
+            .set(msg.id, msg.change)
+            .catch((err: Error) => send({ type: 'lights', status: { ...lights.status(), problem: err.message } }));
         break;
       case 'chat.plan':
         chats.setPlanning(msg.tabId, msg.on === true);

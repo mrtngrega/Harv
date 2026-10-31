@@ -31,6 +31,7 @@ import {
   type HandOff,
   type ProjectTools,
   type BrowserTools,
+  type LightTools,
   type PhoneTools,
   type ImageTools,
   type ScheduleTools,
@@ -167,6 +168,8 @@ export class ChatManager {
   browser?: BrowserTools;
   /** Notifications on the user's phones (set by the server, docs/PLAN.md §6q). */
   phone?: PhoneTools;
+  /** The user's lights (set by the server, docs/PLAN.md §6z). */
+  lights?: LightTools;
 
   constructor(
     private store: ChatStore,
@@ -461,6 +464,7 @@ export class ChatManager {
         images: this.images,
         browser: this.browser,
         phone: this.phone,
+        ...(this.lights ? { lights: this.lights } : {}),
       },
     );
     this.sessions.set(tabId, session);

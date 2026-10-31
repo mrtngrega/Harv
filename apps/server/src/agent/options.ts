@@ -13,6 +13,7 @@ import {
   harvServer,
   recentChatsContext,
   type BrowserTools,
+  type LightTools,
   type PhoneTools,
   type Delegate,
   type ProjectTools,
@@ -68,6 +69,8 @@ export interface ChatContext {
   browser?: BrowserTools;
   /** Harv's phone_notify tool (docs/PLAN.md §6q). */
   phone?: PhoneTools;
+  /** Harv's lights_list / lights_set tools (docs/PLAN.md §6z). */
+  lights?: LightTools;
 }
 
 /** The part about the user's other chats, shared by both kinds of chat. */
@@ -301,6 +304,7 @@ export function buildOptions(
             chat.images,
             chat.browser,
             chat.phone,
+            chat.lights,
           ),
         }
       : {},

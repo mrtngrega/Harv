@@ -142,6 +142,9 @@ export interface ImageTools {
 }
 
 /** The user's phones (phone/service.ts): returns what to tell the model. */
+export type { LightTools } from '../devices/tools.ts';
+import type { LightTools } from '../devices/tools.ts';
+
 export interface PhoneTools {
   notify(tabId: string, title: string, body: string, talk: boolean): Promise<string>;
 }
@@ -157,6 +160,7 @@ export function harvServer(
   images?: ImageTools,
   browser?: BrowserTools,
   phone?: PhoneTools,
+  lights?: LightTools,
 ) {
   return createSdkMcpServer({
     name: 'harv',
@@ -296,6 +300,33 @@ export function harvServer(
               'Cancel a scheduled task by its id (from list_scheduled), when the user asks to stop it.',
               { id: z.string().min(1) },
               async ({ id }) => text(schedules.cancel(id) ? `Cancelled ${id}.` : `No scheduled task with id ${id}.`),
+            ),
+          ]
+        : []),
+      ...(lights
+        ? [
+            tool(
+              'lights_list',
+              "The user's light strip(s) Harv controls (Tapo, on the home Wi-Fi): each one's name and state right now (on/off, brightness, colour or white, effect), and the effects it has.",
+              {},
+              async () => text(await lights.describe()),
+            ),
+            tool(
+              'lights_set',
+              'Change the user\'s light strip: on/off, brightness, a colour or white, or a built-in effect (Aurora, Ocean, Rainbow, Sunset…). Anything left out stays as it is; a colour, white or effect also turns it on. Use it whenever the user asks about the lights ("lights on", "make it blue", "warm and dim", "turn the LED off"), and with schedule_task for timed changes.',
+              {
+                light: z.string().optional().describe('Which light, by its name; leave out (or "all") for every light Harv controls'),
+                on: z.boolean().optional(),
+                brightness: z.number().min(1).max(100).optional().describe('Percent'),
+                color: z
+                  .string()
+                  .optional()
+                  .describe(
+                    'A colour or white: a name (red, orange, teal, blue, purple, pink…, warm white, white, cool white, daylight), a hex code (#ff8800) or kelvin (2700K)',
+                  ),
+                effect: z.string().optional().describe('A built-in effect by name (see lights_list), or "off" to stop it'),
+              },
+              async ({ light, ...request }) => text(await lights.set(light, request)),
             ),
           ]
         : []),

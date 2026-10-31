@@ -32,6 +32,7 @@ const PLAN_SAFE_HARV = [
   'list_projects',
   'project_status',
   'harv_db',
+  'lights_list',
   'list_scheduled',
   'terminal_read',
   'browser_open',

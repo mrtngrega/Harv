@@ -24,6 +24,7 @@ export type * from './projects.ts';
 export type * from './watchdog.ts';
 export type * from './sync.ts';
 export type * from './phone.ts';
+export * from './lights.ts';
 import type { MetricsSnapshot } from './metrics.ts';
 import type { ActionEntry, ApprovalRequest, SafetyClientMessage, SafetyServerMessage } from './safety.ts';
 import type { PlanUsage, UsageServerMessage } from './usage.ts';
@@ -36,6 +37,7 @@ import type { WatchdogServerMessage } from './watchdog.ts';
 import type { SyncClientMessage, SyncServerMessage, SyncStatus } from './sync.ts';
 import type { ScheduleClientMessage, ScheduledTask, ScheduleServerMessage } from './schedule.ts';
 import type { PhoneClientMessage, PhoneServerMessage } from './phone.ts';
+import type { LightsClientMessage, LightsServerMessage } from './lights.ts';
 
 /** Messages the server pushes to the dashboard over /ws. */
 export type ServerMessage =
@@ -85,7 +87,8 @@ export type ServerMessage =
   | SyncServerMessage
   | ScheduleServerMessage
   | BrowserServerMessage
-  | PhoneServerMessage;
+  | PhoneServerMessage
+  | LightsServerMessage;
 
 /** Messages the dashboard sends to the server over /ws. */
 export type ClientMessage =
@@ -98,4 +101,5 @@ export type ClientMessage =
   | SyncClientMessage
   | ScheduleClientMessage
   | BrowserClientMessage
-  | PhoneClientMessage;
+  | PhoneClientMessage
+  | LightsClientMessage;
