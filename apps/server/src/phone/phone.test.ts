@@ -202,6 +202,35 @@ describe('push notes', () => {
     expect(noteFor({ ...done, stopped: true } as ServerMessage, () => true, title)).toBeNull();
   });
 
+  it('reads out a Siri answer that came after Siri stopped waiting', () => {
+    const done = { type: 'chat.done', tabId: 't', ok: true, stopped: false } as ServerMessage;
+    expect(
+      noteFor(
+        done,
+        () => true,
+        title,
+        () => true,
+      ),
+    ).toMatchObject({ title: 'Harv has your answer', tabId: 't', talk: true, last: true });
+    expect(
+      noteFor(
+        done,
+        () => true,
+        title,
+        () => false,
+      )?.talk,
+    ).toBeUndefined();
+    // A failed turn says so instead of reading out an error.
+    expect(
+      noteFor(
+        { ...done, ok: false } as ServerMessage,
+        () => true,
+        title,
+        () => true,
+      )?.title,
+    ).toBe('Harv ran into a problem');
+  });
+
   it('tells the phone when Harv waits for an OK, an answer or a plan', () => {
     const ask = (kind?: 'action' | 'question' | 'plan') =>
       noteFor(

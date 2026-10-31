@@ -1111,7 +1111,7 @@ export class ChatManager {
     if (!finished) {
       // Still working: keep the collector until the turn ends, then drop it.
       void done.catch(() => {}).finally(() => this.replies.delete(tabId));
-      return { reply: 'On it. This takes a bit longer; I’ll let you know when it’s done.', done: false };
+      return { reply: 'On it. I’ll send you the answer when it’s ready.', done: false };
     }
     const reply = (this.replies.get(tabId) ?? []).join('\n\n').trim();
     this.replies.delete(tabId);

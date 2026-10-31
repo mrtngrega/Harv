@@ -14,6 +14,39 @@ export const standalone =
 
 export const isIos = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/.test(navigator.userAgent);
 
+/**
+ * Where the phone was: its chat and how far up that chat's log was scrolled. iOS drops a Home Screen
+ * app that's been in the background and loads it fresh on return; with this it comes back there,
+ * not on whatever chat the computer last showed (the user: "it restarts every time").
+ */
+export interface PhoneSpot {
+  activeId: string;
+  /** Pixels from the bottom of the log (0: following the end). */
+  fromBottom: number;
+  at: number;
+}
+
+const SPOT_KEY = 'harv.phoneSpot';
+/** Older than this, the app opens as usual (the computer's chat, at the end). */
+const SPOT_MAX_AGE_MS = 12 * 3600_000;
+
+export function phoneSpot(now = Date.now()): PhoneSpot | null {
+  try {
+    const spot = JSON.parse(localStorage.getItem(SPOT_KEY) ?? 'null') as PhoneSpot | null;
+    return spot && typeof spot.activeId === 'string' && now - spot.at < SPOT_MAX_AGE_MS ? spot : null;
+  } catch {
+    return null;
+  }
+}
+
+export function savePhoneSpot(activeId: string, fromBottom: number): void {
+  try {
+    localStorage.setItem(SPOT_KEY, JSON.stringify({ activeId, fromBottom: Math.max(0, Math.round(fromBottom)), at: Date.now() }));
+  } catch {
+    /* private mode: it opens as usual */
+  }
+}
+
 async function call<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method: body === undefined ? 'GET' : 'POST',
@@ -108,6 +141,8 @@ export const testPush = () => call<{ sent: number }>('/api/phone/push/test', {})
 export interface OpenRequest {
   tabId?: string;
   talk: boolean;
+  /** Say the chat's last reply (a Siri answer that came after Siri stopped waiting). */
+  last?: boolean;
   say?: string;
 }
 
@@ -115,7 +150,12 @@ export interface OpenRequest {
 export function onOpenRequest(listener: (req: OpenRequest) => void): void {
   const q = new URLSearchParams(location.search);
   if (q.has('tab') || q.has('talk')) {
-    listener({ tabId: q.get('tab') ?? undefined, talk: q.get('talk') === '1', say: q.get('say') ?? undefined });
+    listener({
+      tabId: q.get('tab') ?? undefined,
+      talk: q.get('talk') === '1',
+      last: q.get('last') === '1',
+      say: q.get('say') ?? undefined,
+    });
     history.replaceState(null, '', '/');
   }
   navigator.serviceWorker?.addEventListener('message', (event: MessageEvent<{ type?: string } & OpenRequest>) => {

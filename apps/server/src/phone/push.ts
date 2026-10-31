@@ -13,6 +13,8 @@ export interface PushNote {
   tabId?: string;
   /** Tapping opens the chat in voice mode and Harv says `body` ("Harv wants to talk"). */
   talk?: boolean;
+  /** With `talk`: say the chat's last reply instead of `body` (a Siri answer that came too late for Siri). */
+  last?: boolean;
   /** Same tag = replaces the older notification. */
   tag?: string;
 }
@@ -38,10 +40,25 @@ export function loadVapid(file: string): Vapid {
 }
 
 /** What a dashboard event means for the phone, if anything (pure, tested). `phoneTurn`: the turn came from the phone. */
-export function noteFor(msg: ServerMessage, phoneTurn: (tabId: string) => boolean, title: (tabId: string) => string): PushNote | null {
+export function noteFor(
+  msg: ServerMessage,
+  phoneTurn: (tabId: string) => boolean,
+  title: (tabId: string) => string,
+  siriLate: (tabId: string) => boolean = () => false,
+): PushNote | null {
   switch (msg.type) {
     case 'chat.done':
       if (!phoneTurn(msg.tabId) || msg.stopped) return null;
+      // Siri gave up waiting: a tap opens the chat in voice mode and reads the answer out.
+      if (siriLate(msg.tabId) && msg.ok)
+        return {
+          title: 'Harv has your answer',
+          body: 'Tap to hear it.',
+          tabId: msg.tabId,
+          tag: `done-${msg.tabId}`,
+          talk: true,
+          last: true,
+        };
       return {
         title: msg.ok ? 'Harv is done' : 'Harv ran into a problem',
         body: title(msg.tabId),

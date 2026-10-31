@@ -22,8 +22,11 @@ import { serving, setServe, tailnetSelf, type TailnetSelf } from './tailnet.ts';
 // checks every request that comes in on the phone address, and serves pairing, Face ID, push,
 // and Siri / the share sheet.
 
-/** Siri waits this long for a reply before Harv says "on it, I'll let you know". */
-const ASK_WAIT_MS = 45_000;
+/**
+ * Siri waits this long for a reply before Harv says "on it, I'll let you know" (Siri gives up on
+ * its own after ~10 s and then says nothing). The answer comes later as a push that reads it out.
+ */
+const ASK_WAIT_MS = 8_000;
 /** Tailscale's state is read again this often (the address or certificates may change). */
 const REFRESH_MS = 5 * 60_000;
 /** The device cookie lasts as long as browsers allow (400 days). */
@@ -62,6 +65,8 @@ export class PhoneService {
   private phoneTurns = new Set<string>();
   /** Chats whose turn Siri's request is waiting for (/api/phone/ask). */
   private asking = new Set<string>();
+  /** Chats whose Siri question took longer than Siri waits: their answer is pushed to be read out. */
+  private siriLate = new Set<string>();
   /** Phone windows in front right now (no push while one is). */
   private visible = new Set<object>();
   private sockets = new Map<string, Set<() => void>>();
@@ -183,8 +188,16 @@ export class PhoneService {
   observe(msg: ServerMessage) {
     // Siri is still waiting for this turn: it says the answer itself, so no push.
     if (msg.type === 'chat.done' && this.asking.has(msg.tabId)) return void this.phoneTurns.delete(msg.tabId);
-    const note = noteFor(msg, (tab) => this.phoneTurns.has(tab), this.deps.title);
-    if (msg.type === 'chat.done') this.phoneTurns.delete(msg.tabId);
+    const note = noteFor(
+      msg,
+      (tab) => this.phoneTurns.has(tab),
+      this.deps.title,
+      (tab) => this.siriLate.has(tab),
+    );
+    if (msg.type === 'chat.done') {
+      this.phoneTurns.delete(msg.tabId);
+      this.siriLate.delete(msg.tabId);
+    }
     if (!note || this.visible.size) return;
     void this.push.send(note);
   }
@@ -377,6 +390,7 @@ export class PhoneService {
       }
       // Answered in time: Siri already said it, no push needed (a longer one pushes when it's done).
       if (answer.done) this.phoneTurns.delete(tab);
+      else this.siriLate.add(tab);
       return { reply: answer.reply.replace(/[*_`#>]/g, '').slice(0, 2000), done: answer.done };
     });
 

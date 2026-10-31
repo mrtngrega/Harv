@@ -22,7 +22,7 @@ import { shownView, SpecialTab, TOOL_ICONS, ViewMenu } from './tools/TabParts.ts
 import { addReference, lastPart, setDraftText, updatePending, useDrafts, useDraftTexts } from '../lib/drafts.ts';
 import { desktop, inApp } from '../lib/desktop.ts';
 import { ErrorBoundary, retryImport } from './ErrorBoundary.tsx';
-import { isPhone } from '../lib/phone.ts';
+import { isPhone, phoneSpot, savePhoneSpot } from '../lib/phone.ts';
 import { MicButton, VoiceBar } from './phone/VoiceBar.tsx';
 
 // The terminal (xterm) and the explorer load when first opened, keeping the dashboard's first load small.
@@ -428,7 +428,36 @@ export function ChatPanel() {
     stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     setScrolledUp(stuck.current ? null : activeId);
   };
-  useLayoutEffect(toBottom, [activeId]);
+  // The phone back after iOS reloaded it: its chat scrolled where it was (docs/PLAN.md §6q), once.
+  const spot = useRef(isPhone ? phoneSpot() : null);
+  useLayoutEffect(() => {
+    const was = spot.current;
+    const el = logRef.current;
+    if (was && el && was.activeId === activeId && was.fromBottom > 40) {
+      spot.current = null;
+      el.scrollTop = el.scrollHeight - el.clientHeight - was.fromBottom;
+      stuck.current = false;
+      return;
+    }
+    if (hydrated) spot.current = null;
+    toBottom();
+  }, [activeId, hydrated]);
+  // iOS may drop the app while it's in the background: note where it was each time it's hidden.
+  useEffect(() => {
+    if (!isPhone) return;
+    const save = () => {
+      const el = logRef.current;
+      const id = getChatState().activeId;
+      if (document.visibilityState !== 'hidden' || !id || id === SETTINGS_TAB) return;
+      savePhoneSpot(id, el ? el.scrollHeight - el.scrollTop - el.clientHeight : 0);
+    };
+    document.addEventListener('visibilitychange', save);
+    window.addEventListener('pagehide', save);
+    return () => {
+      document.removeEventListener('visibilitychange', save);
+      window.removeEventListener('pagehide', save);
+    };
+  }, []);
   useEffect(() => {
     if (lastLine?.kind === 'you') stuck.current = true;
     if (stuck.current) toBottom();

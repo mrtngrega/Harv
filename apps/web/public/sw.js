@@ -1,6 +1,6 @@
 /* global self, URLSearchParams */
 // Harv's service worker on the phone (docs/PLAN.md §6q): notifications only, no caching (the
-// dashboard always comes fresh from the computer). A push carries { title, body, tabId?, talk?, tag? }.
+// dashboard always comes fresh from the computer). A push carries { title, body, tabId?, talk?, last?, tag? }.
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
@@ -18,19 +18,20 @@ self.addEventListener('push', (event) => {
       tag: note.tag,
       icon: '/icon-192.png',
       badge: '/icon-192.png',
-      data: { tabId: note.tabId, talk: !!note.talk, body: note.body },
+      data: { tabId: note.tabId, talk: !!note.talk, last: !!note.last, body: note.body },
     }),
   );
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const { tabId, talk, body } = event.notification.data ?? {};
+  const { tabId, talk, last, body } = event.notification.data ?? {};
   const params = new URLSearchParams();
   if (tabId) params.set('tab', tabId);
   if (talk) {
     params.set('talk', '1');
-    if (body) params.set('say', body);
+    if (last) params.set('last', '1');
+    else if (body) params.set('say', body);
   }
   const url = `/${params.size ? `?${params}` : ''}`;
   event.waitUntil(
@@ -39,7 +40,7 @@ self.addEventListener('notificationclick', (event) => {
       const open = windows[0];
       if (open) {
         // The app is open: it switches to the chat (and voice mode) itself.
-        open.postMessage({ type: 'harv.open', tabId, talk: !!talk, say: body });
+        open.postMessage({ type: 'harv.open', tabId, talk: !!talk, last: !!last, say: last ? undefined : body });
         return open.focus();
       }
       return self.clients.openWindow(url);

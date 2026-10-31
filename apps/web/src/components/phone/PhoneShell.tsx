@@ -6,6 +6,7 @@ import { Icon } from '../tools/explorer/icons.tsx';
 import { chat, getChatState, SETTINGS_TAB, useChat } from '../../lib/chatStore.ts';
 import { onOpenRequest, phoneState, type OpenRequest } from '../../lib/phone.ts';
 import { useConnection, useMetrics, useUsage } from '../../lib/useHarvSocket.ts';
+import { lastReply } from '../../lib/voice.ts';
 import { startVoiceHere } from './VoiceBar.tsx';
 
 // The phone's layout (docs/PLAN.md §6q): chat first and full height; history and stats slide in;
@@ -140,12 +141,14 @@ export function PhoneShell() {
         <button
           type="button"
           onClick={() => {
-            startVoiceHere(talk.say);
+            const lines = getChatState().tabs.find((t) => t.id === talk.tabId)?.lines ?? [];
+            startVoiceHere(talk.last ? lastReply(lines) || 'Your answer is in the chat.' : talk.say);
             setTalk(null);
           }}
           className="glass rounded-2xl px-4 py-3 text-left text-sm text-ink"
         >
-          🎙 Harv wants to talk. <span className="text-accent">Tap to answer.</span>
+          🎙 {talk.last ? 'Harv has your answer.' : 'Harv wants to talk.'}{' '}
+          <span className="text-accent">{talk.last ? 'Tap to hear it.' : 'Tap to answer.'}</span>
         </button>
       )}
 

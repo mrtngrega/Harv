@@ -18,7 +18,7 @@ import type {
 import { terminalId } from '@harv/shared';
 import { createStore } from './createStore.ts';
 import { addAttachment, dropDrafts, replaceDrafts, setDraftText } from './drafts.ts';
-import { isPhone } from './phone.ts';
+import { isPhone, phoneSpot } from './phone.ts';
 import { onServerMessage, sendMessage } from './socket.ts';
 
 export type { LineKind };
@@ -178,9 +178,22 @@ const onlyTabs = <T>(map: Record<string, T>, tabs: Tab[]) =>
  * Chrome reopening its tabs. After a reconnect the dashboard's own layout wins.
  */
 function hydrate(chats: ChatSnapshot[], saved?: UiState) {
-  // The phone opens on a chat, not on whatever the computer's window last showed (Settings, say).
+  // The phone opens on the chat it showed before iOS reloaded it, else on a chat, never on whatever
+  // the computer's window last showed (Settings, say).
+  const spot = saved && isPhone ? phoneSpot() : null;
   const ui =
-    saved && isPhone ? { ...saved, settingsOpen: false, activeId: saved.activeId === SETTINGS_TAB ? null : saved.activeId } : saved;
+    saved && isPhone
+      ? {
+          ...saved,
+          settingsOpen: false,
+          activeId:
+            spot && (chats.some((c) => c.id === spot.activeId) || saved.blanks?.includes(spot.activeId))
+              ? spot.activeId
+              : saved.activeId === SETTINGS_TAB
+                ? null
+                : saved.activeId,
+        }
+      : saved;
   store.set((s) => {
     const saved = chats.map(fromSnapshot);
     // The untouched starter tab gives way to saved chats; blank tabs the user opened stay.

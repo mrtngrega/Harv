@@ -54,6 +54,21 @@ export function speakable(text: string): string {
     .trim();
 }
 
+/** Harv's reply to the last message in a chat (its text lines after the user's last one), to read out. */
+export function lastReply(lines: readonly { kind: string; text: string }[]): string {
+  let start = 0;
+  for (let i = lines.length - 1; i >= 0; i--)
+    if (lines[i]!.kind === 'you') {
+      start = i + 1;
+      break;
+    }
+  return lines
+    .slice(start)
+    .filter((l) => l.kind === 'harv' && l.text.trim())
+    .map((l) => l.text.trim())
+    .join(' ');
+}
+
 /** Whole sentences at the start of `text` (to speak now) and the rest (still coming). */
 export function splitSentences(text: string): { done: string; rest: string } {
   const m = /^[\s\S]*[.!?…:](?=\s)/.exec(text);
