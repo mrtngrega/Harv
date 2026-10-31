@@ -94,5 +94,7 @@ const OWN_WORDS = new Set(['btw', 'fresh', 'report', 'clear', 'plan', 'rewind', 
 export function asksForSkill(text: string, known: (name: string) => boolean, overrideWord: (word: string) => boolean): boolean {
   const name = commandName(text);
   if (name) return !OWN_WORDS.has(name.toLowerCase()) && !overrideWord(name) && !known(name);
-  return /\b(skills?|plugins?)\b/i.test(text);
+  // Words in paths don't count (~/.claude/plugins/…, a SKILL.md being read).
+  const words = text.split(/\s+/).filter((w) => !/[\\/]/.test(w) && !/\.\w{1,5}$/.test(w));
+  return words.some((w) => /^\W*(skills?|plugins?)\b/i.test(w));
 }

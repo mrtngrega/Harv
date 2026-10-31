@@ -29,5 +29,7 @@ describe('asksForSkill', () => {
     expect(asksForSkill('/opus explain this', known, override)).toBe(false);
     expect(asksForSkill('/c/Users/me/file.txt', known, override)).toBe(false);
     expect(asksForSkill('how good is my GPU?', known, override)).toBe(false);
+    expect(asksForSkill('read ~/.claude/plugins/x/README.md and tell me its heading', known, override)).toBe(false);
+    expect(asksForSkill('open SKILL.md in the docx folder', known, override)).toBe(false);
   });
 });
