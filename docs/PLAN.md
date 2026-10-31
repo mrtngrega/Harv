@@ -610,3 +610,39 @@ If none works, stop and tell the user before building.
   3. **No internet:** the last sun times are kept in `lights-log.json` (`sun`, with the place) and used when the weather is 30+ min old or missing at start (`sunOnly`: moved on by whole days to today, a minute or two of drift a day). Without a sunlight reading only the sun decides: on from 30 min before sunset, its own light off at sunrise; the problem line says "going by sunset and sunrise only".
   - **Tested:** unit cases for all three (`autoLights.test.ts`); live on the PC: the probe saw a display request held by a test process (0x2) and the server's status showed "watching"; `/api/lights/leaving` answered `{"off":0}` for a strip last switched outside Harv (left alone, right); a fake suspend message sent to the app's hidden window went through the app to Harv.
 - **Found on the way:** a restart left Harv down once (19:49: `npm run harv` quit at once, "'concurrently' is not recognized", though it was installed; the next start worked). `scripts/harv.ps1` now tries a second time when a start quits at once, and writes "start attempt N quit at once" / "didn't start" to harv-script.log. Not seen again; `harv.sh` has no retry yet.
+
+## 6ab. Skills from the outside (reviewed 2026-10-31, planned, not built)
+
+The user's report listed 15 links to skills and tools. Each was checked (README, license, stars, last push) against Harv's rules: subscription only, no paid services, never touch logins, little overhead on a Pro plan. **The user's wish: they won't call these themselves; Harv uses them on its own when a task needs one.**
+
+**Verdicts**
+
+| Link | What it is | Verdict |
+|---|---|---|
+| mattpocock/skills (MIT, official plugin store) | ~27 on-demand skills: grill-me, diagnosing-bugs, tdd, prototype, research, handoff, code-review, teach… | **Add** (the plugin), minus the issue-tracker ones |
+| pbakaus/impeccable (Apache-2.0) | Design toolkit: polish, critique, audit, bolder, quieter, typeset, layout, "AI slop" detector | **Add**, telemetry off, no design hook. Still fetches style directions from impeccable.style on a new design |
+| upstash/context7 (MIT) | Up-to-date library docs (CLI + skill, or MCP) | **Add**, free key (Upstash sign-in in the browser, once); never a paid plan. Sends only library name + question |
+| obra/superpowers (MIT) | Full dev methodology, SessionStart hook, mandatory workflows, many subagents | **Only 2 skills** copied as plain skills (no hook): systematic-debugging, verification-before-completion |
+| forrestchang/andrej-karpathy-skills (the linked multica-ai copy has no license) | 4 coding rules | **Into `harv/dev-rules.md`**: change only what's needed, simplest code that works. Not "ask when unsure" (the user dislikes needless questions) |
+| vercel-labs find-skills | Searches skills.sh, installs with `npx skills add -g -y` (no review) | **Skip**; Harv searches skills.sh itself and reviews before installing |
+| Jakeschincariol/trader-skill (MIT, 999★) | 11 investing skills, free SEC/House/RSS/Yahoo data, Alpaca broker | **Maybe later**: read-only ones only, never the broker (Harv's cards are off) |
+| HKUDS/CLI-Anything (Apache-2.0) | Generates CLIs for desktop apps from source | **Later**, with desktop control (§6t item 1) |
+| nidhinjs/prompt-master (MIT) | One big prompt that writes prompts for other AI tools | Skip (low value; maybe for `generate_image` prompts) |
+| ranxianglei/billion-context | Proxy between Claude Code and Anthropic that forwards the login token | **Never**: intermediates subscription credentials (Anthropic's terms, §1) |
+| thedotmack/claude-mem | 6 hooks on every prompt/tool, Bun worker, default hosted paid "CMEM Pro" + cloud sync | **Skip**: duplicates Harv's memory, paid/cloud by default |
+| 666ghj/MiroFish (AGPL) | Standalone multi-agent prediction app, needs a paid LLM API + Zep Cloud | **Skip**: can't run on the subscription |
+| Panniantong/Agent-Reach | Reads X/Reddit/YouTube by copying Chrome logins into its own browser | **Skip**: touches logins, ToS/ban risk. Maybe a small `yt-dlp` subtitles tool later |
+| rebelytics/one-skill-to-rule-them-all | Watches every session, proposes skill changes | Skip: Harv already learns rules into persona/memory |
+| ecc.tools | Big bundle (skills, agents, hooks, memory) + paid GitHub app | Skip: duplicates Harv |
+
+The morning "start the 5-hour window early" note: the user sets it up as a scheduled task on claude.ai (runs in Anthropic's cloud, limits are shared with Claude Code), not in Harv.
+
+**How it works together (the plan)**
+
+1. **Install once, user scope** (`~/.claude`, so the dev sessions, project chats and normal chats all see them; the notebook gets the same through the user's Claude Code setup on that machine, installed there too): the mattpocock plugin, the impeccable plugin, context7 (`ctx7` CLI + its skill), the two superpowers skills as plain folders in `~/.claude/skills`. Check every plugin for hooks before enabling it: **no hooks** (they'd run in every Harv chat).
+2. **Automatic use = listed + described.** Claude picks a skill by itself when its description matches the task; it only has to be *listed*. Project chats list every skill already. Normal chats list only `CHAT_SKILLS`: add the ones that make sense outside a project (context7, research, grill-me, teach, handoff, critique/audit for a page the user shows). Coding skills stay project-only.
+3. **Trim what never fits** (a skip list applied to project chats too, built from `supportedCommands()`): the issue-tracker skills (triage, to-spec, to-tickets, implement-spec, wayfinder, setup-matt-pocock-skills, pr) and duplicates of Harv's own (handoff vs /fresh, code-review vs Claude Code's). Each listed skill costs ~50–150 tokens of descriptions per turn (cached, cheap).
+4. **Tell Harv**: one line in `harv/persona.md` / `dev-rules.md`: use a skill without being asked when it fits; say in a few words which one ("using diagnosing-bugs"). The status line already shows the Skill tool call.
+5. **New skills later**: when a task would clearly benefit, Harv may search skills.sh / GitHub, review the skill (code, hooks, network, costs) and ask the user before installing (installing is the user's call, like any install).
+
+Cost check after building: a new normal chat was 18.9k tokens (§6u); measure again, aim for +2k at most.
