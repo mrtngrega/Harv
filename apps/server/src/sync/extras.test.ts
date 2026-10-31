@@ -1,5 +1,16 @@
-import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
@@ -69,8 +80,11 @@ function device(name: string, projects: string[] = ['car_radio']) {
         workspace: { dir: workspace, accept: () => true },
         home: {
           dir: home,
-          accept: (rel) => /^background\.(jpg|png)$/.test(rel),
-          beforeWrite: () => ['jpg', 'png'].forEach((e) => rmSync(join(home, `background.${e}`), { force: true })),
+          // As in index.ts: the photo, and the Tapo login (docs/PLAN.md §6z), which mustn't replace the photo.
+          accept: (rel) => /^background\.(jpg|png)$/.test(rel) || rel === 'devices.json',
+          beforeWrite: (rel) =>
+            /^background\./.test(rel) && ['jpg', 'png'].forEach((e) => rmSync(join(home, `background.${e}`), { force: true })),
+          secret: (rel) => rel === 'devices.json',
           shallow: true,
         },
       },
@@ -228,6 +242,24 @@ describe('sync of everything else', { timeout: 60_000 }, () => {
     expect(readFileSync(join(nb.home, 'background.png'), 'utf8')).toBe('forest photo');
     expect(nb.got.written).toContain('home/background.png');
     expect(existsSync(join(nb.home, 'settings.json'))).toBe(false);
+  });
+
+  it('brings the Tapo login over owner-only, and leaves the photo alone (docs/PLAN.md §6z)', async () => {
+    const [pc, nb] = await pair();
+    write(join(pc.home, 'background.png'), 'forest photo');
+    await pc.sync();
+    await nb.sync();
+    write(join(pc.home, 'devices.json'), '{"tapo":{"email":"me@example.com","password":"pw"},"lights":["EC:75:0C:EA:F1:9F"]}');
+    await pc.sync();
+    await nb.sync();
+    expect(JSON.parse(readFileSync(join(nb.home, 'devices.json'), 'utf8')).lights).toEqual(['EC:75:0C:EA:F1:9F']);
+    expect(readFileSync(join(nb.home, 'background.png'), 'utf8')).toBe('forest photo');
+    if (process.platform !== 'win32') expect(statSync(join(nb.home, 'devices.json')).mode & 0o777).toBe(0o600);
+    // Only sealed in the shared repo: the password isn't readable there.
+    // git grep exits 1 when nothing matches, which is the point here.
+    const grep = spawnSync('git', ['-C', join(pc.home, 'sync'), 'grep', '-l', 'me@example.com', 'HEAD'], { encoding: 'utf8' });
+    expect(grep.status).toBe(1);
+    expect(grep.stdout).toBe('');
   });
 
   it('shows the newer tabs and drafts on the other device, without echoing them back', async () => {

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -87,6 +87,8 @@ export interface SyncFolder {
   beforeWrite?: (rel: string) => void;
   /** Only the folder's own files, not its subfolders. */
   shallow?: boolean;
+  /** Files only their owner may read (a login): written owner-only on the other device too. */
+  secret?: (rel: string) => boolean;
 }
 
 /** More of this device that syncs (docs/PLAN.md §6m "Everything Harv needs"); left out in older tests. */
@@ -1035,7 +1037,9 @@ export class SyncEngine {
     if (live && hashBytes(data) !== e.hash) return;
     folder.beforeWrite?.(e.path);
     mkdirSync(join(path, '..'), { recursive: true });
-    writeFileSync(path, data);
+    const secret = folder.secret?.(e.path) === true;
+    writeFileSync(path, data, secret ? { mode: 0o600 } : {});
+    if (secret) chmodSync(path, 0o600);
     remember();
     this.hooks.fileWritten?.(e.root, e.path);
   }

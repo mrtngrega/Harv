@@ -262,6 +262,7 @@ const sync = new SyncEngine(
         dir: HARV_HOME,
         accept: (rel) => BACKGROUND.test(rel) || rel === 'devices.json',
         beforeWrite: (rel) => BACKGROUND.test(rel) && removeBackground(),
+        secret: (rel) => rel === 'devices.json',
         shallow: true,
       },
     },
