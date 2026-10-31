@@ -595,3 +595,11 @@ Why Harv couldn't answer "where did we end in car_radio" (§6q item 3): not a mi
 4. **A skill asked for by name** in a normal chat (`/simplify`, "use the claude-api skill", a word "skill(s)"/"plugin(s)" outside paths) makes that chat load every skill from then on (`asksForSkill`, `ChatManager.allSkills`, the session resumed, a notice says so). Not kept over a Harv restart.
 Tested in the app: a plugin README read, `settings.json` refused with a reason, the claude-api skill run after the notice.
 Kept on purpose: the credential blocks, system folders, Harv's own data, the refused billed commands.
+
+**Later the same day, the user: "I want Harv to have the same access to my computer as you, and all about him, all the logs, history and everything":**
+- Every chat gets an "About yourself" section (`agent/harvSelf.ts`): the repo (PLAN, CLAUDE.md, persona), `~/.harv`'s layout (harv.db, logs/harv.log, harv.previous.log, harv-script.log, app.log, settings, ui.json, memory, backups, terminals, sync, workspace) and that it reads all of it freely but changes it only through its tools and the user's Settings.
+- `harv_db`: read-only SQL on harv.db (no query → tables, columns, row counts; SELECT/WITH/PRAGMA table_info only, on a read-only connection; 200 rows, 12k characters). Green, fine in plan mode.
+- `~/.claude` is the user's like any of their files: read and changed (backed up, Undo). Never: its login, its session history (read only), and a write that would move Claude Code to per-token billing (`BILLING_SETTING` on the Edit/Write text or the command: ANTHROPIC_API_KEY/AUTH_TOKEN/BASE_URL, apiKeyHelper, CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY).
+- Harv's own keys stay unread: sync.key, vapid.json, phones.json, the browser and Gemini profiles (also for searches over ~/.harv).
+- Tested in the app: Harv counted its chats and model picks from harv.db, read the last line of harv-script.log, read the user's ~/.claude/settings.json.
+- Still different from a Claude Code session, on purpose: Harv never changes its own data files or safety settings directly (the user's Settings switches), the credential and system blocks stay, and the billed commands stay refused.
