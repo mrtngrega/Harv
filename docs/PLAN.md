@@ -560,7 +560,7 @@ The user's report note: "deep thorough test of the whole app, everything we buil
 - **Rule for dev sessions:** keep the notebook awake for 5 h at the start (`kde-inhibit`, memory `feedback-notebook-awake`).
 
 
-## 6z. The LED strips (M12, planned 2026-10-29, not built)
+## 6z. The LED strips (M12, planned 2026-10-29, built 2026-10-31)
 
 The user's report note: "i have an led strip connected to my phone via wifi, can you connect it to harv?"
 
@@ -586,20 +586,10 @@ If none works, stop and tell the user before building.
 
 **Sources:** python-kasa issue #1590, PRs #1592 and #1706, CHANGELOG 0.12.0; home-assistant-tapo-p100 #968.
 
-## 6aa. Fewer walls for Harv (2026-10-31, the user's wish)
-
-Why Harv couldn't answer "where did we end in car_radio" (§6q item 3): not a missing permission but its rules steered it to old chats. The user asked for every rule like that; all four proposals built the same day:
-1. **`~/.claude` readable:** the user's global CLAUDE.md, skills, plugins, agents (the whole folder was blocked as "the Claude login"). Still blocked: `.credentials.json` and `settings*.json` (they can carry keys and tokens), any `..` climbing out of a readable part, and changing anything there except the project memory notes (`isClaudeSetup`). Found on the way: the `sensitive()` helper only filled in `END` at the end of a pattern, so `([\\/]|END)` never matched a path ending at the folder (a search rooted at `~/.ssh` passed); fixed.
-2. **Real sources before old chats:** the normal chats' prompt says to look where the answer lives (project_status, files, git, memory) before list_chats/read_chat; persona rule 11 names project_status.
-3. **Spoken turns** (Siri, voice mode) look things up as fully as typed ones; only the reply stays short (`SPOKEN_NOTE`).
-4. **A skill asked for by name** in a normal chat (`/simplify`, "use the claude-api skill", a word "skill(s)"/"plugin(s)" outside paths) makes that chat load every skill from then on (`asksForSkill`, `ChatManager.allSkills`, the session resumed, a notice says so). Not kept over a Harv restart.
-Tested in the app: a plugin README read, `settings.json` refused with a reason, the claude-api skill run after the notice.
-Kept on purpose: the credential blocks, system folders, Harv's own data, the refused billed commands.
-
-**Later the same day, the user: "I want Harv to have the same access to my computer as you, and all about him, all the logs, history and everything":**
-- Every chat gets an "About yourself" section (`agent/harvSelf.ts`): the repo (PLAN, CLAUDE.md, persona), `~/.harv`'s layout (harv.db, logs/harv.log, harv.previous.log, harv-script.log, app.log, settings, ui.json, memory, backups, terminals, sync, workspace) and that it reads all of it freely but changes it only through its tools and the user's Settings.
-- `harv_db`: read-only SQL on harv.db (no query → tables, columns, row counts; SELECT/WITH/PRAGMA table_info only, on a read-only connection; 200 rows, 12k characters). Green, fine in plan mode.
-- `~/.claude` is the user's like any of their files: read and changed (backed up, Undo). Never: its login, its session history (read only), and a write that would move Claude Code to per-token billing (`BILLING_SETTING` on the Edit/Write text or the command: ANTHROPIC_API_KEY/AUTH_TOKEN/BASE_URL, apiKeyHelper, CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY).
-- Harv's own keys stay unread: sync.key, vapid.json, phones.json, the browser and Gemini profiles (also for searches over ~/.harv).
-- Tested in the app: Harv counted its chats and model picks from harv.db, read the last line of harv-script.log, read the user's ~/.claude/settings.json.
-- Still different from a Claude Code session, on purpose: Harv never changes its own data files or safety settings directly (the user's Settings switches), the credential and system blocks stay, and the billed commands stay refused.
+**As built (2026-10-31):**
+- **Which lights:** both strips are the user's, but Harv controls only **L.E.D** (192.168.1.42, `EC:75:0C:EA:F1:9F`), the user's pick. The other one (.41, `EC:75:0C:EA:F0:3C`) refuses the user's Tapo login (another account?) and counts every failed login toward a lockout ("14 attempts left"), so Harv never logs in to it: finding lights is a broadcast without a login (every Tapo device answers with MAC and model), and only lights switched on in Settings › Devices are ever logged in to; one that refuses is marked and never asked again until the login changes.
+- **The library:** python-kasa from PR #1592 (ZeliardM's `feature/tpap`) pinned to commit 844ec73 (`KASA_SOURCE` in `devices/lights.ts`), reviewed before install: only connects to the device's own address, no other hosts, no subprocess/exec/file writes, the password only feeds the SPAKE2+ handshake; adds the `ecdsa` package. Claude Code's auto-mode classifier refuses installing it (code from an unreleased fork), so the user ran the first install; Harv installs it itself from Settings › Devices › Install (`POST /api/devices/setup`, the user's click) into `~/.harv/kasa/venv`, once per computer. Switch to a python-kasa release once one has TPAP.
+- **Server** (`apps/server/src/devices/`): `kasa_helper.py` (JSON lines over stdin/stdout, the login as the first line, stdin read on a thread for Windows), `lights.ts` (`LightsService`: the helper process, `broadcastTargets` = the home networks' broadcast addresses without Tailscale/Hamachi/link-local, since 255.255.255.255 left through the wrong adapter and found nothing; state read every 30 s while a dashboard is open; `allowed` = chosen and not refused), `store.ts` (`~/.harv/devices.json`: the login, chosen lights, refused ones; blocked for every chat tool and in `secrets.ts`), `colors.ts` (names, hex, kelvin), `tools.ts` (`lights_list`, `lights_set`, green in the gate). `devices.json` syncs with the background photo's folder, sealed, written owner-only on the other device (`SyncFolder.secret`); the photo's `beforeWrite` now runs only for the photo (it would have deleted the photo for any arriving file).
+- **Dashboard:** a row per light in the narrow panel (name, brightness, a round switch in the light's colour), a card in the expanded panel (switch, brightness, colour dots, effects), Settings › Devices (Tapo login, Install, the found lights with a switch each). `lib/lights.ts`, `components/stats/LightsCard.tsx`.
+- **Tested:** in the PC app, Install, Find lights and choosing L.E.D; a chat read it ("on, 100%, white 9000K") and made it teal at 30%; the card's Warm dot; put back to how it was. Notebook: login arrived by sync (owner-only), helper installed through its Harv, read and wrote L.E.D (`node scripts/ui-check/lights-check.mjs --touch`).
+- **Later (the user's picks):** the extras (amber flash on warnings, a pulse when a long reply ends, colour from CPU/GPU temperature while gaming).
