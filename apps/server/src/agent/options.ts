@@ -93,8 +93,16 @@ function otherChats(chat: ChatContext): string {
  * own dev skills (config, keybindings, code review, init…) and ones that can't work in Harv (the
  * browsers, computer use, /loop, /schedule) only cost context there; project chats keep them all.
  * Each name twice: as Claude Code lists it and as the claude.ai plugin names it.
+ * Since 2026-10-31 also the reviewed outside skills that fit outside a project (docs/PLAN.md §6ab,
+ * copied into ~/.claude/skills): Harv picks them by itself when a task matches.
  */
 export const CHAT_SKILLS = [
+  'find-docs',
+  'research',
+  'grilling',
+  'teach',
+  'impeccable',
+  'systematic-debugging',
   'docx',
   'xlsx',
   'pptx',

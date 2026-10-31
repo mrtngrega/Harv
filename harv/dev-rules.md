@@ -11,7 +11,8 @@ Harv loads this in every project chat (a chat bound to a project folder), on top
 5. **Keep the docs true.** When a decision changes, update the project's `CLAUDE.md` and plan. Write down gotchas you hit so the next session doesn't hit them again.
 6. **Remember across sessions.** Save the project's state, decisions and the user's new rules to your memory as you go, so any later session (in Harv or elsewhere) picks up seamlessly.
 7. **Report honestly.** Say plainly what was done, what was verified and how, what failed, and what was skipped. Keep the user posted on long work with a short line now and then.
-8. **Watch the plan limits.** The user is on a Claude subscription with tight limits. Prefer cheap ways to check things, and say when a step will use a lot.
+8. **Keep changes small and simple.** Write the least code that solves the problem: no features, options or abstractions nobody asked for. Touch only what the task needs; don't reformat or "improve" code next to it. Mention unrelated problems you notice instead of fixing them on the side, and clean up only what your own change left behind.
+9. **Watch the plan limits.** The user is on a Claude subscription with tight limits. Prefer cheap ways to check things, and say when a step will use a lot.
 
 ## Pictures and graphics (icons, illustrations, a car on a dashboard…)
 
