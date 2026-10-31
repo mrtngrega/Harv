@@ -534,11 +534,13 @@ export class ChatManager {
     }
     // A skill the normal chat doesn't list (code-review, simplify, frontend-design…), asked for by name:
     // the chat loads every skill from now on, like a project chat. Same conversation, resumed.
+    // Read without a leading /opus, /low… ("/haiku use the X skill" isn't a command called haiku).
+    const asked = parseOverride(message).text.trim();
     if (
       !this.allSkills.has(tabId) &&
       !this.store.projectOf(tabId) &&
       asksForSkill(
-        message,
+        asked,
         (n) => this.isCommand(tabId, n),
         (w) => !!parseOverride(`/${w}`).model || !!parseOverride(`/${w}`).effort,
       )
@@ -547,9 +549,9 @@ export class ChatManager {
       this.dropSession(tabId);
       this.commands.delete(tabId);
       this.emit({ type: 'chat.notice', tabId, message: 'This chat now has all your skills (the ones project chats have).' });
-      const named = commandName(message);
+      const named = commandName(asked);
       if (named && !files.length && !hiddenReason(named)) {
-        await this.runCommand(tabId, named, message.trim());
+        await this.runCommand(tabId, named, asked);
         return;
       }
     }
