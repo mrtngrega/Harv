@@ -529,6 +529,8 @@ describe('credentials stay blocked (the user’s wish)', () => {
     expect(tier('Read', { file_path: '~/.harv/settings.json' })).toBe('green');
     expect(tier('Read', { file_path: '~/.harv/vapid.json' })).toBe('blocked');
     expect(tier('Read', { file_path: '~/.harv/phones.json' })).toBe('blocked');
+    expect(tier('Read', { file_path: '~/.harv/devices.json' })).toBe('blocked');
+    expect(cmd('cat ~/.harv/devices.json')).toBe('blocked');
     expect(tier('Read', { file_path: '~/.harv/sync.key' })).toBe('blocked');
     expect(tier('mcp__harv__harv_db', { sql: 'select 1' })).toBe('green');
   });

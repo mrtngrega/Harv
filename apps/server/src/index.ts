@@ -37,6 +37,7 @@ import { keepBackup, listBackups, pruneBackups } from './safety/backup.ts';
 import { applySharedUi, loadUi, resetUi, saveUi, sharedUi } from './ui.ts';
 import { BrowserHost } from './tools/browserHost.ts';
 import { GeminiImages, GeminiProblem } from './tools/gemini.ts';
+import { DeviceStore } from './devices/store.ts';
 import { HarvBrowser } from './tools/harvBrowser.ts';
 import { cleanPath, listFolder, openWithDefault, places, previewType, suggestPaths } from './tools/files.ts';
 import {
@@ -298,6 +299,7 @@ onSettingsChange((before, after) => {
 // Harv's terminal_run / terminal_read: the chat's own terminal, shown in the dashboard while Harv uses it.
 // Harv's generate_image: pictures from the Gemini website on Harv's own Chrome profile (docs/PLAN.md §6w).
 const gemini = new GeminiImages();
+const devices = new DeviceStore();
 chats.images = {
   async generate(prompt, images) {
     try {
@@ -526,6 +528,20 @@ app.post('/api/backups/keep', async (req, reply) => {
     return reply.code(400).send({ error: 'No such backup' });
   }
   return { ok: true };
+});
+// Settings › Devices: the Tapo account login for the user's lights (docs/PLAN.md §6z). The password goes in, never out.
+app.get('/api/devices', async () => devices.summary());
+app.post('/api/devices/tapo', async (req, reply) => {
+  const { email, password } = (req.body ?? {}) as { email?: unknown; password?: unknown };
+  if (email === null) {
+    devices.setTapo(null);
+    return devices.summary();
+  }
+  if (typeof email !== 'string' || !/^\S+@\S+\.\S+$/.test(email.trim()) || typeof password !== 'string' || !password) {
+    return reply.code(400).send({ error: 'Type the email and password of your Tapo account.' });
+  }
+  devices.setTapo({ email, password });
+  return devices.summary();
 });
 // Settings › This computer › Pictures: Gemini in a window on Harv's profile, to sign in once.
 app.post('/api/gemini/signin', async (_req, reply) => {

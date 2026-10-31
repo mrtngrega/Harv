@@ -106,7 +106,7 @@ const SENSITIVE_PATHS: RegExp[] = [
   // Climbing out of a folder to reach it anyway (`~/.claude/projects/x/../../.credentials.json`).
   /[\\/]\.claude[\\/].*\.\.([\\/]|$)/i,
   // Harv's own keys: web push (vapid.json), paired phones' hashed tokens (phones.json); sync.key is a key file.
-  /[\\/]\.harv[\\/](vapid|phones)\.json/i,
+  /[\\/]\.harv[\\/](vapid|phones|devices)\.json/i,
   /credential/i, // Windows Credentials, .git-credentials, …credentials.json
   sensitive(String.raw`^START\.(ssh|aws|azure|kube|gnupg|gcloud)([\\/]|END)`),
   sensitive(String.raw`^START\.env(?!\.(example|sample|template)\b)(\.[\w.-]+)?END`),

@@ -906,6 +906,89 @@ function Pictures() {
   );
 }
 
+/** Settings › Devices: the Tapo account login for the user's lights (docs/PLAN.md §6z). The password only goes to the server. */
+function TapoLogin() {
+  const [saved, setSaved] = useState<string | null | undefined>(undefined);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [status, setStatus] = useState<string | null>(null);
+  useEffect(() => {
+    fetch('/api/devices')
+      .then((r) => r.json() as Promise<{ tapoEmail: string | null }>)
+      .then((d) => setSaved(d.tapoEmail))
+      .catch(() => setSaved(null));
+  }, []);
+  const send = async (body: { email: string | null; password?: string }) => {
+    setStatus('Saving…');
+    try {
+      const res = await fetch('/api/devices/tapo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json()) as { tapoEmail?: string | null; error?: string };
+      if (!res.ok) return setStatus(data.error ?? 'Couldn’t save it.');
+      setSaved(data.tapoEmail ?? null);
+      setPassword('');
+      setStatus(body.email ? 'Saved.' : 'Removed.');
+    } catch {
+      setStatus('Couldn’t reach the Harv server.');
+    }
+  };
+  return (
+    <Sub title="Tapo lights">
+      <Note>
+        The login of your Tapo app account: Harv controls your light strip on the home Wi-Fi with it (no cloud). It stays in a file on this
+        computer that Harv’s chats can never read.
+      </Note>
+      {saved && (
+        <div className="flex items-center gap-3 text-xs">
+          <span className="text-muted">Signed in as</span>
+          <span className="min-w-0 truncate text-ink">{saved}</span>
+          <button type="button" className={BUTTON} onClick={() => void send({ email: null })}>
+            Remove
+          </button>
+        </div>
+      )}
+      <form
+        className="flex flex-col gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void send({ email, password });
+        }}
+      >
+        <label className={ROW}>
+          <span className={LABEL}>Email</span>
+          <input
+            className={INPUT}
+            type="email"
+            autoComplete="off"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder={saved ?? 'you@example.com'}
+          />
+        </label>
+        <label className={ROW}>
+          <span className={LABEL}>Password</span>
+          <input
+            className={INPUT}
+            type="password"
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </label>
+        <div className="flex items-center gap-3">
+          <button type="submit" className={BUTTON} disabled={!email.trim() || !password}>
+            {saved ? 'Change login' : 'Save login'}
+          </button>
+          {status && <span className="text-xs text-muted">{status}</span>}
+        </div>
+      </form>
+    </Sub>
+  );
+}
+
 /** The photo: preview, choose, remove. */
 function PhotoPicker() {
   const { version } = useBackground();
@@ -1362,6 +1445,12 @@ export function SettingsView() {
         <Watchdog />
         {inApp && <AppSection />}
       </Group>
+
+      {!isPhone && (
+        <Group title="Devices" hint="Smart-home devices Harv controls.">
+          <TapoLogin />
+        </Group>
+      )}
 
       <Group title="Sync">
         <Sync />

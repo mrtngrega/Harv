@@ -33,6 +33,7 @@ function secretPaths(): string[] {
     h('.harv', 'browser-data', '*'),
     h('.harv', 'vapid.json'),
     h('.harv', 'phones.json'),
+    h('.harv', 'devices.json'),
   ];
   if (!IS_WINDOWS) {
     const browsers = ['google-chrome', 'chromium', 'BraveSoftware/Brave-Browser', 'microsoft-edge'].flatMap((b) =>
