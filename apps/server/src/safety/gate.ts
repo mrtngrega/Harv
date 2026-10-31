@@ -30,6 +30,7 @@ const PLAN_SAFE_HARV = [
   'list_chats',
   'read_chat',
   'list_projects',
+  'project_status',
   'list_scheduled',
   'terminal_read',
   'browser_open',

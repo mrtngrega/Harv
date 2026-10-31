@@ -76,6 +76,7 @@ export const HARV_TOOLS = [
   'mcp__harv__read_chat',
   'mcp__harv__hand_off',
   'mcp__harv__list_projects',
+  'mcp__harv__project_status',
   'mcp__harv__start_project',
   'mcp__harv__open_project',
   'mcp__harv__schedule_task',

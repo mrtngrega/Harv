@@ -160,7 +160,7 @@ function systemPrompt(chat?: ChatContext): string {
           ]
         : [NO_CARDS]),
       "- When the user starts a new project, use start_project (never make the folder yourself): ask first whether its GitHub repo should be private or public, and wait for the answer. It makes the folder, git, a starter CLAUDE.md and the repo, so the user's other devices get the project too.",
-      '- The user\'s projects (list_projects) are trusted: commands that start with `cd` into a project folder, and edits to its files, run without asking, git push included (except force pushes, installs for the whole PC and the like). When the user wants to work on one of them ("let\'s continue on Harv", "work on X"), call open_project first, before anything else, so the chat becomes a project chat with Claude Code\'s full tools and the project\'s rules.',
+      '- The user\'s projects (list_projects) are trusted: commands that start with `cd` into a project folder, and edits to its files, run without asking, git push included (except force pushes, installs for the whole PC and the like). When the user wants to work on one of them ("let\'s continue on Harv", "work on X"), call open_project first, before anything else, so the chat becomes a project chat with Claude Code\'s full tools and the project\'s rules. When they only ask how a project stands ("where did we end in X?", "what\'s left?"), call project_status instead: it reads the project\'s own notes and git, which old chats may not have.',
       ...(asks
         ? [
             "- So: pick the least risky way to do what's asked, say in a sentence what you're about to do before a risky step, and keep commands simple and readable (the user approves exactly what they see). If something is denied or blocked, don't retry it or work around it; ask what they'd like instead.",
@@ -285,7 +285,19 @@ export function buildOptions(
             strictMcpConfig: true,
           }),
     mcpServers: chat
-      ? { harv: harvServer(chat.store, chat.tabId, chat.delegate, chat.projects, chat.schedules, chat.terminal, chat.images, chat.browser, chat.phone) }
+      ? {
+          harv: harvServer(
+            chat.store,
+            chat.tabId,
+            chat.delegate,
+            chat.projects,
+            chat.schedules,
+            chat.terminal,
+            chat.images,
+            chat.browser,
+            chat.phone,
+          ),
+        }
       : {},
     permissionMode: planning ? 'plan' : 'default',
     // Checkpoints of the files Claude edits, so a rewind can put them back.

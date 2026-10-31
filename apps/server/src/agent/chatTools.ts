@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { ChatStore } from '../store/chats.ts';
 import type { ScheduleInput } from '../schedule/schedule.ts';
 import { memoryTools, text } from './memory.ts';
+import { findProject, projectStatus } from './projectStatus.ts';
 
 // Every chat tab is its own Claude session, but they share one history. These
 // tools let Harv look through its other chats (open tabs and past ones) when the
@@ -219,6 +220,24 @@ export function harvServer(
               const list = projects.list();
               return text(list.length ? list.map((p) => `- ${p.name}: ${p.path}`).join('\n') : 'No projects yet.');
             }),
+            tool(
+              'project_status',
+              'Where a project stands, read-only and without switching this chat to it: its Claude Code memory (the state its sessions saved: where they stopped, what\'s next), the start of its CLAUDE.md and plan, and git (recent commits, uncommitted and unpushed work). Use it whenever the user asks about a project\'s progress ("where did we end in X", "what\'s left on X") before searching old chats: work done in Claude Code never shows up in Harv\'s chats.',
+              { name: z.string().min(1).describe("The project's name (see list_projects); a close spelling is fine") },
+              async ({ name }) => {
+                const found = findProject(projects.list(), name);
+                if (!found)
+                  return text(
+                    `No project called "${name}". Known: ${
+                      projects
+                        .list()
+                        .map((p) => p.name)
+                        .join(', ') || 'none'
+                    }.`,
+                  );
+                return text(await projectStatus(found));
+              },
+            ),
             tool(
               'start_project',
               "Start a new project when the user says so (\"we're starting a new project…\"): makes its folder in the user's projects folder, runs git init, writes a starter CLAUDE.md, creates its GitHub repo (so the user's other devices get it too) and turns this chat into a project chat there (from the next message you work as Claude Code in that folder). Before calling it, ALWAYS ask the user whether the GitHub repo should be private or public, and wait for the answer: never guess or pick a default. Fails if the folder exists: then ask the user, or use open_project.",

@@ -146,6 +146,7 @@ describe('reading', () => {
     expect(tier('Read', { file_path: 'C:\\Users\\me\\Documents\\notes.md' })).toBe('green');
     expect(tier('WebSearch', { query: 'weather' })).toBe('green');
     expect(tier('mcp__harv__read_chat', { id: 'x' })).toBe('green');
+    expect(tier('mcp__harv__project_status', { name: 'car_radio' })).toBe('green');
     // A hand-off only starts a turn in another chat, which passes the gate itself.
     expect(tier('mcp__harv__hand_off', { message: 'x' })).toBe('green');
     expect(tier('Read', { file_path: 'C:\\notes\\environment.md' })).toBe('green');
