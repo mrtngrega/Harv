@@ -87,18 +87,26 @@ function Start-Harv {
 
   $log = Join-Path $Logs 'harv.log'
   if (Test-Path $log) { Move-Item $log (Join-Path $Logs 'harv.previous.log') -Force }
-  $proc = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', "npm run harv > `"$log`" 2>&1" -WorkingDirectory $Repo -WindowStyle Hidden -PassThru
-  Set-Content -Path $PidFile -Value $proc.Id
-
-  for ($i = 0; $i -lt 180; $i++) {
-    if ((Test-Url "$Server/api/health") -and (Test-Url $Dashboard)) {
-      if (-not $NoBrowser) { Start-Process $Dashboard }
-      Write-Host 'Harv is running.'
-      return
+  # Twice: a start that quits at once can be a passing hiccup (2026-10-31: npm briefly couldn't find
+  # concurrently right after a restart, and Harv stayed down until started by hand).
+  for ($attempt = 1; $attempt -le 2; $attempt++) {
+    $proc = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', "npm run harv >> `"$log`" 2>&1" -WorkingDirectory $Repo -WindowStyle Hidden -PassThru
+    Set-Content -Path $PidFile -Value $proc.Id
+    for ($i = 0; $i -lt 180; $i++) {
+      if ((Test-Url "$Server/api/health") -and (Test-Url $Dashboard)) {
+        if (-not $NoBrowser) { Start-Process $Dashboard }
+        Write-Host 'Harv is running.'
+        return
+      }
+      if ($proc.HasExited) { break }
+      Start-Sleep -Milliseconds 500
     }
-    if ($proc.HasExited) { break }
-    Start-Sleep -Milliseconds 500
+    if (-not $proc.HasExited) { break }
+    Write-Log "start attempt $attempt quit at once"
+    if (Get-PortPids 4317, 5173) { Stop-Harv }
+    Start-Sleep -Seconds 3
   }
+  Write-Log "didn't start (see harv.log)"
   Write-Host "Harv didn't start. See $log"
   Show-Note "Harv didn't start. The log opens now." 48
   Start-Process notepad.exe $log
