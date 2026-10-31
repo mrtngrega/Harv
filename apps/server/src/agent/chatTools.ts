@@ -5,6 +5,7 @@ import type { ChatStore } from '../store/chats.ts';
 import type { ScheduleInput } from '../schedule/schedule.ts';
 import { memoryTools, text } from './memory.ts';
 import { findProject, projectStatus } from './projectStatus.ts';
+import { queryHarvDb } from './harvSelf.ts';
 
 // Every chat tab is its own Claude session, but they share one history. These
 // tools let Harv look through its other chats (open tabs and past ones) when the
@@ -162,6 +163,12 @@ export function harvServer(
     version: '1.0.0',
     tools: [
       ...memoryTools,
+      tool(
+        'harv_db',
+        "Read Harv's own database (harv.db): every chat and its lines, every model·effort pick and its tokens (routes), every action the safety gate let through (actions), projects, scheduled tasks, sync state. Without sql it lists the tables, their columns and row counts. sql: one read-only query (SELECT / WITH / PRAGMA table_info), at most 200 rows. Use it for questions about your own history and usage.",
+        { sql: z.string().optional().describe('A read-only SQLite query; leave out to see the tables') },
+        async ({ sql }) => text(queryHarvDb(sql)),
+      ),
       tool(
         'list_chats',
         "List your chats with the user (open tabs and past ones), newest first. Pass a query to search titles and messages. Use it when the user refers to another chat or something you talked about before that isn't in this conversation.",

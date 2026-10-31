@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { selfContext } from './harvSelf.ts';
 import type { HookCallbackMatcher, HookEvent, Options } from '@anthropic-ai/claude-agent-sdk';
 import { HARV_VERSION, type EffortLevel, type Project } from '@harv/shared';
 import { IS_WINDOWS, OS_NAME } from '../platform.ts';
@@ -76,7 +77,7 @@ function otherChats(chat: ChatContext): string {
     [
       "Each chat tab is a separate conversation, but they're all you: the same rules, the same memory, one shared history. If another chat saves or forgets a memory, you'll get a note about it with the user's next message.",
       "When the user asks about something outside this conversation, look where the answer actually lives first: a project's state with project_status, files and folders on the computer, git, your memory. Old chats come second: when the user refers to another tab or something you talked about before, use list_chats to find it and read_chat to read it. Don't comb through old chats with no reason to; it uses the user's plan.",
-      "Earlier Claude Code sessions (project chats, and the user's own Claude Code sessions in a terminal) are saved as ~/.claude/projects/<folder>/<session>.jsonl, one JSON line per message, with <folder> the working folder with every non-letter or digit turned into \"-\". When the user asks about an earlier session (theirs in Claude Code or a project chat's), grep those files (they get big), then read the parts you need. They are read-only. The user's Claude Code setup in ~/.claude (their global CLAUDE.md, skills, plugins, agents) is readable too, also read-only; only its login and settings files are off-limits.",
+      "Earlier Claude Code sessions (project chats, and the user's own Claude Code sessions in a terminal) are saved as ~/.claude/projects/<folder>/<session>.jsonl, one JSON line per message, with <folder> the working folder with every non-letter or digit turned into \"-\". When the user asks about an earlier session (theirs in Claude Code or a project chat's), grep those files (they get big), then read the parts you need. They are read-only. The user's Claude Code setup in ~/.claude (their global CLAUDE.md, settings, skills, plugins, agents) is yours to read and change like any of their files (backed up, with Undo); only its login file is off-limits, and nothing may switch it to an API key or per-token billing.",
       "When the user asks another tab (or a new one) to do something, use hand_off with a complete request: the other chat can't see this conversation. By default you wait and get its answer; pass wait: false for long jobs the user wants running on their own. A message that starts with [Handed over from …] came from another of your chats, not straight from the user: do it like a normal request, and your reply goes back to that chat.",
       'Recent chats:',
       recentChatsContext(chat.store, chat.tabId),
@@ -136,6 +137,7 @@ function projectPrompt(chat: ChatContext, project: Project): string {
       "- Harv's own tools: schedule_task / list_scheduled / cancel_scheduled for anything to run later or on a repeat (Claude Code's Cron and ScheduleWakeup tools don't work here). Files you make show as cards, pictures by full path show in the chat, and HTML, SVG and Mermaid open in a live preview pane.",
       `- The user's home folder is ${homedir()}. Today is ${today}.`,
     ].join('\n'),
+    selfContext(),
     '## How the user likes project work done',
     readText(DEV_RULES_PATH),
     '## What Harv knows about the user',
@@ -181,6 +183,7 @@ function systemPrompt(chat?: ChatContext): string {
       `- Your own working files (scripts, builds, drafts, downloads) go in your workspace, ${WORKSPACE}, or the temp folder; never anywhere else under ~/.harv, which holds Harv's database, backups and memory.`,
       `- Today is ${today}.`,
     ].join('\n'),
+    selfContext(),
     '## Your memory',
     memoryContext(),
     ...(chat ? [otherChats(chat)] : []),

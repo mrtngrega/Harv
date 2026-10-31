@@ -77,6 +77,7 @@ export const HARV_TOOLS = [
   'mcp__harv__hand_off',
   'mcp__harv__list_projects',
   'mcp__harv__project_status',
+  'mcp__harv__harv_db',
   'mcp__harv__start_project',
   'mcp__harv__open_project',
   'mcp__harv__schedule_task',
@@ -98,12 +99,14 @@ const sensitive = (body: string) => new RegExp(body.replace(/\^START/g, START).r
 
 /** Files and folders that hold passwords, keys, tokens or login sessions: never read or changed. */
 const SENSITIVE_PATHS: RegExp[] = [
-  // Claude Code's login (.credentials.json, also caught by "credential") and its settings files, which can
-  // carry API keys and tokens (env, apiKeyHelper, MCP servers). The rest of ~/.claude (the user's CLAUDE.md,
-  // skills, plugins, agents, commands) is readable; only Claude Code itself changes it (isClaudeSetup).
-  sensitive(String.raw`[\\/]\.claude[\\/](\.credentials\.json|settings(\.local)?\.json)END`),
-  // Climbing back out of a readable part (`~/.claude/projects/x/../../settings.json`).
+  // Claude Code's login (.credentials.json, also caught by "credential"). The rest of ~/.claude is the
+  // user's Claude Code setup, open to Harv like to Claude Code itself (the user's wish, 2026-10-31):
+  // see isClaudeSetup and BILLING_SETTING for what changing it may not do.
+  sensitive(String.raw`[\\/]\.claude[\\/]\.credentials\.jsonEND`),
+  // Climbing out of a folder to reach it anyway (`~/.claude/projects/x/../../.credentials.json`).
   /[\\/]\.claude[\\/].*\.\.([\\/]|$)/i,
+  // Harv's own keys: web push (vapid.json), paired phones' hashed tokens (phones.json); sync.key is a key file.
+  /[\\/]\.harv[\\/](vapid|phones)\.json/i,
   /credential/i, // Windows Credentials, .git-credentials, …credentials.json
   sensitive(String.raw`^START\.(ssh|aws|azure|kube|gnupg|gcloud)([\\/]|END)`),
   sensitive(String.raw`^START\.env(?!\.(example|sample|template)\b)(\.[\w.-]+)?END`),
@@ -187,13 +190,22 @@ export function isClaudeMemory(p: string): boolean {
 }
 
 /**
- * Claude Code's own setup (~/.claude: the user's CLAUDE.md, skills, plugins, settings): readable
- * (since 2026-10-31, the user's wish), changed only by Claude Code and the user, except the
- * project memory notes.
+ * Claude Code's own setup (~/.claude: the user's CLAUDE.md, skills, plugins, settings, agents).
+ * Since 2026-10-31 (the user: "the same access to my computer as you") Harv reads and changes it
+ * like any of the user's files (backed up, Undo), except: the login, the session history, and a
+ * change that would make Claude Code bill per token (BILLING_SETTING).
  */
 export function isClaudeSetup(p: string): boolean {
   const path = fullPath(p);
-  return isInside(path, join(homedir(), '.claude')) && !isClaudeMemory(path);
+  return isInside(path, join(homedir(), '.claude')) && !isClaudeHistory(path);
+}
+
+/** Settings that move Claude Code off the subscription onto per-token billing: never written by Harv. */
+const BILLING_SETTING = /ANTHROPIC_(API_KEY|AUTH_TOKEN|BASE_URL)|apiKeyHelper|CLAUDE_CODE_USE_(BEDROCK|VERTEX|FOUNDRY)/i;
+
+/** A write into Claude Code's setup that would turn on per-token billing (checked on the new text). */
+export function writesBillingSetting(path: string, input: Record<string, unknown>): boolean {
+  return isClaudeSetup(fullPath(path)) && BILLING_SETTING.test(JSON.stringify(input));
 }
 
 /** Where a call runs: in a project chat, the project folder (trusted, and the base for relative paths). */
@@ -256,6 +268,8 @@ export function classify(tool: string, input: Record<string, unknown>, ctx: Clas
   if (FILE_WRITE_TOOLS.includes(tool)) {
     const file = str(input, 'file_path') || str(input, 'notebook_path');
     const inProject = ctx.project ?? (file ? ctx.projects?.find((p) => isInside(fullPath(file), p)) : undefined);
+    if (file && writesBillingSetting(file, input))
+      return verdict('blocked', 'It would switch Claude Code to per-token billing; Harv only runs on the subscription.', `${tool} ${file}`);
     return classifyFileWrite(tool, file, { ...ctx, project: inProject });
   }
 
@@ -419,8 +433,6 @@ function classifyFileWrite(tool: string, rawPath: string, ctx: ClassifyContext =
   if (protectedDir) return verdict('blocked', `${protectedDir} is on your read-only list.`, summary);
   if (isClaudeHistory(path) && !isClaudeMemory(path))
     return verdict('blocked', "Claude Code's session history is only read, never changed.", summary);
-  if (isClaudeSetup(path))
-    return verdict('blocked', "Claude Code's own setup (~/.claude) is only read; the user changes it in Claude Code.", summary);
   if (isSensitivePath(path)) return verdict('blocked', 'That file may hold credentials or secrets.', summary);
   if (isSystemDir(path)) return verdict('blocked', `Harv never writes inside ${SYSTEM_FOLDER}.`, summary);
   if (isHarvData(path)) return verdict('blocked', "Harv's database, backups and memory are only changed by Harv itself.", summary);
@@ -1212,9 +1224,12 @@ function classifyCommandAsIs(command: string, description: string, ctx: Classify
   }
   if (
     (changing || writesFile(shell) || bodies.length > 0) &&
-    mentions(isClaudeSetup, /\.claude[\\/]+(?!projects[\\/]+[^\\/\s"']+[\\/]+memory\b)/i)
+    mentions((p) => isClaudeHistory(p) && !isClaudeMemory(p), /\.claude[\\/]+projects[\\/]+(?![^\\/\s"']+[\\/]+memory\b)/i)
   ) {
-    return verdict('blocked', "Blocked: Claude Code's own setup (~/.claude) is only read; the user changes it in Claude Code.", summary);
+    return verdict('blocked', "Blocked: Claude Code's session history is only read, never changed.", summary);
+  }
+  if ((changing || writesFile(shell) || bodies.length > 0) && mentions(isClaudeSetup, /\.claude[\\/]/i) && BILLING_SETTING.test(command)) {
+    return verdict('blocked', 'Blocked: it would switch Claude Code to per-token billing; Harv only runs on the subscription.', summary);
   }
   if (ctx.project) {
     const trusted = classifyInProject(command, summary, ctx.project, paths);

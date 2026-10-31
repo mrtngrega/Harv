@@ -17,7 +17,6 @@ function secretPaths(): string[] {
   const h = (...p: string[]) => join(home, ...p);
   const common = [
     h('.claude', '.credentials.json'),
-    h('.claude', 'settings.json'),
     ...['id_rsa', 'id_ed25519', 'id_ecdsa', 'id_dsa', 'config'].map((k) => h('.ssh', k)),
     h('.aws', 'credentials'),
     h('.azure', '*'),
@@ -30,6 +29,10 @@ function secretPaths(): string[] {
     h('.docker', 'config.json'),
     h('.harv', 'sync.key'),
     h('.harv', 'browser-profile', '*'),
+    h('.harv', 'gemini-profile', '*'),
+    h('.harv', 'browser-data', '*'),
+    h('.harv', 'vapid.json'),
+    h('.harv', 'phones.json'),
   ];
   if (!IS_WINDOWS) {
     const browsers = ['google-chrome', 'chromium', 'BraveSoftware/Brave-Browser', 'microsoft-edge'].flatMap((b) =>

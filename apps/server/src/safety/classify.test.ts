@@ -495,27 +495,42 @@ describe('credentials stay blocked (the user’s wish)', () => {
     expect(tier('Edit', { file_path: transcript })).toBe('blocked');
     expect(cmd(`rm ${transcript}`)).toBe('blocked');
     expect(tier('Read', { file_path: '~/.claude/.credentials.json' })).toBe('blocked');
-    expect(tier('Read', { file_path: '~/.claude/settings.json' })).toBe('blocked');
+    expect(tier('Read', { file_path: '~/.claude/settings.json' })).toBe('green');
     expect(cmd('cat ~/.claude/projects/../settings.json')).toBe('blocked');
   });
 
-  it("reads the user's Claude Code setup (global CLAUDE.md, skills, plugins), never changes it (2026-10-31)", () => {
+  it("treats the user's Claude Code setup like their own files, never its login or billing (2026-10-31)", () => {
     const skill = '~/.claude/skills/synced/abc/docx/SKILL.md';
     expect(tier('Read', { file_path: '~/.claude/CLAUDE.md' })).toBe('green');
     expect(tier('Read', { file_path: skill })).toBe('green');
+    expect(tier('Read', { file_path: '~/.claude/settings.json' })).toBe('green');
     expect(tier('Read', { file_path: '~/.claude/plugins/marketplaces/x/plugins/y/skills/z/SKILL.md' })).toBe('green');
     expect(cmd('cat ~/.claude/CLAUDE.md')).toBe('green');
     expect(cmd('ls ~/.claude/skills')).toBe('green');
-    expect(tier('Write', { file_path: '~/.claude/CLAUDE.md' })).toBe('blocked');
-    expect(tier('Edit', { file_path: skill })).toBe('blocked');
-    expect(cmd('rm -rf ~/.claude/skills/old')).toBe('blocked');
-    expect(cmd('echo x >> ~/.claude/CLAUDE.md')).toBe('blocked');
-    // The login and the settings stay off-limits, also by a detour.
-    expect(tier('Read', { file_path: '~/.claude/settings.local.json' })).toBe('blocked');
+    expect(tier('Edit', { file_path: skill, old_string: 'a', new_string: 'b' })).toBe('yellow');
+    expect(tier('Edit', { file_path: '~/.claude/settings.json', old_string: '{', new_string: '{"theme":"dark",' })).toBe('yellow');
+    expect(cmd('rm -rf ~/.claude/skills/old')).not.toBe('blocked');
+    // Never onto per-token billing.
+    expect(tier('Edit', { file_path: '~/.claude/settings.json', old_string: '{', new_string: '{"env":{"ANTHROPIC_API_KEY":"x"},' })).toBe(
+      'blocked',
+    );
+    expect(tier('Write', { file_path: '~/.claude/settings.local.json', content: '{"apiKeyHelper":"x.sh"}' })).toBe('blocked');
+    expect(cmd(`echo '{"env":{"ANTHROPIC_AUTH_TOKEN":"x"}}' > ~/.claude/settings.json`)).toBe('blocked');
+    // The login stays off-limits, also by a detour.
+    expect(tier('Read', { file_path: '~/.claude/.credentials.json' })).toBe('blocked');
     expect(cmd('cat ~/.claude/skills/../.credentials.json')).toBe('blocked');
-    expect(cmd('cat ~/.claude/skills/../settings.json')).toBe('blocked');
-    // Project memory notes stay writable.
+    // Session history is read, never changed; project memory notes stay writable.
+    expect(cmd('rm ~/.claude/projects/C--x/abc.jsonl')).toBe('blocked');
     expect(tier('Write', { file_path: '~/.claude/projects/C--x/memory/notes.md' })).toBe('green');
+  });
+
+  it("reads all of Harv's own data but its keys (2026-10-31)", () => {
+    expect(tier('Read', { file_path: '~/.harv/logs/harv.log' })).toBe('green');
+    expect(tier('Read', { file_path: '~/.harv/settings.json' })).toBe('green');
+    expect(tier('Read', { file_path: '~/.harv/vapid.json' })).toBe('blocked');
+    expect(tier('Read', { file_path: '~/.harv/phones.json' })).toBe('blocked');
+    expect(tier('Read', { file_path: '~/.harv/sync.key' })).toBe('blocked');
+    expect(tier('mcp__harv__harv_db', { sql: 'select 1' })).toBe('green');
   });
 });
 
@@ -600,12 +615,12 @@ describe('project chats (trusted project folder)', () => {
     expect(classify('TodoWrite', {}, ctx).tier).toBe('green');
   });
 
-  it('lets project chats keep their notes in Claude Code memory, nothing else under .claude', () => {
+  it('lets project chats keep their notes in Claude Code memory, the rest of .claude like the user’s files', () => {
     const note = join(claudeHome, 'projects', 'C--x', 'memory', 'notes.md');
     expect(classify('Write', { file_path: note }, ctx).tier).toBe('green');
     expect(classify('Read', { file_path: note }, ctx).tier).toBe('green');
     expect(classify('Read', { file_path: join(claudeHome, '.credentials.json') }, ctx).tier).toBe('blocked');
-    expect(classify('Write', { file_path: join(claudeHome, 'settings.json') }, ctx).tier).toBe('blocked');
+    expect(classify('Write', { file_path: join(claudeHome, 'settings.json') }, ctx).tier).toBe('yellow');
     expect(classify('Write', { file_path: join(claudeHome, 'projects', 'C--x', 'memory', '..', '..', 'x.md') }, ctx).tier).toBe('blocked');
   });
 });
@@ -712,12 +727,12 @@ describe('read-only command chains', () => {
     }
   });
 
-  it("reads Claude Code's project memory but nothing else under .claude", () => {
+  it("reads Claude Code's project memory and the rest of .claude, not its login", () => {
     expect(cmd('ls ~/.claude/projects/C--My-files-Code-Harv/memory/')).toBe('green');
     expect(cmd('cat ~/.claude/projects/C--x/memory/notes.md')).toBe('green');
     expect(cmd('cat ~/.claude/.credentials.json')).toBe('blocked');
-    expect(cmd('cat ~/.claude/settings.json')).toBe('blocked');
-    expect(cmd('ls ~/.claude/projects/C--x/memory/ && cat ~/.claude/settings.json')).toBe('blocked');
+    expect(cmd('cat ~/.claude/settings.json')).toBe('green');
+    expect(cmd('ls ~/.claude/projects/C--x/memory/ && cat ~/.claude/settings.json')).toBe('green');
   });
 
   it("reads Harv's logs, never changes Harv's data", () => {
