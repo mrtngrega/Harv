@@ -3,7 +3,7 @@
 // read from this computer's dashboard connection), makes its passkey, opens the phone layout,
 // tries the sheets and Settings, makes a Shortcut token, shares a picture, optionally asks Siri's
 // endpoint one question (--ask, one small model turn), then removes the test phone again.
-//   node scripts/ui-check/phone-e2e.mjs [--ask] [--slow-ask] [--share] [--app] [--keep]
+//   node scripts/ui-check/phone-e2e.mjs [--ask[=question]] [--slow-ask] [--share] [--app] [--keep]
 // Needs: Settings › Phone access on, HTTPS certificates on in the tailnet.
 import { createRequire } from 'node:module';
 import { launch } from './cdp.mjs';
@@ -208,12 +208,13 @@ const bad = await fetch(`${url}/api/phone/ask`, {
 });
 console.log('ask with a wrong token:', bad.status);
 
-if (process.argv.includes('--ask')) {
+const askArg = process.argv.find((a) => a === '--ask' || a.startsWith('--ask='));
+if (askArg) {
   const t0 = Date.now();
   const ask = await fetch(`${url}/api/phone/ask`, {
     method: 'POST',
     headers: { authorization: token, 'content-type': 'application/json' },
-    body: JSON.stringify({ text: 'Test from the phone setup: say just "ready".' }),
+    body: JSON.stringify({ text: askArg.startsWith('--ask=') ? askArg.slice(6) : 'Test from the phone setup: say just "ready".' }),
   });
   console.log('ask:', ask.status, await ask.text(), `${Math.round((Date.now() - t0) / 1000)}s`);
 }
