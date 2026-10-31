@@ -246,7 +246,7 @@ export class LightsService {
     // Seen on the first read since Harv started: it happened some time while Harv wasn't running, so it
     // can't count as "since it got dark" tonight (switched off last night, the PC on again after dark).
     const control = firstLook
-      ? this.log.record(state.id, 'outside', !!state.on, `${state.on ? 'on' : 'off'} (while Harv wasn’t running)`, last.at + 1)
+      ? this.log.record(state.id, 'outside', !!state.on, `${state.on ? 'on' : 'off'} (while Harv wasn’t running)`, last.at + 1, Date.now())
       : this.log.record(state.id, 'outside', !!state.on, state.on ? 'on' : 'off');
     const next = { ...state, control };
     this.states.set(state.id, next);

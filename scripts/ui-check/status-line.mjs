@@ -20,6 +20,12 @@ const tabId = await page.eval(`(() => {
   const url = performance.getEntriesByType('resource').map((e) => e.name).find((n) => n.includes('/src/lib/chatStore.ts'));
   return import(url).then((m) => m.getChatState().activeId);
 })()`);
+// The status line belongs to a chat: with Settings (or nothing) in front there's none to show.
+if (!(await page.eval(`!!document.querySelector('[role=status][aria-label^="Harv is"]')`))) {
+  console.log(`No status line: the active tab (${tabId}) isn't a chat. Open a chat in Harv and run this again.`);
+  await page.close();
+  process.exit(1);
+}
 const fake = (msg) => page.eval(`(window.__harvSocket.onmessage({ data: ${JSON.stringify(JSON.stringify({ tabId, ...msg }))} }), true)`);
 const status = () => page.eval(`document.querySelector('[role=status][aria-label^="Harv is"]')?.textContent`);
 

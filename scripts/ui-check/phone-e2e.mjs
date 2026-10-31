@@ -33,6 +33,8 @@ const next = (test, ms = 15000) =>
     setTimeout(() => reject(new Error('timed out waiting for the server')), ms);
   });
 await new Promise((r) => pc.once('open', r));
+// Was Siri's Phone chat open as a tab before? An ask opens it in every window; close it again after if not.
+const phoneChatWasOpen = (await next((m) => m.type === 'hello')).chats.some((c) => c.id.startsWith('phone-'));
 pc.send(JSON.stringify({ type: 'phone.list' }));
 const { access } = await next((m) => m.type === 'phone.list');
 if (!access.serving || !access.url) {
@@ -229,6 +231,16 @@ if (process.argv.includes('--slow-ask')) {
   console.log('slow ask:', ask.status, await ask.text(), `${Math.round((Date.now() - t0) / 1000)}s`);
   const done = await next((m) => m.type === 'chat.done' && m.tabId.startsWith('phone-'), 90000).catch(() => null);
   console.log('slow answer finished in the Phone chat:', !!done?.ok, `${Math.round((Date.now() - t0) / 1000)}s`);
+}
+
+// The asks opened the Phone chat as a tab in every window: put the user's tabs back as they were.
+if ((askArg || process.argv.includes('--slow-ask')) && !phoneChatWasOpen) {
+  const opened = seen.find((m) => (m.type === 'chat.opened' && m.chat?.id?.startsWith('phone-')) || (m.tabId ?? '').startsWith('phone-'));
+  const id = opened?.chat?.id ?? opened?.tabId;
+  if (id) {
+    pc.send(JSON.stringify({ type: 'chat.close', tabId: id }));
+    console.log('closed the Phone chat tab again (it was closed before the test)');
+  }
 }
 
 // Locked out at once when removed.

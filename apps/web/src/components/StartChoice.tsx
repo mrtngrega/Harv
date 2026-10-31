@@ -5,6 +5,10 @@ import { answerStart } from '../lib/chatStore.ts';
  * its session with Claude or start a new one. Only that chat's area is blurred:
  * the other tabs and the rest of the dashboard stay usable, and it waits until
  * the user opens the chat and answers.
+ *
+ * Readable without blur: inside the chat panel's own glass the overlay's backdrop blur doesn't
+ * take (nested backdrop-filter), so the chat showed sharp through a card that follows the user's
+ * panel opacity (the test pass, 2026-10-31). A firm dim and a nearly solid card instead.
  */
 export function StartChoice({ tabId, title }: { tabId: string; title: string }) {
   const name = title.trim() || 'this chat';
@@ -13,9 +17,9 @@ export function StartChoice({ tabId, title }: { tabId: string; title: string }) 
       role="dialog"
       aria-modal="false"
       aria-labelledby="start-choice-title"
-      className="animate-fade-in absolute inset-0 z-20 flex items-center justify-center bg-[rgb(10_16_24/0.35)] p-4 backdrop-blur-md"
+      className="animate-fade-in absolute inset-0 z-20 flex items-center justify-center bg-[rgb(10_16_24/0.62)] p-4 backdrop-blur-md"
     >
-      <div className="glass w-full max-w-md rounded-2xl border border-[rgb(220_232_245/0.2)] p-6 text-center shadow-[0_16px_48px_rgb(0_0_0/0.45)]">
+      <div className="w-full max-w-md rounded-2xl border border-[rgb(220_232_245/0.2)] bg-[rgb(16_24_34/0.94)] p-6 text-center shadow-[0_16px_48px_rgb(0_0_0/0.45)]">
         <h2 id="start-choice-title" className="text-sm text-white">
           Continue “{name}”?
         </h2>

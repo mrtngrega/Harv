@@ -1108,7 +1108,7 @@ function AutoLightsSettings() {
       <Toggle
         on={settings.autoLights}
         label="Turn the light on when it’s dark and I’m here"
-        hint="Dark: clouds, rain or dusk, from the sunlight where you live (Open-Meteo, free), or around sunset. Here: you used this computer’s mouse or keyboard lately. It goes off when you leave, only if Harv turned it on; switched off by hand, it stays off until it gets light."
+        hint="Dark: clouds, rain or dusk, from the sunlight where you live (Open-Meteo, free), or around sunset. Here: you used this computer’s mouse, keyboard or gamepad lately, or a video or full-screen app is on (for up to 4 hours without input). It goes off when you leave or the computer sleeps, only if Harv turned it on; switched off by hand, it stays off until it gets light."
         onChange={(autoLights) => updateSettings({ autoLights })}
       />
       <form
@@ -1148,8 +1148,8 @@ function AutoLightsSettings() {
           <span className="text-[11px] text-muted">Who changed it last (automatic lights only turn off what they turned on)</span>
           <ul className="m-0 flex list-none flex-col gap-0.5 p-0 text-[11px]">
             {status.log.slice(0, 6).map((e) => (
-              <li key={`${e.id}-${e.at}`} className="flex gap-2">
-                <span className="w-11 flex-none text-faint tabular-nums">{time(e.at)}</span>
+              <li key={`${e.id}-${e.at}-${e.seenAt ?? ''}`} className="flex gap-2">
+                <span className="w-11 flex-none text-faint tabular-nums">{time(e.seenAt ?? e.at)}</span>
                 <span className="w-28 flex-none text-ink">{CONTROL_BY[e.by]}</span>
                 <span className="min-w-0 truncate text-muted">{e.what}</span>
               </li>

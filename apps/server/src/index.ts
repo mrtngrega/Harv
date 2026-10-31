@@ -41,6 +41,7 @@ import { DeviceStore } from './devices/store.ts';
 import { LightsService } from './devices/lights.ts';
 import { lightTools } from './devices/tools.ts';
 import { AutoLights, findPlace } from './devices/autoLights.ts';
+import { malformed } from './wsInput.ts';
 import { HarvBrowser } from './tools/harvBrowser.ts';
 import { cleanPath, listFolder, openWithDefault, places, previewType, suggestPaths } from './tools/files.ts';
 import {
@@ -687,7 +688,11 @@ app.get('/ws', { websocket: true }, (socket, req) => {
     } catch {
       return;
     }
-    if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') return;
+    const bad = malformed(msg);
+    if (bad) {
+      app.log.warn({ type: (msg as { type?: unknown } | null)?.type, why: bad }, 'A malformed dashboard message was dropped');
+      return;
+    }
     // A phone's Face ID unlock ends after 30 minutes idle; each message keeps it alive.
     if (phoneId && !phone?.stillUnlocked(phoneId, req.headers.cookie)) return socket.close(4401, 'locked');
     // One bad message must never take Harv down (it doesn't restart by itself): log it and go on.

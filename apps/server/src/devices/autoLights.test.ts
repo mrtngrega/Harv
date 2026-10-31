@@ -222,6 +222,15 @@ describe('the log of who took control', () => {
     expect(again.last('B')?.by).toBe('you');
   });
 
+  it('a change noticed at startup keeps when it was noticed, for showing', () => {
+    const log = new ControlLog(join(dir, 'seen.json'));
+    log.record('A', 'auto', true, 'on (sunset)', 100);
+    log.record('A', 'outside', false, 'off (while Harv wasn’t running)', 101, 5000);
+    const again = new ControlLog(join(dir, 'seen.json'));
+    expect(again.last('A')).toMatchObject({ at: 101, seenAt: 5000, by: 'outside' });
+    expect(again.recent(2)[1]).not.toHaveProperty('seenAt');
+  });
+
   it('keeps the last sun times for days without internet', () => {
     const log = new ControlLog(join(dir, 'sun.json'));
     expect(log.sunTimes()).toBeNull();

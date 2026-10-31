@@ -56,8 +56,8 @@ export class ControlLog {
     writeFileSync(this.file, JSON.stringify({ ...next, entries: next.entries.slice(-KEEP) }, null, 1));
   }
 
-  record(id: string, by: LightControlBy, on: boolean, what: string, at = Date.now()): LightControl {
-    const entry: LightControl = { id, at, by, on, what };
+  record(id: string, by: LightControlBy, on: boolean, what: string, at = Date.now(), seenAt?: number): LightControl {
+    const entry: LightControl = { id, at, by, on, what, ...(seenAt !== undefined ? { seenAt } : {}) };
     const now = this.read();
     this.write({ ...now, entries: [...now.entries, entry] });
     return entry;

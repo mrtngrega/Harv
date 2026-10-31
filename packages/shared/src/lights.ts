@@ -40,6 +40,12 @@ export interface LightControl {
   on: boolean;
   /** What changed, in a few words ("on (sunset)", "teal 30%"). */
   what: string;
+  /**
+   * When Harv noticed it, for a change made while Harv wasn't running: `at` is then the earliest it
+   * can have happened (just after the last known change, which ownership needs), and this is the
+   * time to show.
+   */
+  seenAt?: number;
 }
 
 /** A light found on the network (before the user picks which ones Harv controls). */
