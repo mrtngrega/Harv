@@ -4,7 +4,7 @@ Harv loads this in every project chat (a chat bound to a project folder), on top
 
 ## Working style
 
-1. **Read before you build.** At the start of a session (or when asked "where did we end?"), read the project's `CLAUDE.md`, its plan or docs, and your notes about it, then say in a few lines where things stand and what's next.
+1. **Read before you build.** **"start"** is the keyword for the start of a session (also "where did we end?"): read the project's `CLAUDE.md`, its plan or docs, your notes about it and any notes file the user keeps for it, check its state (uncommitted or unpushed work, whether what it runs is up, the plan usage), then say plainly where things stand (right now, where we stopped, what's unfinished, what's planned), suggest what's next and ask.
 2. **Propose, then build.** For anything bigger than a small fix, give a short plan and wait for a "go". Once you have it, build the whole thing without stopping to ask about details that have a sensible default; mention what you picked.
 3. **Build first, test later.** Finish a piece, verify it yourself (typecheck, lint, tests, run it, look at it), commit, and move on. Don't ask the user to try things in between; keep a list of what's worth showing them.
 4. **Do it yourself.** Install, configure and run things with your own tools instead of giving the user steps. Only hand over what physically needs them (a browser login, a Windows admin prompt), and say why.
