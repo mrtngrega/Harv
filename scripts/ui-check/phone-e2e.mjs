@@ -3,7 +3,7 @@
 // read from this computer's dashboard connection), makes its passkey, opens the phone layout,
 // tries the sheets and Settings, makes a Shortcut token, shares a picture, optionally asks Siri's
 // endpoint one question (--ask, one small model turn), then removes the test phone again.
-//   node scripts/ui-check/phone-e2e.mjs [--ask] [--share] [--app] [--keep]
+//   node scripts/ui-check/phone-e2e.mjs [--ask] [--slow-ask] [--share] [--app] [--keep]
 // Needs: Settings › Phone access on, HTTPS certificates on in the tailnet.
 import { createRequire } from 'node:module';
 import { launch } from './cdp.mjs';
@@ -91,7 +91,7 @@ await step('4-open');
 const broke = () => phone.eval('/Something in Harv’s window broke|Couldn’t show the/.test(document.body.innerText)');
 const tabIds = await phone.eval('[...document.querySelectorAll("[data-tab]")].map(t => t.dataset.tab)');
 for (const id of tabIds) {
-  await phone.eval(`document.querySelector('[data-tab="${id}"]')?.click()`);
+  await phone.eval(`(document.querySelector('[data-tab="${id}"] [role=tab]') ?? document.querySelector('[data-tab="${id}"]'))?.click()`);
   await sleep(700);
   if (await broke()) {
     console.log(`BROKEN in tab ${id}`);
@@ -99,6 +99,48 @@ for (const id of tabIds) {
   }
 }
 console.log(`tabs checked: ${tabIds.length}, broken: ${(await broke()) ? 'yes' : 'none at the end'}`);
+
+// Back from another app after iOS dropped the page: the same chat, scrolled where it was. The page hides
+// (iOS sends visibilitychange), then loads fresh. The longest chat that isn't the last tab is the test.
+{
+  const pick = await phone.eval(`(() => {
+    const ids = ${JSON.stringify(tabIds)};
+    return ids.length > 1 ? ids.at(-2) : (ids[0] ?? null);
+  })()`);
+  if (pick) {
+    await phone.eval(
+      `(document.querySelector('[data-tab="${pick}"] [role=tab]') ?? document.querySelector('[data-tab="${pick}"]'))?.click()`,
+    );
+    await sleep(800);
+    const shown = await phone.eval(
+      `(() => { const sel = document.querySelector('[aria-selected="true"]'); return (sel?.closest('[data-tab]') ?? sel)?.dataset?.tab ?? null; })()`,
+    );
+    console.log('picked', pick.slice(0, 12), 'showing before the reload:', shown?.slice(0, 12));
+    const log = '[...document.querySelectorAll(".overflow-y-auto")].sort((a, b) => b.scrollHeight - a.scrollHeight)[0]';
+    const before = await phone.eval(`(() => {
+      const el = ${log};
+      el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - 300);
+      el.dispatchEvent(new Event('scroll'));
+      return el.scrollHeight - el.scrollTop - el.clientHeight;
+    })()`);
+    await phone.eval(`(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    })()`);
+    await phone.eval('location.reload()').catch(() => {});
+    await sleep(5000);
+    const after = await phone.eval(`(() => {
+      const el = ${log};
+      const sel = document.querySelector('[aria-selected="true"]');
+      const active = (sel?.closest('[data-tab]') ?? sel?.querySelector('[data-tab]'))?.dataset.tab ?? null;
+      return { active, fromBottom: el ? Math.round(el.scrollHeight - el.scrollTop - el.clientHeight) : null };
+    })()`);
+    console.log(
+      `back after a reload: same chat ${after.active === pick} (${pick?.slice(0, 12)} → ${after.active?.slice(0, 12)}), scrolled ${Math.round(before)} px up before, ${after.fromBottom} px after`,
+    );
+    await step('4b-return');
+  }
+}
 
 // One Harv, not one per window: a tab opened or closed on the phone shows up in the app (read only, port 9444).
 if (process.argv.includes('--app')) {
@@ -174,6 +216,18 @@ if (process.argv.includes('--ask')) {
     body: JSON.stringify({ text: 'Test from the phone setup: say just "ready".' }),
   });
   console.log('ask:', ask.status, await ask.text(), `${Math.round((Date.now() - t0) / 1000)}s`);
+}
+// A slow answer: Siri gets "on it" after ~8 s, the reply lands in the Phone chat later (and pushes when no phone is looking).
+if (process.argv.includes('--slow-ask')) {
+  const t0 = Date.now();
+  const ask = await fetch(`${url}/api/phone/ask`, {
+    method: 'POST',
+    headers: { authorization: token, 'content-type': 'application/json' },
+    body: JSON.stringify({ text: 'Test from the phone setup: run the shell command `sleep 15` first, then say just "ready".' }),
+  });
+  console.log('slow ask:', ask.status, await ask.text(), `${Math.round((Date.now() - t0) / 1000)}s`);
+  const done = await next((m) => m.type === 'chat.done' && m.tabId.startsWith('phone-'), 90000).catch(() => null);
+  console.log('slow answer finished in the Phone chat:', !!done?.ok, `${Math.round((Date.now() - t0) / 1000)}s`);
 }
 
 // Locked out at once when removed.
