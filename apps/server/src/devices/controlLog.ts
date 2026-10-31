@@ -16,7 +16,17 @@ interface LogFile {
   entries: LightControl[];
   /** Automatic lights: it counted as dark, and since when (ms). */
   auto?: { dark: boolean; darkSince: number };
+  /** The last sunrise and sunset times read (ms) and the place ("lat,lon"), for days without internet. */
+  sun?: SunTimes;
 }
+
+export interface SunTimes {
+  place: string;
+  sunrise: number[];
+  sunset: number[];
+}
+
+const times = (v: unknown): v is number[] => Array.isArray(v) && v.length > 0 && v.every((t) => typeof t === 'number');
 
 export class ControlLog {
   constructor(private file = join(HARV_HOME, 'lights-log.json')) {}
@@ -33,6 +43,9 @@ export class ControlLog {
       return {
         entries,
         ...(raw.auto && typeof raw.auto.darkSince === 'number' ? { auto: { dark: !!raw.auto.dark, darkSince: raw.auto.darkSince } } : {}),
+        ...(raw.sun && typeof raw.sun.place === 'string' && times(raw.sun.sunrise) && times(raw.sun.sunset)
+          ? { sun: { place: raw.sun.place, sunrise: raw.sun.sunrise, sunset: raw.sun.sunset } }
+          : {}),
       };
     } catch {
       return { entries: [] };
@@ -66,5 +79,15 @@ export class ControlLog {
     const now = this.read();
     if (now.auto?.dark === auto.dark && now.auto.darkSince === auto.darkSince) return;
     this.write({ ...now, auto });
+  }
+
+  sunTimes(): SunTimes | null {
+    return this.read().sun ?? null;
+  }
+
+  setSunTimes(sun: SunTimes): void {
+    const now = this.read();
+    if (JSON.stringify(now.sun) === JSON.stringify(sun)) return;
+    this.write({ ...now, sun });
   }
 }

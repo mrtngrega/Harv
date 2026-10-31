@@ -22,6 +22,11 @@ tauri-plugin-dialog = "2"
 
 # Linux: the browser's pages float over the dashboard in a GtkOverlay (src/browser.rs); Tauri
 # itself stacks a window's webviews in a vertical box there. Same gtk as Tauri's own.
+# Windows: a hidden window that hears sleep and shutdown, to turn off a light automatic lights
+# turned on (src/power.rs). The same windows-sys Tauri already pulls in.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_LibraryLoader", "Win32_System_Shutdown", "Win32_System_Power"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
 

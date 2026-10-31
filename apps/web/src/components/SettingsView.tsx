@@ -1135,11 +1135,10 @@ function AutoLightsSettings() {
       {number('autoLightsAway', 'Away after', 'minutes', 1, 120)}
       {settings.autoLights && auto && (
         <Note>
-          Now: {auto.sunlight !== undefined ? `${auto.sunlight} W/m² of sunlight` : 'no weather yet'}
+          Now: {auto.sunlight !== undefined ? `${auto.sunlight} W/m² of sunlight` : auto.sunset ? 'no sunlight reading' : 'no weather yet'}
           {auto.sunset ? `, sunset ${time(auto.sunset)}` : ''}
-          {auto.idleSec !== undefined
-            ? `, last input ${auto.idleSec < 60 ? 'just now' : `${Math.round(auto.idleSec / 60)} min ago`}`
-            : ''}. {auto.why}
+          {auto.idleSec !== undefined ? `, last input ${auto.idleSec < 60 ? 'just now' : `${Math.round(auto.idleSec / 60)} min ago`}` : ''}
+          {auto.watching ? ` (${auto.watching})` : ''}. {auto.why}
           {auto.last ? ` Last: ${auto.last.action} at ${time(auto.last.at)} (${auto.last.why}).` : ''}
         </Note>
       )}

@@ -8,6 +8,8 @@ mod browser;
 mod harv;
 mod notify;
 mod paths;
+#[cfg(windows)]
+mod power;
 mod prefs;
 mod tray;
 mod update;
@@ -227,6 +229,8 @@ fn main() {
                 show(handle);
             }
             harv::boot(handle.clone());
+            #[cfg(windows)]
+            power::watch();
             update::schedule(handle.clone());
             Ok(())
         })

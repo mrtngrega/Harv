@@ -77,8 +77,10 @@ export interface AutoLightsStatus {
   weatherAt?: number;
   /** Today's (or tomorrow's) sunset, epoch ms. */
   sunset?: number;
-  /** Seconds since the last mouse or keyboard input. */
+  /** Seconds since the last mouse, keyboard or gamepad input. */
   idleSec?: number;
+  /** Why the user counts as here without input ("something keeps the screen on, like a video"). */
+  watching?: string;
   dark: boolean;
   /** Why it does what it does right now ("dark, but you're away"). */
   why: string;

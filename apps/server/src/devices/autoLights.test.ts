@@ -4,7 +4,17 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { LightControl } from '@harv/shared';
 import { ControlLog } from './controlLog.ts';
-import { decide, FRESH_MEMORY, sunDark, type AutoMemory, type Weather } from './autoLights.ts';
+import {
+  decide,
+  FRESH_MEMORY,
+  parsePresence,
+  present,
+  sunDark,
+  sunOnly,
+  WATCH_MAX_SEC,
+  type AutoMemory,
+  type Weather,
+} from './autoLights.ts';
 
 // A day in Geča: sunrise 06:19, sunset 16:16 (31 Oct), the next sunrise 06:20.
 const day = (h: number, m = 0) => Date.UTC(2026, 9, 31, h - 1, m); // CET = UTC+1
@@ -121,6 +131,78 @@ describe('automatic lights', () => {
   });
 });
 
+describe('watching without touching anything (a film, a controller game)', () => {
+  const mine = { by: 'auto' as const, on: true, at: day(18) };
+  const mem = { dark: true, darkSince: day(15, 46) };
+  const watch = (idleSec: number, watching?: string) =>
+    decide({ now: day(20), idleSec, ...(watching ? { watching } : {}), weather: weather(0), light: { on: true }, last: mine, cfg }, mem);
+
+  it('a video keeping the screen on or a full-screen app counts as being here', () => {
+    expect(watch(40 * 60).action).toBe('off');
+    const film = watch(40 * 60, 'something keeps the screen on, like a video');
+    expect(film.action).toBeNull();
+    expect(film.why).toMatch(/so you count as here/);
+  });
+
+  it('but not forever: an app that never lets the screen sleep can’t keep the strip on all night', () => {
+    expect(watch(WATCH_MAX_SEC + 60, 'a full-screen app is in front').action).toBe('off');
+  });
+
+  it('turns on at sunset while a film plays, even with no input for a while', () => {
+    const r = decide(
+      {
+        now: day(16),
+        idleSec: 30 * 60,
+        watching: 'a full-screen app is in front',
+        weather: weather(300),
+        light: { on: false },
+        last: null,
+        cfg,
+      },
+      FRESH_MEMORY,
+    );
+    expect(r.action).toBe('on');
+    expect(r.why).toBe('sunset; a full-screen app is in front');
+  });
+
+  it('reads the probe: display requests, full screen, gamepads', () => {
+    expect(parsePresence('42 2147483651 5 0:17,\r\n')).toEqual({ idleSec: 42, display: true, fullScreen: false, pads: '0:17,' });
+    expect(parsePresence('5 0 3')).toEqual({ idleSec: 5, display: false, fullScreen: true, pads: '' });
+    expect(parsePresence('oops')).toBeNull();
+  });
+
+  it('a gamepad press is input: idle counts from it', () => {
+    const p = { idleSec: 1800, display: false, fullScreen: false, pads: '0:9,' };
+    expect(present(p, null, day(20)).idleSec).toBe(1800);
+    expect(present(p, day(20) - 30_000, day(20))).toEqual({ idleSec: 30 });
+    expect(present({ ...p, display: true }, null, day(20)).watching).toMatch(/video/);
+  });
+});
+
+describe('no internet', () => {
+  it('the last sun times carry on, moved to today', () => {
+    const w = sunOnly({ sunrise: weather(0).sunrise, sunset: weather(0).sunset }, day(3 * 24 + 12), 0);
+    expect(w.radiation).toBeNull();
+    expect(w.sunrise[0]).toBe(day(3 * 24 + 6, 19));
+    expect(sunDark(day(3 * 24 + 12), w, 30)).toBe(false);
+    expect(sunDark(day(3 * 24 + 16), w, 30)).toBe(true);
+    expect(sunDark(day(3 * 24 + 23), w, 30)).toBe(true);
+  });
+
+  it('without a sunlight reading it goes on at sunset and its light goes off at sunrise', () => {
+    const noLight = (now: number, on: boolean, last: Last, mem: AutoMemory) =>
+      decide({ now, idleSec: 10, weather: sunOnly(weather(0), now, 0), light: { on }, last, cfg }, mem);
+    const noon = noLight(day(12), false, null, FRESH_MEMORY);
+    expect(noon.action).toBeNull();
+    const evening = noLight(day(15, 50), false, null, noon.mem);
+    expect(evening.action).toBe('on');
+    expect(evening.why).toBe('sunset');
+    const morning = noLight(day(24 + 7), true, { by: 'auto', on: true, at: day(15, 50) }, evening.mem);
+    expect(morning.action).toBe('off');
+    expect(morning.mem.dark).toBe(false);
+  });
+});
+
 describe('the log of who took control', () => {
   const dir = mkdtempSync(join(tmpdir(), 'harv-lightlog-'));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -138,6 +220,13 @@ describe('the log of who took control', () => {
     const again = new ControlLog(join(dir, 'log.json'));
     expect(again.autoState()).toEqual({ dark: true, darkSince: 5 });
     expect(again.last('B')?.by).toBe('you');
+  });
+
+  it('keeps the last sun times for days without internet', () => {
+    const log = new ControlLog(join(dir, 'sun.json'));
+    expect(log.sunTimes()).toBeNull();
+    log.setSunTimes({ place: '48.1,18.2', sunrise: [1, 3], sunset: [2, 4] });
+    expect(new ControlLog(join(dir, 'sun.json')).sunTimes()).toEqual({ place: '48.1,18.2', sunrise: [1, 3], sunset: [2, 4] });
   });
 
   it('keeps only the latest 60 changes', () => {

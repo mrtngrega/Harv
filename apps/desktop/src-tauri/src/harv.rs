@@ -113,10 +113,18 @@ pub fn script(action: &str) -> bool {
 /// A tiny HTTP request to Harv on localhost; the status code, or None if nothing answered.
 /// Sends the dashboard's Origin, which the server requires.
 pub fn http(method: &str, port: u16, path: &str) -> Option<u16> {
+    request(method, port, path, if method == "POST" { "{}" } else { "" })
+}
+
+/// A POST with a JSON body to Harv's server; the status code, or None if nothing answered.
+pub fn post_json(path: &str, body: &str) -> Option<u16> {
+    request("POST", SERVER_PORT, path, body)
+}
+
+fn request(method: &str, port: u16, path: &str, body: &str) -> Option<u16> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(800)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
-    let body = if method == "POST" { "{}" } else { "" };
     let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: {DASHBOARD}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()

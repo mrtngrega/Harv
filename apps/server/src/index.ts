@@ -573,6 +573,14 @@ app.post('/api/devices/place', async (req, reply) => {
     return reply.code(502).send({ error: `The place search didn’t answer: ${(err as Error).message}` });
   }
 });
+// The Harv app hears Windows going to sleep, shutting down or logging off: a light automatic lights
+// turned on goes off first, or it stays on all night (docs/PLAN.md §6z).
+app.post('/api/lights/leaving', async (req) => {
+  const { why } = (req.body ?? {}) as { why?: unknown };
+  const reason =
+    why === 'shutdown' ? 'the computer is shutting down' : why === 'logoff' ? 'you signed out' : 'the computer is going to sleep';
+  return { off: await autoLights.leaving(reason) };
+});
 app.post('/api/devices/setup', async () => {
   void lights.install().then(() => lights.scan());
   return { ok: true };
