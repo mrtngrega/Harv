@@ -70,7 +70,7 @@ export function lightTools(service: LightsService): LightTools {
       const out: string[] = [];
       for (const t of targets) {
         try {
-          out.push(describeLight(await service.set(t.id, change)));
+          out.push(describeLight(await service.set(t.id, change, 'chat')));
         } catch (err) {
           out.push(`${t.name}: ${(err as Error).message}`);
         }

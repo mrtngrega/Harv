@@ -24,6 +24,22 @@ export interface LightState {
   error?: string;
   /** When it was last read (ms). */
   at?: number;
+  /** Who changed it last (docs/PLAN.md §6z): automatic lights only turn off a light they turned on. */
+  control?: LightControl;
+}
+
+/** Who changed a light: Harv's automatic lights, the user in the dashboard, a chat (or Siri), or something outside Harv (the Tapo app, its button, the other computer). */
+export type LightControlBy = 'auto' | 'you' | 'chat' | 'outside';
+
+/** One change to a light, in the log of who took control. */
+export interface LightControl {
+  id: string;
+  at: number;
+  by: LightControlBy;
+  /** On or off after the change. */
+  on: boolean;
+  /** What changed, in a few words ("on (sunset)", "teal 30%"). */
+  what: string;
 }
 
 /** A light found on the network (before the user picks which ones Harv controls). */
@@ -47,6 +63,8 @@ export interface LightsStatus {
   problem?: string;
   /** Automatic lights on this computer (docs/PLAN.md §6z). */
   auto?: AutoLightsStatus;
+  /** The latest changes to the lights, newest first. */
+  log?: LightControl[];
 }
 
 /** What automatic lights see and did, for Settings › Devices. */

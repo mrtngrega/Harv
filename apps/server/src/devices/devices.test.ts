@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { swatch } from '@harv/shared';
 import { fitTemp, parseColor } from './colors.ts';
-import { broadcastTargets, LightsService } from './lights.ts';
+import { broadcastTargets, describeChange, LightsService } from './lights.ts';
 import { DeviceStore } from './store.ts';
+import { ControlLog } from './controlLog.ts';
 import { describeLight, toChange } from './tools.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'harv-devices-'));
@@ -87,7 +88,11 @@ describe('the devices file', () => {
 
 describe('only the chosen light, never one that refused the login', () => {
   const store = new DeviceStore(join(dir, 'd.json'));
-  const service = new LightsService(store, { broadcast: () => {}, log: () => {}, watchers: () => 0 });
+  const service = new LightsService(
+    store,
+    { broadcast: () => {}, log: () => {}, watchers: () => 0 },
+    new ControlLog(join(dir, 'log.json')),
+  );
   store.setTapo({ email: 'me@example.com', password: 'pw' });
   store.setChosen(MINE, true);
 
@@ -123,5 +128,14 @@ describe('what a chat asks for', () => {
     );
     expect(describeLight({ id: MINE, name: 'L.E.D', reachable: true, on: false })).toBe('L.E.D: off');
     expect(describeLight({ id: MINE, name: 'L.E.D', reachable: false, error: 'No answer.' })).toMatch(/can't be reached/);
+  });
+});
+
+describe('a change in a few words for the log', () => {
+  it('names what changed', () => {
+    expect(describeChange({ on: false }, false)).toBe('off');
+    expect(describeChange({ hue: 175, saturation: 100, brightness: 30 }, true)).toBe('on, 30%, hue 175');
+    expect(describeChange({ temp: 2700 }, true)).toBe('on, 2700K');
+    expect(describeChange({ effect: 'Off' }, true)).toBe('on, no effect');
   });
 });

@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
+import type { LightControl } from '@harv/shared';
+import { ControlLog } from './controlLog.ts';
 import { decide, FRESH_MEMORY, sunDark, type AutoMemory, type Weather } from './autoLights.ts';
 
 // A day in Geča: sunrise 06:19, sunset 16:16 (31 Oct), the next sunrise 06:20.
@@ -10,8 +15,9 @@ const weather = (radiation: number): Weather => ({
   at: 0,
 });
 const cfg = { autoLightsDark: 100, autoLightsSunset: 30, autoLightsAway: 10 };
-const run = (now: number, radiation: number, idleSec: number, on: boolean, mem: AutoMemory = FRESH_MEMORY) =>
-  decide({ now, idleSec, weather: weather(radiation), light: { on }, cfg }, mem);
+type Last = Pick<LightControl, 'by' | 'on' | 'at'> | null;
+const run = (now: number, radiation: number, idleSec: number, on: boolean, last: Last = null, mem: AutoMemory = FRESH_MEMORY) =>
+  decide({ now, idleSec, weather: weather(radiation), light: { on }, last, cfg }, mem);
 
 describe('dark by the sun', () => {
   it('from 30 min before sunset until sunrise', () => {
@@ -24,11 +30,11 @@ describe('dark by the sun', () => {
 });
 
 describe('automatic lights', () => {
-  it('turns on at sunset when the user is at the computer', () => {
+  it('turns on at sunset when the user is at the computer, and remembers when it got dark', () => {
     const r = run(day(15, 50), 300, 20, false);
     expect(r.action).toBe('on');
     expect(r.why).toBe('sunset');
-    expect(r.mem.owned).toBe(true);
+    expect(r.mem).toEqual({ dark: true, darkSince: day(15, 50) });
   });
 
   it('turns on on a dark cloudy afternoon, not on a bright one', () => {
@@ -40,46 +46,82 @@ describe('automatic lights', () => {
     const r = run(day(18), 0, 400, false);
     expect(r.action).toBeNull();
     expect(r.why).toMatch(/waiting until you’re back/);
-    expect(run(day(18), 0, 30, false, r.mem).action).toBe('on');
+    expect(run(day(18), 0, 30, false, null, r.mem).action).toBe('on');
   });
 
-  it('turns off when the user leaves, and on again when they’re back', () => {
-    const on = run(day(18), 0, 10, false).mem;
-    const away = run(day(18, 20), 0, 11 * 60, true, on);
+  it('turns its own light off when the user leaves, and on again when they’re back', () => {
+    const mem = run(day(18), 0, 10, false).mem;
+    const away = run(day(18, 20), 0, 11 * 60, true, { by: 'auto', on: true, at: day(18) }, mem);
     expect(away.action).toBe('off');
     expect(away.why).toBe('away for 11 min');
-    expect(run(day(18, 40), 0, 5, false, away.mem).action).toBe('on');
+    expect(run(day(18, 40), 0, 5, false, { by: 'auto', on: false, at: day(18, 20) }, away.mem).action).toBe('on');
   });
 
-  it('never turns off a light the user switched on', () => {
-    const r = run(day(18), 0, 20 * 60, true);
+  it('leaves a light on that someone else switched on last, whoever it was', () => {
+    for (const by of ['you', 'chat', 'outside'] as const) {
+      const r = run(day(18), 0, 20 * 60, true, { by, on: true, at: day(17) });
+      expect(r.action).toBeNull();
+    }
+    // Nobody Harv knows of (it was on before Harv logged anything): left alone too.
+    expect(run(day(18), 0, 20 * 60, true).action).toBeNull();
+  });
+
+  it('a light automatic lights turned on is still theirs after a restart (it’s in the log)', () => {
+    const r = run(day(19), 0, 15 * 60, true, { by: 'auto', on: true, at: day(16) }, { dark: true, darkSince: day(15, 46) });
+    expect(r.action).toBe('off');
+  });
+
+  it('switched off by someone else since it got dark: stays off until it gets light, then works again', () => {
+    const mem = { dark: true, darkSince: day(15, 46) };
+    const off = { by: 'you' as const, on: false, at: day(18, 5) };
+    const r = run(day(22), 0, 10, false, off, mem);
     expect(r.action).toBeNull();
-    expect(r.mem.owned).toBe(false);
+    expect(r.why).toMatch(/you switched it off/);
+    // Morning: light again; the next dark spell starts later than that switch-off.
+    const morning = run(day(24 + 9), 400, 10, false, off, r.mem);
+    expect(morning.mem.dark).toBe(false);
+    const evening = run(day(24 + 16), 300, 10, false, off, morning.mem);
+    expect(evening.action).toBe('on');
   });
 
-  it('switched off by hand: stays off until it gets light, then works again', () => {
-    const on = run(day(18), 0, 10, false).mem;
-    const byHand = run(day(18, 5), 0, 10, false, on);
-    expect(byHand.action).toBeNull();
-    expect(byHand.mem.suppressed).toBe(true);
-    expect(run(day(22), 0, 10, false, byHand.mem).action).toBeNull();
-    // Morning: light again, the hand switch is forgotten.
-    const morning = run(day(24 + 9), 400, 10, false, byHand.mem);
-    expect(morning.mem.suppressed).toBe(false);
-    expect(run(day(24 + 16), 300, 10, false, morning.mem).action).toBe('on');
+  it('a switch-off from before it got dark doesn’t keep it off', () => {
+    const r = run(day(16), 300, 10, false, { by: 'you', on: false, at: day(10) }, { dark: false, darkSince: 0 });
+    expect(r.action).toBe('on');
   });
 
   it('turns its own light off when daylight is back, without flickering on a passing cloud', () => {
-    const on = run(day(13), 60, 5, false).mem;
-    // 120 W/m²: above the threshold but not clearly bright: stays.
-    expect(run(day(13, 10), 120, 5, true, on).action).toBeNull();
-    const bright = run(day(13, 20), 200, 5, true, on);
+    const mem = run(day(13), 60, 5, false).mem;
+    const mine = { by: 'auto' as const, on: true, at: day(13) };
+    expect(run(day(13, 10), 120, 5, true, mine, mem).action).toBeNull();
+    const bright = run(day(13, 20), 200, 5, true, mine, mem);
     expect(bright.action).toBe('off');
     expect(bright.why).toBe('daylight is back');
   });
+});
 
-  it('a change by hand from on to on (colour, brightness) keeps it Harv’s', () => {
-    const on = run(day(18), 0, 10, false).mem;
-    expect(run(day(18, 1), 0, 10, true, on).mem.owned).toBe(true);
+describe('the log of who took control', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'harv-lightlog-'));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('keeps the latest per light, newest first, and automatic lights’ state', () => {
+    const log = new ControlLog(join(dir, 'log.json'));
+    expect(log.last('A')).toBeNull();
+    log.record('A', 'auto', true, 'on (sunset)', 1);
+    log.record('B', 'you', false, 'off', 2);
+    log.record('A', 'outside', false, 'off', 3);
+    expect(log.last('A')).toMatchObject({ by: 'outside', on: false, at: 3 });
+    expect(log.recent(2).map((e) => e.at)).toEqual([3, 2]);
+    log.setAutoState({ dark: true, darkSince: 5 });
+    // A fresh reader (a restart) sees all of it.
+    const again = new ControlLog(join(dir, 'log.json'));
+    expect(again.autoState()).toEqual({ dark: true, darkSince: 5 });
+    expect(again.last('B')?.by).toBe('you');
+  });
+
+  it('keeps only the latest 60 changes', () => {
+    const log = new ControlLog(join(dir, 'many.json'));
+    for (let i = 0; i < 70; i++) log.record('A', 'chat', i % 2 === 0, 'x', i);
+    expect(log.recent(100)).toHaveLength(60);
+    expect(log.recent(1)[0]?.at).toBe(69);
   });
 });

@@ -4,7 +4,8 @@ import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import type { AutoLightsStatus, FoundLight, LightChange, LightState, LightsStatus } from '@harv/shared';
+import type { AutoLightsStatus, FoundLight, LightChange, LightControlBy, LightState, LightsStatus } from '@harv/shared';
+import { ControlLog } from './controlLog.ts';
 import { HARV_HOME } from '../paths.ts';
 import { IS_WINDOWS } from '../platform.ts';
 import { fitTemp } from './colors.ts';
@@ -78,6 +79,8 @@ export class LightsService {
   constructor(
     private store: DeviceStore,
     private deps: LightsDeps,
+    /** Who took control of each light last. */
+    readonly log: ControlLog = new ControlLog(),
   ) {}
 
   start(): void {
@@ -112,6 +115,7 @@ export class LightsService {
       found,
       ...(this.problem ? { problem: this.problem } : {}),
       ...(this.autoStatus ? { auto: this.autoStatus() } : {}),
+      log: this.log.recent(8),
     };
   }
 
@@ -215,7 +219,8 @@ export class LightsService {
       const s = a.result as LightState & { ip?: string };
       if (s.ip) this.ips.set(id, s.ip);
       const { ip: _ip, ...state } = s;
-      const next: LightState = { ...state, id, reachable: true, at: Date.now() };
+      const control = this.log.last(id);
+      const next: LightState = { ...state, id, reachable: true, at: Date.now(), ...(control ? { control } : {}) };
       this.states.set(id, next);
       return next;
     }
@@ -232,6 +237,16 @@ export class LightsService {
     return next;
   }
 
+  /** Switched on or off by something outside Harv since the last change Harv knows of (the Tapo app, its button, the other computer). */
+  private noticeOutside(state: LightState): LightState {
+    const last = state.control;
+    if (!state.reachable || !last || last.on === !!state.on) return state;
+    const control = this.log.record(state.id, 'outside', !!state.on, state.on ? 'on' : 'off');
+    const next = { ...state, control };
+    this.states.set(state.id, next);
+    return next;
+  }
+
   /** Reads every chosen light again. */
   async refresh(): Promise<LightState[]> {
     if (!this.ready() || !(await this.login())) {
@@ -241,14 +256,18 @@ export class LightsService {
     const out: LightState[] = [];
     for (const id of this.chosen()) {
       if (this.allowed(id)) continue;
-      out.push(this.remember(id, await this.ask({ op: 'state', mac: id, ip: this.ips.get(id), targets: broadcastTargets() })));
+      const state = this.remember(id, await this.ask({ op: 'state', mac: id, ip: this.ips.get(id), targets: broadcastTargets() }));
+      out.push(this.noticeOutside(state));
     }
     this.publish();
     return out;
   }
 
-  /** Changes one light; anything not in `change` stays. Throws with a plain reason when it can't. */
-  async set(id: string, change: LightChange): Promise<LightState> {
+  /**
+   * Changes one light; anything not in `change` stays. `by` is written to the log of who took
+   * control (automatic lights follow it). Throws with a plain reason when it can't.
+   */
+  async set(id: string, change: LightChange, by: LightControlBy = 'you', what?: string): Promise<LightState> {
     const why = this.allowed(id) ?? (this.ready() ? null : 'The light helper isn’t installed yet (Settings › Devices › Install).');
     if (why) throw new Error(why);
     if (!(await this.login())) throw new Error('Save your Tapo login in Settings › Devices first.');
@@ -269,9 +288,15 @@ export class LightsService {
       id,
       await this.ask({ op: 'set', mac: id, ip: this.ips.get(id), targets: broadcastTargets(), change: clean }),
     );
+    if (!state.reachable) {
+      this.publish();
+      throw new Error(state.error ?? 'The light didn’t answer.');
+    }
+    const control = this.log.record(id, by, !!state.on, what ?? describeChange(clean, !!state.on));
+    const next = { ...state, control };
+    this.states.set(id, next);
     this.publish();
-    if (!state.reachable) throw new Error(state.error ?? 'The light didn’t answer.');
-    return state;
+    return next;
   }
 
   async choose(id: string, chosen: boolean): Promise<void> {
@@ -289,6 +314,17 @@ export class LightsService {
     const k = key(name);
     return lights.filter((l) => key(l.name) === k || key(l.id) === k || (k.length > 1 && key(l.name).includes(k)));
   }
+}
+
+/** A change in a few words for the log ("on, 30%, hue 175"). */
+export function describeChange(c: LightChange, on: boolean): string {
+  if (c.on === false) return 'off';
+  const parts = [c.on === true || on ? 'on' : 'off'];
+  if (c.brightness !== undefined) parts.push(`${c.brightness}%`);
+  if (c.hue !== undefined) parts.push(`hue ${c.hue}`);
+  if (c.temp !== undefined) parts.push(`${c.temp}K`);
+  if (c.effect) parts.push(c.effect === 'Off' ? 'no effect' : c.effect);
+  return parts.join(', ');
 }
 
 function run(cmd: string, args: string[]): Promise<void> {

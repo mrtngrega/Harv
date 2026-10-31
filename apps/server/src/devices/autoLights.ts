@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { AutoLightsStatus, HarvSettings } from '@harv/shared';
+import type { AutoLightsStatus, HarvSettings, LightControl } from '@harv/shared';
 import { IS_WINDOWS } from '../platform.ts';
 import type { LightsService } from './lights.ts';
 
@@ -20,18 +20,18 @@ export interface Weather {
   at: number;
 }
 
+/**
+ * Automatic lights' own state, kept in the control log's file so it survives a restart. Whose the
+ * light is comes from the log of who took control last (`LightControl`), not from here.
+ */
 export interface AutoMemory {
   /** It counted as dark at the last check (kept between the on and off thresholds). */
   dark: boolean;
-  /** Harv turned the light on, so Harv may turn it off. */
-  owned: boolean;
-  /** The user switched it off while dark: left alone until it gets light again. */
-  suppressed: boolean;
-  /** The light's on/off as last seen (after Harv's own change), to notice a change by hand. */
-  seenOn: boolean | null;
+  /** When this dark spell began (ms): switched off by the user since then, it stays off. */
+  darkSince: number;
 }
 
-export const FRESH_MEMORY: AutoMemory = { dark: false, owned: false, suppressed: false, seenOn: null };
+export const FRESH_MEMORY: AutoMemory = { dark: false, darkSince: 0 };
 
 export interface AutoInput {
   now: number;
@@ -39,6 +39,8 @@ export interface AutoInput {
   idleSec: number;
   weather: Weather;
   light: { on: boolean };
+  /** Who changed the light last (null: nobody Harv knows of). */
+  last: Pick<LightControl, 'by' | 'on' | 'at'> | null;
   cfg: Pick<HarvSettings, 'autoLightsDark' | 'autoLightsSunset' | 'autoLightsAway'>;
 }
 
@@ -53,41 +55,40 @@ export function sunDark(now: number, w: Weather, beforeMin: number): boolean {
   return w.sunset.some((set, i) => now >= set - beforeMin * 60_000 && (w.sunrise[i + 1] === undefined || now < w.sunrise[i + 1]!));
 }
 
-export function decide(input: AutoInput, before: AutoMemory): { action: 'on' | 'off' | null; why: string; mem: AutoMemory } {
-  const { now, idleSec, weather, light, cfg } = input;
-  const mem = { ...before };
-  const byHand = mem.seenOn !== null && mem.seenOn !== light.on;
-  mem.seenOn = light.on;
-  if (byHand) {
-    // Switched by hand (the app, a chat, the card): it's the user's now.
-    mem.owned = false;
-    if (!light.on && mem.dark) mem.suppressed = true;
-  }
+const WHO: Record<LightControl['by'], string> = { auto: 'automatic lights', you: 'you', chat: 'a chat', outside: 'outside Harv' };
 
+export function decide(input: AutoInput, before: AutoMemory): { action: 'on' | 'off' | null; why: string; mem: AutoMemory } {
+  const { now, idleSec, weather, light, last, cfg } = input;
+  const mem = { ...before };
   const bySun = sunDark(now, weather, cfg.autoLightsSunset);
-  if (bySun || weather.radiation < cfg.autoLightsDark) mem.dark = true;
-  else if (weather.radiation > cfg.autoLightsDark * BRIGHT_FACTOR) mem.dark = false;
+  if (bySun || weather.radiation < cfg.autoLightsDark) {
+    if (!mem.dark) mem.darkSince = now;
+    mem.dark = true;
+  } else if (weather.radiation > cfg.autoLightsDark * BRIGHT_FACTOR) mem.dark = false;
+  // Harv's to turn off only while automatic lights were the last to change it.
+  const mine = last?.by === 'auto';
   const away = idleSec >= cfg.autoLightsAway * 60;
 
   if (!mem.dark) {
-    mem.suppressed = false;
-    if (mem.owned && light.on) return off(mem, 'daylight is back');
+    if (mine && light.on) return { action: 'off', why: 'daylight is back', mem };
     return { action: null, why: 'light outside', mem };
   }
   if (away) {
-    if (mem.owned && light.on) return off(mem, `away for ${Math.round(idleSec / 60)} min`);
-    return { action: null, why: 'dark, but you’re away', mem };
+    if (mine && light.on) return { action: 'off', why: `away for ${Math.round(idleSec / 60)} min`, mem };
+    return {
+      action: null,
+      why: light.on ? `dark, you’re away, but ${WHO[last?.by ?? 'outside']} turned it on` : 'dark, but you’re away',
+      mem,
+    };
   }
-  if (light.on) return { action: null, why: mem.owned ? 'dark, light on' : 'dark, already on (by hand)', mem };
-  if (mem.suppressed) return { action: null, why: 'dark, but you switched it off (until it gets light)', mem };
+  if (light.on)
+    return { action: null, why: mine ? 'dark, light on' : `dark, on (${last ? `${WHO[last.by]} turned it on` : 'it was on'})`, mem };
+  // Switched off by someone else since it got dark: theirs until it gets light again.
+  if (last && !mine && !last.on && last.at >= mem.darkSince) {
+    return { action: null, why: `dark, but ${WHO[last.by]} switched it off (until it gets light)`, mem };
+  }
   if (idleSec > ACTIVE_SEC) return { action: null, why: 'dark, waiting until you’re back at the computer', mem };
-  mem.owned = true;
-  mem.seenOn = true;
   return { action: 'on', why: bySun ? 'sunset' : `little sunlight (${Math.round(weather.radiation)} W/m²)`, mem };
-}
-
-function off(mem: AutoMemory, why: string) {
-  return { action: 'off' as const, why, mem: { ...mem, owned: false, seenOn: false } };
 }
 
 /** Open-Meteo: sunlight now, sunrise and sunset (free, no key; only the coordinates leave). */
@@ -155,7 +156,7 @@ const TICK_MS = 60_000;
 const WEATHER_MS = 10 * 60_000;
 
 export class AutoLights {
-  private mem: AutoMemory = { ...FRESH_MEMORY };
+  private mem: AutoMemory;
   private weather: Weather | null = null;
   private weatherFor = '';
   private idleSec: number | null = null;
@@ -168,7 +169,9 @@ export class AutoLights {
   constructor(
     private lights: LightsService,
     private deps: AutoDeps,
-  ) {}
+  ) {
+    this.mem = lights.log.autoState() ?? { ...FRESH_MEMORY };
+  }
 
   start(): void {
     this.timer = setInterval(() => void this.tick(), TICK_MS);
@@ -203,7 +206,6 @@ export class AutoLights {
   async tick(): Promise<void> {
     const s = this.deps.settings();
     if (!s.autoLights || !s.autoLightsPlace || this.running) {
-      if (!s.autoLights) this.mem = { ...FRESH_MEMORY };
       return;
     }
     this.running = true;
@@ -230,19 +232,20 @@ export class AutoLights {
         this.why = 'the light isn’t reachable';
         return;
       }
-      const result = decide({ now, idleSec: this.idleSec, weather: this.weather!, light: { on: !!light.on }, cfg: s }, this.mem);
+      const result = decide(
+        { now, idleSec: this.idleSec, weather: this.weather!, light: { on: !!light.on }, last: light.control ?? null, cfg: s },
+        this.mem,
+      );
       this.mem = result.mem;
+      this.lights.log.setAutoState(this.mem);
       this.why = result.why;
       if (result.action) {
         try {
-          await this.lights.set(light.id, { on: result.action === 'on' });
+          await this.lights.set(light.id, { on: result.action === 'on' }, 'auto', `${result.action} (${result.why})`);
           this.last = { action: result.action, why: result.why, at: now };
           this.deps.log(`Automatic lights: ${light.name} ${result.action} (${result.why})`);
         } catch (err) {
           this.problem = (err as Error).message;
-          // Not done: next time it's seen as it really is, not as a change by hand.
-          this.mem.seenOn = !!light.on;
-          if (result.action === 'on') this.mem.owned = false;
         }
       }
     } finally {

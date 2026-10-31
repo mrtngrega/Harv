@@ -1054,6 +1054,8 @@ function LightsSettings() {
   );
 }
 
+const CONTROL_BY = { auto: 'Automatic lights', you: 'You', chat: 'A chat', outside: 'Outside Harv' } as const;
+
 /** Settings › Devices › Automatic lights (docs/PLAN.md §6z): on when it's dark outside and the user is here. */
 function AutoLightsSettings() {
   const settings = useSettings();
@@ -1142,6 +1144,20 @@ function AutoLightsSettings() {
         </Note>
       )}
       {settings.autoLights && !settings.autoLightsPlace && <Note warn>Set your place first: the weather is read there.</Note>}
+      {!!status.log?.length && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] text-muted">Who changed it last (automatic lights only turn off what they turned on)</span>
+          <ul className="m-0 flex list-none flex-col gap-0.5 p-0 text-[11px]">
+            {status.log.slice(0, 6).map((e) => (
+              <li key={`${e.id}-${e.at}`} className="flex gap-2">
+                <span className="w-11 flex-none text-faint tabular-nums">{time(e.at)}</span>
+                <span className="w-28 flex-none text-ink">{CONTROL_BY[e.by]}</span>
+                <span className="min-w-0 truncate text-muted">{e.what}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {auto?.problem && <Note warn>{auto.problem}</Note>}
     </Sub>
   );
