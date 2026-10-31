@@ -1084,7 +1084,7 @@ function AutoLightsSettings() {
       setNote('Couldn’t reach the Harv server.');
     }
   };
-  const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time = (ms: number) => new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   const number = (key: 'autoLightsDark' | 'autoLightsSunset' | 'autoLightsAway', label: string, unit: string, min: number, max: number) => (
     <label className={ROW}>
       <span className={LABEL}>{label}</span>
