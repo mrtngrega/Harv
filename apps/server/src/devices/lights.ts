@@ -4,7 +4,7 @@ import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import type { FoundLight, LightChange, LightState, LightsStatus } from '@harv/shared';
+import type { AutoLightsStatus, FoundLight, LightChange, LightState, LightsStatus } from '@harv/shared';
 import { HARV_HOME } from '../paths.ts';
 import { IS_WINDOWS } from '../platform.ts';
 import { fitTemp } from './colors.ts';
@@ -72,6 +72,8 @@ export class LightsService {
   private problem: string | undefined;
   private installing = false;
   private timer: NodeJS.Timeout | null = null;
+  /** Automatic lights' state, shown with the lights (set by the server). */
+  autoStatus: (() => AutoLightsStatus) | null = null;
 
   constructor(
     private store: DeviceStore,
@@ -109,10 +111,11 @@ export class LightsService {
       lights,
       found,
       ...(this.problem ? { problem: this.problem } : {}),
+      ...(this.autoStatus ? { auto: this.autoStatus() } : {}),
     };
   }
 
-  private publish() {
+  publish(): void {
     this.deps.broadcast(this.status());
   }
 

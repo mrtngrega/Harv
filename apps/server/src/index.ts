@@ -40,6 +40,7 @@ import { GeminiImages, GeminiProblem } from './tools/gemini.ts';
 import { DeviceStore } from './devices/store.ts';
 import { LightsService } from './devices/lights.ts';
 import { lightTools } from './devices/tools.ts';
+import { AutoLights, findPlace } from './devices/autoLights.ts';
 import { HarvBrowser } from './tools/harvBrowser.ts';
 import { cleanPath, listFolder, openWithDefault, places, previewType, suggestPaths } from './tools/files.ts';
 import {
@@ -318,6 +319,14 @@ const lights = new LightsService(devices, {
 });
 lights.start();
 chats.lights = lightTools(lights);
+// Automatic lights: on when it's dark outside and the user is at this computer (docs/PLAN.md §6z).
+const autoLights = new AutoLights(lights, {
+  settings: loadSettings,
+  log: (message) => app.log.info(message),
+  changed: () => lights.publish(),
+});
+lights.autoStatus = () => autoLights.status();
+autoLights.start();
 chats.images = {
   async generate(prompt, images) {
     try {
@@ -550,6 +559,20 @@ app.post('/api/backups/keep', async (req, reply) => {
 // Settings › Devices: the Tapo account login for the user's lights (docs/PLAN.md §6z). The password goes in, never out.
 app.get('/api/devices', async () => devices.summary());
 // Settings › Devices › Install: the light helper's venv with the reviewed python-kasa (once per computer).
+// Settings › Devices › Automatic lights: the place the weather is read for, found by name.
+app.post('/api/devices/place', async (req, reply) => {
+  const { name } = (req.body ?? {}) as { name?: unknown };
+  if (typeof name !== 'string' || !name.trim()) return reply.code(400).send({ error: 'Type a town or village.' });
+  try {
+    const found = await findPlace(name);
+    if (!found) return reply.code(404).send({ error: `Couldn’t find “${name.trim()}”.` });
+    broadcast({ type: 'settings', settings: updateSettings({ autoLightsPlace: found }) });
+    void autoLights.tick();
+    return { place: found };
+  } catch (err) {
+    return reply.code(502).send({ error: `The place search didn’t answer: ${(err as Error).message}` });
+  }
+});
 app.post('/api/devices/setup', async () => {
   void lights.install().then(() => lights.scan());
   return { ok: true };
@@ -817,6 +840,8 @@ app.get('/ws', { websocket: true }, (socket, req) => {
       case 'settings.update':
         if (!msg.patch || typeof msg.patch !== 'object') break;
         broadcast({ type: 'settings', settings: updateSettings(msg.patch) });
+        // Automatic lights switched on (or tuned): check at once instead of within the minute.
+        if (Object.keys(msg.patch).some((k) => k.startsWith('autoLights'))) void autoLights.tick();
         break;
       case 'sync.now':
         void sync.now();

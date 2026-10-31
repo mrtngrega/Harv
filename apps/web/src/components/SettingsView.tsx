@@ -1054,6 +1054,99 @@ function LightsSettings() {
   );
 }
 
+/** Settings › Devices › Automatic lights (docs/PLAN.md §6z): on when it's dark outside and the user is here. */
+function AutoLightsSettings() {
+  const settings = useSettings();
+  const status = useLights();
+  const auto = status?.auto;
+  const [place, setPlace] = useState('');
+  const [note, setNote] = useState<string | null>(null);
+  if (!status?.lights.length) return null;
+  if (auto && !auto.supported) {
+    return (
+      <Sub title="Automatic lights">
+        <Note>For now only on the PC: it tells you’re here from the mouse and keyboard there.</Note>
+      </Sub>
+    );
+  }
+  const findPlace = async () => {
+    setNote('Looking…');
+    try {
+      const res = await fetch('/api/devices/place', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: place }),
+      });
+      const body = (await res.json()) as { place?: { name: string }; error?: string };
+      setNote(res.ok ? null : (body.error ?? 'Couldn’t find it.'));
+      if (res.ok) setPlace('');
+    } catch {
+      setNote('Couldn’t reach the Harv server.');
+    }
+  };
+  const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const number = (key: 'autoLightsDark' | 'autoLightsSunset' | 'autoLightsAway', label: string, unit: string, min: number, max: number) => (
+    <label className={ROW}>
+      <span className={LABEL}>{label}</span>
+      <span className="flex items-center gap-2">
+        <input
+          type="number"
+          min={min}
+          max={max}
+          value={settings[key]}
+          onChange={(e) => e.target.value && updateSettings({ [key]: Number(e.target.value) })}
+          className={`${INPUT} max-w-20 flex-none`}
+        />
+        <span className="text-faint">{unit}</span>
+      </span>
+    </label>
+  );
+  return (
+    <Sub title="Automatic lights">
+      <Toggle
+        on={settings.autoLights}
+        label="Turn the light on when it’s dark and I’m here"
+        hint="Dark: clouds, rain or dusk, from the sunlight where you live (Open-Meteo, free), or around sunset. Here: you used this computer’s mouse or keyboard lately. It goes off when you leave, only if Harv turned it on; switched off by hand, it stays off until it gets light."
+        onChange={(autoLights) => updateSettings({ autoLights })}
+      />
+      <form
+        className={ROW}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void findPlace();
+        }}
+      >
+        <span className={LABEL}>Place</span>
+        <input
+          className={INPUT}
+          value={place}
+          onChange={(e) => setPlace(e.target.value)}
+          placeholder={settings.autoLightsPlace?.name ?? 'Your town or village'}
+        />
+        <button type="submit" className={BUTTON} disabled={!place.trim()}>
+          Set
+        </button>
+      </form>
+      {note && <Note warn>{note}</Note>}
+      {number('autoLightsDark', 'Dark below', 'W/m² of sunlight', 5, 500)}
+      {number('autoLightsSunset', 'Before sunset', 'minutes', 0, 180)}
+      {number('autoLightsAway', 'Away after', 'minutes', 1, 120)}
+      {settings.autoLights && auto && (
+        <Note>
+          Now: {auto.sunlight !== undefined ? `${auto.sunlight} W/m² of sunlight` : 'no weather yet'}
+          {auto.sunset ? `, sunset ${time(auto.sunset)}` : ''}
+          {auto.idleSec !== undefined
+            ? `, last input ${auto.idleSec < 60 ? 'just now' : `${Math.round(auto.idleSec / 60)} min ago`}`
+            : ''}. {auto.why}
+          {auto.last ? ` Last: ${auto.last.action} at ${time(auto.last.at)} (${auto.last.why}).` : ''}
+        </Note>
+      )}
+      {settings.autoLights && !settings.autoLightsPlace && <Note warn>Set your place first: the weather is read there.</Note>}
+      {auto?.problem && <Note warn>{auto.problem}</Note>}
+    </Sub>
+  );
+}
+
 /** The photo: preview, choose, remove. */
 function PhotoPicker() {
   const { version } = useBackground();
@@ -1515,6 +1608,7 @@ export function SettingsView() {
         <Group title="Devices" hint="Smart-home devices Harv controls.">
           <TapoLogin />
           <LightsSettings />
+          <AutoLightsSettings />
         </Group>
       )}
 

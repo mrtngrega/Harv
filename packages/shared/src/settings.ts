@@ -108,6 +108,18 @@ export interface HarvSettings {
   // Phone (docs/PLAN.md §6q)
   /** Paired phones may open this device's Harv over Tailscale (`tailscale serve`). Per device, off by default. */
   phoneAccess: boolean;
+
+  // Automatic lights (docs/PLAN.md §6z "Automatic lights"), per device: it needs the user at this computer.
+  /** Turn the user's light on when it's dark outside and they're at this computer, off when they leave. */
+  autoLights: boolean;
+  /** Where the weather is read (a place the user typed, found by Open-Meteo's geocoding). */
+  autoLightsPlace: { name: string; lat: number; lon: number } | null;
+  /** Sunlight on the ground (W/m²) below which it counts as dark (clouds, rain, dusk). */
+  autoLightsDark: number;
+  /** Minutes before sunset from which it counts as dark anyway. */
+  autoLightsSunset: number;
+  /** Minutes without mouse or keyboard after which the user has left (a light Harv turned on goes off). */
+  autoLightsAway: number;
 }
 
 export const DEFAULT_SETTINGS: HarvSettings = {
@@ -148,6 +160,11 @@ export const DEFAULT_SETTINGS: HarvSettings = {
   syncRepo: '',
   deviceName: '',
   phoneAccess: false,
+  autoLights: false,
+  autoLightsPlace: null,
+  autoLightsDark: 100,
+  autoLightsSunset: 30,
+  autoLightsAway: 10,
 };
 
 /**

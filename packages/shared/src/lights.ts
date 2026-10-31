@@ -45,6 +45,27 @@ export interface LightsStatus {
   /** The last scan's lights (Settings › Devices). */
   found: FoundLight[];
   problem?: string;
+  /** Automatic lights on this computer (docs/PLAN.md §6z). */
+  auto?: AutoLightsStatus;
+}
+
+/** What automatic lights see and did, for Settings › Devices. */
+export interface AutoLightsStatus {
+  enabled: boolean;
+  /** It needs to know the user is at the computer: Windows only for now. */
+  supported: boolean;
+  /** Sunlight on the ground now (W/m²), and when the weather was read. */
+  sunlight?: number;
+  weatherAt?: number;
+  /** Today's (or tomorrow's) sunset, epoch ms. */
+  sunset?: number;
+  /** Seconds since the last mouse or keyboard input. */
+  idleSec?: number;
+  dark: boolean;
+  /** Why it does what it does right now ("dark, but you're away"). */
+  why: string;
+  last?: { action: 'on' | 'off'; why: string; at: number };
+  problem?: string;
 }
 
 /** What to change on a light; anything left out stays. A colour, a white or an effect also turns it on. */

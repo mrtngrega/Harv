@@ -20,6 +20,18 @@ const bool = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fa
 const num = (v: unknown, min: number, max: number, fallback: number) =>
   typeof v === 'number' && Number.isFinite(v) ? Math.round(Math.min(max, Math.max(min, v))) : fallback;
 const oneOf = <T>(v: unknown, options: readonly T[], fallback: T): T => (options.includes(v as T) ? (v as T) : fallback);
+/** A place with real coordinates, or null to clear it. */
+const place = (v: unknown, fallback: HarvSettings['autoLightsPlace']): HarvSettings['autoLightsPlace'] => {
+  if (v === null) return null;
+  const p = v as { name?: unknown; lat?: unknown; lon?: unknown } | undefined;
+  return typeof p?.name === 'string' &&
+    typeof p.lat === 'number' &&
+    typeof p.lon === 'number' &&
+    Math.abs(p.lat) <= 90 &&
+    Math.abs(p.lon) <= 180
+    ? { name: p.name.trim().slice(0, 80), lat: p.lat, lon: p.lon }
+    : fallback;
+};
 const percents = (v: unknown, fallback: number[]) =>
   Array.isArray(v)
     ? [...new Set(v.filter((n): n is number => typeof n === 'number' && n > 0 && n < 100).map(Math.round))].sort((a, b) => a - b)
@@ -86,6 +98,11 @@ export function cleanSettings(raw: Raw, base: HarvSettings = DEFAULT_SETTINGS): 
       : base.watchdogIgnored,
     syncEnabled: bool(raw.syncEnabled, base.syncEnabled),
     phoneAccess: bool(raw.phoneAccess, base.phoneAccess),
+    autoLights: bool(raw.autoLights, base.autoLights),
+    autoLightsPlace: place(raw.autoLightsPlace, base.autoLightsPlace),
+    autoLightsDark: num(raw.autoLightsDark, 5, 500, base.autoLightsDark),
+    autoLightsSunset: num(raw.autoLightsSunset, 0, 180, base.autoLightsSunset),
+    autoLightsAway: num(raw.autoLightsAway, 1, 120, base.autoLightsAway),
     syncRepo:
       typeof raw.syncRepo === 'string' && (raw.syncRepo.trim() === '' || SYNC_REPO.test(raw.syncRepo.trim()))
         ? raw.syncRepo.trim()
