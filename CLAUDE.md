@@ -107,7 +107,7 @@ Since 2026-10-24 (evening) the user develops Harv in **Claude Code** again ("it 
   - `options.ts` builds every query:
     - an explicit `env` with no API key
     - `cwd` set to `~/.harv/workspace`
-    - since 2026-10-27 every chat has Claude Code's full toolset (`tools: preset claude_code`) and the user's Claude Code setup (`settingSources: ['user']`, `strictMcpConfig: false`: skills, plugins, claude.ai connectors), with Claude Code's auto-memory off (`settings.autoMemoryEnabled: false`; Harv's memory is `~/.harv/memory`), only `CHAT_SKILLS` listed until the user asks for another skill by name (`asksForSkill`: then that chat loads them all, `ChatManager.allSkills`) and plans written to `~/.harv/workspace/plans` (`PLANS_DIR`)
+    - since 2026-10-27 every chat has Claude Code's full toolset (`tools: preset claude_code`) and the user's Claude Code setup (`settingSources: ['user']`, `strictMcpConfig: false`: skills, plugins, claude.ai connectors), with Claude Code's auto-memory off (`settings.autoMemoryEnabled: false`; Harv's memory is `~/.harv/memory`), only `CHAT_SKILLS` listed (including the reviewed outside skills in `~/.claude/skills`, plain folders, no plugins or hooks, which Harv uses by itself: persona rule 13, `docs/PLAN.md` §6ab) until the user asks for another skill by name (`asksForSkill`: then that chat loads them all, `ChatManager.allSkills`) and plans written to `~/.harv/workspace/plans` (`PLANS_DIR`)
     - Harv's own system prompt, plus Harv's own `mcp__harv__*` tools
     - file checkpoints (`enableFileCheckpointing`) for rewind
     - the safety gate's `PreToolUse`/`PostToolUse` hooks plus `canUseTool` as a backstop
