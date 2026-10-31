@@ -84,6 +84,28 @@ describe('automatic lights', () => {
     expect(evening.action).toBe('on');
   });
 
+  it('the user’s night: switched off by hand, the PC off overnight, on again after dark the next day', () => {
+    // Tonight: dark since 15:46, the user switches the strip off at 22:00 and shuts the PC down.
+    const tonight = { dark: true, darkSince: day(15, 46) };
+    const off = { by: 'you' as const, on: false, at: day(22) };
+    expect(run(day(22, 1), 0, 5, false, off, tonight).action).toBeNull();
+    // Tomorrow at 18:00 the PC starts again: Harv never saw the morning, but the sun rose since.
+    const tomorrow = run(day(24 + 18), 0, 5, false, off, tonight);
+    expect(tomorrow.mem.darkSince).toBe(day(24 + 18));
+    expect(tomorrow.action).toBe('on');
+    // Started during the day instead: also on once it gets dark.
+    const noon = run(day(24 + 12), 400, 5, false, off, tonight);
+    expect(noon.action).toBeNull();
+    expect(run(day(24 + 16), 300, 5, false, off, noon.mem).action).toBe('on');
+  });
+
+  it('a hand switch-off earlier the same night still holds after a Harv restart', () => {
+    const tonight = { dark: true, darkSince: day(15, 46) };
+    const r = run(day(23), 0, 5, false, { by: 'you', on: false, at: day(21) }, tonight);
+    expect(r.action).toBeNull();
+    expect(r.mem.darkSince).toBe(day(15, 46));
+  });
+
   it('a switch-off from before it got dark doesn’t keep it off', () => {
     const r = run(day(16), 300, 10, false, { by: 'you', on: false, at: day(10) }, { dark: false, darkSince: 0 });
     expect(r.action).toBe('on');

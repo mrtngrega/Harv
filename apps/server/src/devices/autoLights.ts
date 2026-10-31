@@ -62,7 +62,10 @@ export function decide(input: AutoInput, before: AutoMemory): { action: 'on' | '
   const mem = { ...before };
   const bySun = sunDark(now, weather, cfg.autoLightsSunset);
   if (bySun || weather.radiation < cfg.autoLightsDark) {
-    if (!mem.dark) mem.darkSince = now;
+    // A new dark spell: it was light at the last check, or the sun rose since this one began (the PC
+    // was off through the morning, so Harv never saw the daylight in between).
+    const sunRoseSince = weather.sunrise.some((t) => t > mem.darkSince && t <= now);
+    if (!mem.dark || sunRoseSince) mem.darkSince = now;
     mem.dark = true;
   } else if (weather.radiation > cfg.autoLightsDark * BRIGHT_FACTOR) mem.dark = false;
   // Harv's to turn off only while automatic lights were the last to change it.

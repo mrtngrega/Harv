@@ -69,6 +69,8 @@ export class LightsService {
   private pending = new Map<number, (a: HelperAnswer) => void>();
   private states = new Map<string, LightState>();
   private ips = new Map<string, string>();
+  /** Lights read since Harv started (a change seen on the first read happened while it was off). */
+  private watched = new Set<string>();
   private found: { id: string; ip: string; model: string }[] = [];
   private problem: string | undefined;
   private installing = false;
@@ -238,10 +240,14 @@ export class LightsService {
   }
 
   /** Switched on or off by something outside Harv since the last change Harv knows of (the Tapo app, its button, the other computer). */
-  private noticeOutside(state: LightState): LightState {
+  private noticeOutside(state: LightState, firstLook: boolean): LightState {
     const last = state.control;
     if (!state.reachable || !last || last.on === !!state.on) return state;
-    const control = this.log.record(state.id, 'outside', !!state.on, state.on ? 'on' : 'off');
+    // Seen on the first read since Harv started: it happened some time while Harv wasn't running, so it
+    // can't count as "since it got dark" tonight (switched off last night, the PC on again after dark).
+    const control = firstLook
+      ? this.log.record(state.id, 'outside', !!state.on, `${state.on ? 'on' : 'off'} (while Harv wasn’t running)`, last.at + 1)
+      : this.log.record(state.id, 'outside', !!state.on, state.on ? 'on' : 'off');
     const next = { ...state, control };
     this.states.set(state.id, next);
     return next;
@@ -257,7 +263,8 @@ export class LightsService {
     for (const id of this.chosen()) {
       if (this.allowed(id)) continue;
       const state = this.remember(id, await this.ask({ op: 'state', mac: id, ip: this.ips.get(id), targets: broadcastTargets() }));
-      out.push(this.noticeOutside(state));
+      out.push(this.noticeOutside(state, !this.watched.has(id)));
+      if (state.reachable) this.watched.add(id);
     }
     this.publish();
     return out;
