@@ -82,3 +82,17 @@ export function toCommandInfo(commands: SlashCommand[], terminalOnly: string[] =
 export function commandName(text: string): string | undefined {
   return /^\/([\w:.-]+)(\s|$)/.exec(text.trim())?.[1];
 }
+
+/** Harv's and the dashboard's own words after a slash: never a skill to go looking for. */
+const OWN_WORDS = new Set(['btw', 'fresh', 'report', 'clear', 'plan', 'rewind', 'model', 'effort', 'attach', 'new', 'help', 'compact']);
+
+/**
+ * A normal chat lists only some skills (CHAT_SKILLS). This says whether the user asked for one
+ * by name: a `/name` the chat doesn't know (not a model or effort word like /opus), or a message
+ * that talks about a skill or plugin ("use the code-review skill").
+ */
+export function asksForSkill(text: string, known: (name: string) => boolean, overrideWord: (word: string) => boolean): boolean {
+  const name = commandName(text);
+  if (name) return !OWN_WORDS.has(name.toLowerCase()) && !overrideWord(name) && !known(name);
+  return /\b(skills?|plugins?)\b/i.test(text);
+}

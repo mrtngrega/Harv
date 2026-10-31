@@ -164,7 +164,7 @@ describe('reading', () => {
   });
 
   it('checks search roots too', () => {
-    expect(tier('Glob', { pattern: '**/*', path: 'C:\\Users\\me\\.claude' })).toBe('blocked');
+    expect(tier('Glob', { pattern: '**/*', path: 'C:\\Users\\me\\.ssh' })).toBe('blocked');
   });
 
   it('refuses tools Harv does not have', () => {
@@ -493,10 +493,29 @@ describe('credentials stay blocked (the user’s wish)', () => {
     expect(cmd('for f in ~/.claude/projects/x/*.jsonl; do grep -c image "$f"; done')).not.toBe('blocked');
     expect(tier('Write', { file_path: transcript })).toBe('blocked');
     expect(tier('Edit', { file_path: transcript })).toBe('blocked');
-    expect(cmd(`rm ${transcript}`)).toBe('red');
+    expect(cmd(`rm ${transcript}`)).toBe('blocked');
     expect(tier('Read', { file_path: '~/.claude/.credentials.json' })).toBe('blocked');
     expect(tier('Read', { file_path: '~/.claude/settings.json' })).toBe('blocked');
     expect(cmd('cat ~/.claude/projects/../settings.json')).toBe('blocked');
+  });
+
+  it("reads the user's Claude Code setup (global CLAUDE.md, skills, plugins), never changes it (2026-10-31)", () => {
+    const skill = '~/.claude/skills/synced/abc/docx/SKILL.md';
+    expect(tier('Read', { file_path: '~/.claude/CLAUDE.md' })).toBe('green');
+    expect(tier('Read', { file_path: skill })).toBe('green');
+    expect(tier('Read', { file_path: '~/.claude/plugins/marketplaces/x/plugins/y/skills/z/SKILL.md' })).toBe('green');
+    expect(cmd('cat ~/.claude/CLAUDE.md')).toBe('green');
+    expect(cmd('ls ~/.claude/skills')).toBe('green');
+    expect(tier('Write', { file_path: '~/.claude/CLAUDE.md' })).toBe('blocked');
+    expect(tier('Edit', { file_path: skill })).toBe('blocked');
+    expect(cmd('rm -rf ~/.claude/skills/old')).toBe('blocked');
+    expect(cmd('echo x >> ~/.claude/CLAUDE.md')).toBe('blocked');
+    // The login and the settings stay off-limits, also by a detour.
+    expect(tier('Read', { file_path: '~/.claude/settings.local.json' })).toBe('blocked');
+    expect(cmd('cat ~/.claude/skills/../.credentials.json')).toBe('blocked');
+    expect(cmd('cat ~/.claude/skills/../settings.json')).toBe('blocked');
+    // Project memory notes stay writable.
+    expect(tier('Write', { file_path: '~/.claude/projects/C--x/memory/notes.md' })).toBe('green');
   });
 });
 

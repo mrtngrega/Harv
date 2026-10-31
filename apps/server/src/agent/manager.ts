@@ -25,7 +25,7 @@ import { cloneProject, createGitHubRepo, planLink, pullNotice, pullProject, remo
 import type { UsageMeter } from '../usage/meter.ts';
 import { buildContent, cleanAttachments, deleteAttachments } from './attachments.ts';
 import { sideQuestion } from './btw.ts';
-import { commandName, hiddenReason } from './commands.ts';
+import { asksForSkill, commandName, hiddenReason } from './commands.ts';
 import {
   formatTranscript,
   type HandOff,
@@ -111,7 +111,7 @@ type Queued =
  */
 /** In front of a spoken turn (Siri, the phone's voice mode): the reply is read aloud. */
 export const SPOKEN_NOTE =
-  "[The user is talking to you by voice from their phone, and your reply is read aloud. Answer in one to three short spoken sentences: no Markdown, lists, tables, code or file paths unless they ask. For a longer job, say you're on it, do it, then end with one short spoken sentence on the result.]\n\n";
+  "[The user is talking to you by voice from their phone, and your reply is read aloud. Look things up and do the work as fully as you would in a typed chat (check projects, files, git, your memory), but keep the reply itself to one to three short spoken sentences: no Markdown, lists, tables, code or file paths unless they ask. For a longer job, say you're on it, do it, then end with one short spoken sentence on the result.]\n\n";
 
 export class ChatManager {
   private sessions = new Map<string, ChatSession>();
@@ -119,6 +119,8 @@ export class ChatManager {
   private carry = new Map<string, string>();
   /** Chats whose project changed mid-turn: their session ends when the turn does. */
   private switchAfterTurn = new Set<string>();
+  /** Normal chats that load every skill (the user asked for one they don't list). */
+  private allSkills = new Set<string>();
   /** Old sessions about to go (their turn just ended): a message arriving first makes it happen at once, so it never lands in the old one. */
   private dropping = new Set<string>();
   /** Tag and routing reason of the turn currently running per tab ("sonnet·medium"). */
@@ -452,6 +454,7 @@ export class ChatManager {
       (req, signal) => this.delegate(tabId, req, signal),
       {
         project: this.store.projectOf(tabId),
+        ...(this.allSkills.has(tabId) ? { allSkills: true } : {}),
         projects: this.projectTools,
         schedules: this.schedules,
         terminal: this.terminal,
@@ -528,6 +531,27 @@ export class ChatManager {
     if (/^\/fresh\s*$/i.test(message.trim()) && !files.length) {
       await this.fresh(tabId);
       return;
+    }
+    // A skill the normal chat doesn't list (code-review, simplify, frontend-design…), asked for by name:
+    // the chat loads every skill from now on, like a project chat. Same conversation, resumed.
+    if (
+      !this.allSkills.has(tabId) &&
+      !this.store.projectOf(tabId) &&
+      asksForSkill(
+        message,
+        (n) => this.isCommand(tabId, n),
+        (w) => !!parseOverride(`/${w}`).model || !!parseOverride(`/${w}`).effort,
+      )
+    ) {
+      this.allSkills.add(tabId);
+      this.dropSession(tabId);
+      this.commands.delete(tabId);
+      this.emit({ type: 'chat.notice', tabId, message: 'This chat now has all your skills (the ones project chats have).' });
+      const named = commandName(message);
+      if (named && !files.length && !hiddenReason(named)) {
+        await this.runCommand(tabId, named, message.trim());
+        return;
+      }
     }
     const command = commandName(message);
     if (command && !files.length && this.isCommand(tabId, command)) {

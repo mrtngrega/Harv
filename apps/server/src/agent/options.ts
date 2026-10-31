@@ -53,6 +53,8 @@ export interface ChatContext {
   delegate?: Delegate;
   /** The project this chat works on: the session then runs as Claude Code in that folder (project mode). */
   project?: Project;
+  /** The user asked for a skill a normal chat doesn't list: this chat loads all of them, like a project chat. */
+  allSkills?: boolean;
   /** Harv's start_project / open_project / list_projects tools. */
   projects?: ProjectTools;
   /** Harv's schedule_task / list_scheduled / cancel_scheduled tools. */
@@ -73,8 +75,8 @@ function otherChats(chat: ChatContext): string {
     '## Your other chats',
     [
       "Each chat tab is a separate conversation, but they're all you: the same rules, the same memory, one shared history. If another chat saves or forgets a memory, you'll get a note about it with the user's next message.",
-      "When the user refers to another tab or something you discussed before that isn't in this conversation, use list_chats to find it and read_chat to read it. Don't read other chats unprompted; it uses the user's plan.",
-      'Earlier Claude Code sessions (project chats, and the user\'s own Claude Code sessions in a terminal) are saved as ~/.claude/projects/<folder>/<session>.jsonl, one JSON line per message, with <folder> the working folder with every non-letter or digit turned into "-". When the user asks about an earlier session you can\'t find with read_chat, grep those files first (they get big), then read the parts you need. They are read-only.',
+      "When the user asks about something outside this conversation, look where the answer actually lives first: a project's state with project_status, files and folders on the computer, git, your memory. Old chats come second: when the user refers to another tab or something you talked about before, use list_chats to find it and read_chat to read it. Don't comb through old chats with no reason to; it uses the user's plan.",
+      "Earlier Claude Code sessions (project chats, and the user's own Claude Code sessions in a terminal) are saved as ~/.claude/projects/<folder>/<session>.jsonl, one JSON line per message, with <folder> the working folder with every non-letter or digit turned into \"-\". When the user asks about an earlier session (theirs in Claude Code or a project chat's), grep those files (they get big), then read the parts you need. They are read-only. The user's Claude Code setup in ~/.claude (their global CLAUDE.md, skills, plugins, agents) is readable too, also read-only; only its login and settings files are off-limits.",
       "When the user asks another tab (or a new one) to do something, use hand_off with a complete request: the other chat can't see this conversation. By default you wait and get its answer; pass wait: false for long jobs the user wants running on their own. A message that starts with [Handed over from …] came from another of your chats, not straight from the user: do it like a normal request, and your reply goes back to that chat.",
       'Recent chats:',
       recentChatsContext(chat.store, chat.tabId),
@@ -274,7 +276,7 @@ export function buildOptions(
             systemPrompt: systemPrompt(chat),
             tools: { type: 'preset', preset: 'claude_code' },
             disallowedTools: [...NEVER_TOOLS, ...CODING_TOOLS],
-            skills: CHAT_SKILLS,
+            ...(chat.allSkills ? {} : { skills: CHAT_SKILLS }),
           }
         : {
             // The model catalog: nothing loaded, no tools.

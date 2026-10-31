@@ -93,11 +93,17 @@ export const ENABLED_TOOLS = [...READ_TOOLS, ...FILE_WRITE_TOOLS, ...SHELL_TOOLS
 /** Where a file name ends inside a command line too (a quote, a space, a separator), not only at the end. */
 const END = String.raw`(?=$|[\s"'\\/;|),])`;
 const START = String.raw`(^|[\\/\s"'])`;
-const sensitive = (body: string) => new RegExp(body.replace(/\^START/g, START).replace(/END$/, END), 'i');
+// END can sit inside a group too (`([\\/]|END)`: the folder itself or anything in it).
+const sensitive = (body: string) => new RegExp(body.replace(/\^START/g, START).replace(/END/g, END), 'i');
 
 /** Files and folders that hold passwords, keys, tokens or login sessions: never read or changed. */
 const SENSITIVE_PATHS: RegExp[] = [
-  /(^|[\\/])\.claude([\\/]|$)/i, // Claude Code login and settings
+  // Claude Code's login (.credentials.json, also caught by "credential") and its settings files, which can
+  // carry API keys and tokens (env, apiKeyHelper, MCP servers). The rest of ~/.claude (the user's CLAUDE.md,
+  // skills, plugins, agents, commands) is readable; only Claude Code itself changes it (isClaudeSetup).
+  sensitive(String.raw`[\\/]\.claude[\\/](\.credentials\.json|settings(\.local)?\.json)END`),
+  // Climbing back out of a readable part (`~/.claude/projects/x/../../settings.json`).
+  /[\\/]\.claude[\\/].*\.\.([\\/]|$)/i,
   /credential/i, // Windows Credentials, .git-credentials, …credentials.json
   sensitive(String.raw`^START\.(ssh|aws|azure|kube|gnupg|gcloud)([\\/]|END)`),
   sensitive(String.raw`^START\.env(?!\.(example|sample|template)\b)(\.[\w.-]+)?END`),
@@ -178,6 +184,16 @@ export function isClaudeHistory(p: string): boolean {
 export function isClaudeMemory(p: string): boolean {
   const path = fullPath(p);
   return isClaudeHistory(path) && /[\\/]memory[\\/][^\\/]+\.md$|[\\/]memory[\\/]?$/i.test(path);
+}
+
+/**
+ * Claude Code's own setup (~/.claude: the user's CLAUDE.md, skills, plugins, settings): readable
+ * (since 2026-10-31, the user's wish), changed only by Claude Code and the user, except the
+ * project memory notes.
+ */
+export function isClaudeSetup(p: string): boolean {
+  const path = fullPath(p);
+  return isInside(path, join(homedir(), '.claude')) && !isClaudeMemory(path);
 }
 
 /** Where a call runs: in a project chat, the project folder (trusted, and the base for relative paths). */
@@ -403,6 +419,8 @@ function classifyFileWrite(tool: string, rawPath: string, ctx: ClassifyContext =
   if (protectedDir) return verdict('blocked', `${protectedDir} is on your read-only list.`, summary);
   if (isClaudeHistory(path) && !isClaudeMemory(path))
     return verdict('blocked', "Claude Code's session history is only read, never changed.", summary);
+  if (isClaudeSetup(path))
+    return verdict('blocked', "Claude Code's own setup (~/.claude) is only read; the user changes it in Claude Code.", summary);
   if (isSensitivePath(path)) return verdict('blocked', 'That file may hold credentials or secrets.', summary);
   if (isSystemDir(path)) return verdict('blocked', `Harv never writes inside ${SYSTEM_FOLDER}.`, summary);
   if (isHarvData(path)) return verdict('blocked', "Harv's database, backups and memory are only changed by Harv itself.", summary);
@@ -1191,6 +1209,12 @@ function classifyCommandAsIs(command: string, description: string, ctx: Classify
   // Separators can come doubled: code writes Windows paths with escaped backslashes ("C:\\Users\\…\\.harv\\workspace").
   if ((changing || writesFile(shell) || bodies.length > 0) && mentions(isHarvData, /\.harv[\\/]+(?![\\/])(?!workspace([\\/"'\s]|$))/i)) {
     return verdict('blocked', "Blocked: Harv's database, backups and memory are only changed by Harv itself.", summary);
+  }
+  if (
+    (changing || writesFile(shell) || bodies.length > 0) &&
+    mentions(isClaudeSetup, /\.claude[\\/]+(?!projects[\\/]+[^\\/\s"']+[\\/]+memory\b)/i)
+  ) {
+    return verdict('blocked', "Blocked: Claude Code's own setup (~/.claude) is only read; the user changes it in Claude Code.", summary);
   }
   if (ctx.project) {
     const trusted = classifyInProject(command, summary, ctx.project, paths);
