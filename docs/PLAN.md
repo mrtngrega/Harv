@@ -585,3 +585,13 @@ If none works, stop and tell the user before building.
 **Open questions for the user:** the Tapo login (typed into Settings, not a chat); are .41 and .42 two strips, and their names (desk, bed…); which extras; should the notebook control them too (only on the home Wi-Fi; the login would then sync sealed, like the sync key's other secrets, or be entered there too).
 
 **Sources:** python-kasa issue #1590, PRs #1592 and #1706, CHANGELOG 0.12.0; home-assistant-tapo-p100 #968.
+
+## 6aa. Fewer walls for Harv (2026-10-31, the user's wish)
+
+Why Harv couldn't answer "where did we end in car_radio" (§6q item 3): not a missing permission but its rules steered it to old chats. The user asked for every rule like that; all four proposals built the same day:
+1. **`~/.claude` readable:** the user's global CLAUDE.md, skills, plugins, agents (the whole folder was blocked as "the Claude login"). Still blocked: `.credentials.json` and `settings*.json` (they can carry keys and tokens), any `..` climbing out of a readable part, and changing anything there except the project memory notes (`isClaudeSetup`). Found on the way: the `sensitive()` helper only filled in `END` at the end of a pattern, so `([\\/]|END)` never matched a path ending at the folder (a search rooted at `~/.ssh` passed); fixed.
+2. **Real sources before old chats:** the normal chats' prompt says to look where the answer lives (project_status, files, git, memory) before list_chats/read_chat; persona rule 11 names project_status.
+3. **Spoken turns** (Siri, voice mode) look things up as fully as typed ones; only the reply stays short (`SPOKEN_NOTE`).
+4. **A skill asked for by name** in a normal chat (`/simplify`, "use the claude-api skill", a word "skill(s)"/"plugin(s)" outside paths) makes that chat load every skill from then on (`asksForSkill`, `ChatManager.allSkills`, the session resumed, a notice says so). Not kept over a Harv restart.
+Tested in the app: a plugin README read, `settings.json` refused with a reason, the claude-api skill run after the notice.
+Kept on purpose: the credential blocks, system folders, Harv's own data, the refused billed commands.
