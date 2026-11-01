@@ -37,7 +37,7 @@ describe("Harv's own skills", () => {
     const names = readdirSync(OWN_SKILLS_SRC, { withFileTypes: true })
       .filter((e) => e.isDirectory())
       .map((e) => e.name);
-    expect(names).toEqual(expect.arrayContaining(['diagnose', 'deslop', 'ui-check', 'learn-from-session', 'image-prompt']));
+    expect(names).toEqual(expect.arrayContaining(['diagnose', 'deslop', 'ui-check', 'learn-from-session', 'image-prompt', 'video']));
     for (const name of names) {
       const text = readFileSync(join(OWN_SKILLS_SRC, name, 'SKILL.md'), 'utf8');
       expect(text).toMatch(new RegExp(`^---\\r?\\nname: ${name}\\r?\\ndescription: .*\\bUse `, 'm'));

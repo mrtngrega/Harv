@@ -96,7 +96,7 @@ function otherChats(chat: ChatContext): string {
  * Since 2026-10-31 also the reviewed outside skills that fit outside a project (docs/PLAN.md §6ab,
  * copied into ~/.claude/skills): Harv picks them by itself when a task matches. Since 2026-11-01
  * Harv's own `diagnose` (harv/skills, it also covers PC and app problems) replaces
- * systematic-debugging here, with `image-prompt` and `learn-from-session`; `deslop` and `ui-check`
+ * systematic-debugging here, with `image-prompt`, `learn-from-session` and `video`; `deslop` and `ui-check`
  * are for projects only.
  */
 export const CHAT_SKILLS = [
@@ -108,6 +108,7 @@ export const CHAT_SKILLS = [
   'diagnose',
   'image-prompt',
   'learn-from-session',
+  'video',
   'docx',
   'xlsx',
   'pptx',
