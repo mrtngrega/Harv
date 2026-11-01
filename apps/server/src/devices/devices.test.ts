@@ -2,12 +2,12 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { swatch } from '@harv/shared';
+import { DEFAULT_SETTINGS, swatch } from '@harv/shared';
 import { fitTemp, parseColor } from './colors.ts';
 import { broadcastTargets, describeChange, LightsService } from './lights.ts';
 import { DeviceStore } from './store.ts';
 import { ControlLog } from './controlLog.ts';
-import { describeLight, toChange } from './tools.ts';
+import { describeAuto, describeLight, toChange } from './tools.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'harv-devices-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -128,6 +128,20 @@ describe('what a chat asks for', () => {
     );
     expect(describeLight({ id: MINE, name: 'L.E.D', reachable: true, on: false })).toBe('L.E.D: off');
     expect(describeLight({ id: MINE, name: 'L.E.D', reachable: false, error: 'No answer.' })).toMatch(/can't be reached/);
+  });
+  it('tells a chat about automatic lights, so it never says they don’t exist', () => {
+    const cfg = { ...DEFAULT_SETTINGS, autoLights: true, autoLightsPlace: { name: 'Geča', lat: 48.6, lon: 21.3 } };
+    const on = { id: MINE, at: 1, by: 'auto' as const, on: true, what: 'on (little sunlight (86 W/m²))' };
+    const text = describeAuto(
+      { enabled: true, supported: true, sunlight: 86, weatherAt: 1, dark: true, idleSec: 3, why: 'dark, light on' },
+      cfg,
+      [{ id: MINE, name: 'L.E.D', reachable: true, on: true, control: on }],
+    );
+    expect(text).toMatch(/not a scheduled task/);
+    expect(text).toMatch(/dark below 100 W\/m²/);
+    expect(text).toMatch(/sunlight 86 W\/m².*counts as dark.*Doing: dark, light on/);
+    expect(text).toMatch(/L\.E\.D was last switched by automatic lights/);
+    expect(describeAuto(undefined, DEFAULT_SETTINGS, [])).toMatch(/switched off in Settings/);
   });
 });
 

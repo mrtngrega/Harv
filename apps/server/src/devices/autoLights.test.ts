@@ -1,10 +1,14 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
-import type { LightControl } from '@harv/shared';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_SETTINGS, type LightControl } from '@harv/shared';
 import { ControlLog } from './controlLog.ts';
+import type { LightsService } from './lights.ts';
 import {
+  ACTIVE_SEC,
+  AutoLights,
+  weatherDue,
   decide,
   FRESH_MEMORY,
   parsePresence,
@@ -176,6 +180,84 @@ describe('watching without touching anything (a film, a controller game)', () =>
     expect(present(p, null, day(20)).idleSec).toBe(1800);
     expect(present(p, day(20) - 30_000, day(20))).toEqual({ idleSec: 30 });
     expect(present({ ...p, display: true }, null, day(20)).watching).toMatch(/video/);
+  });
+});
+
+describe('the moment the user is back', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'harv-autolights-'));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  // A fake strip and Windows: the user was away for 5 min after dark, then touches the mouse.
+  const setup = (gate?: Promise<void>) => {
+    const log = new ControlLog(join(dir, `${Math.random()}.json`));
+    const light = { id: 'A', name: 'L.E.D', reachable: true, on: false };
+    const sets: boolean[] = [];
+    const lights = {
+      log,
+      refresh: async () => [light],
+      set: async (_id: string, change: { on: boolean }) => {
+        sets.push(change.on);
+        light.on = change.on;
+        return light;
+      },
+      status: () => ({ lights: [light] }),
+    } as unknown as LightsService;
+    let idleSec = 300;
+    let back: (() => void) | null = null;
+    let watchers = 0;
+    const auto = new AutoLights(lights, {
+      settings: () => ({ ...DEFAULT_SETTINGS, autoLights: true, autoLightsPlace: { name: 'Geča', lat: 48.6, lon: 21.3 } }),
+      log: () => {},
+      changed: () => {},
+      now: () => day(17),
+      weather: async () => ({ ...weather(0), at: day(17) }),
+      presence: async () => {
+        const seen = { idleSec, display: false, fullScreen: false, pads: '' };
+        await gate;
+        return seen;
+      },
+      inputWatch: (gapSec, onBack) => {
+        expect(gapSec).toBe(ACTIVE_SEC);
+        watchers++;
+        back = onBack;
+        return () => watchers--;
+      },
+    });
+    return { auto, sets, here: () => (idleSec = 0), back: () => back?.(), watchers: () => watchers };
+  };
+
+  it('turns the light on at once when the user touches the mouse, without waiting for the minute', async () => {
+    const t = setup();
+    await t.auto.tick();
+    expect(t.sets).toEqual([]);
+    expect(t.watchers()).toBe(1);
+    t.here();
+    t.back();
+    await vi.waitFor(() => expect(t.sets).toEqual([true]));
+    t.auto.stop();
+    expect(t.watchers()).toBe(0);
+  });
+
+  it('a "back" during a running check runs another one right after it', async () => {
+    let open = () => {};
+    const t = setup(new Promise((r) => (open = r)));
+    const first = t.auto.tick();
+    await vi.waitFor(() => expect(t.watchers()).toBe(1));
+    // The first check has already read "away 5 min" when the mouse moves.
+    await new Promise((r) => setTimeout(r, 10));
+    t.here();
+    t.back();
+    open();
+    await first;
+    await vi.waitFor(() => expect(t.sets).toEqual([true]));
+    t.auto.stop();
+  });
+
+  it('reads the sunlight a minute after each quarter hour, when Open-Meteo has a new value', () => {
+    expect(weatherDue(day(15, 1), day(15, 14))).toBe(false);
+    expect(weatherDue(day(15, 14), day(15, 16))).toBe(true);
+    expect(weatherDue(day(15, 16), day(15, 30))).toBe(false);
+    expect(weatherDue(day(15, 30), day(15, 31))).toBe(true);
   });
 });
 

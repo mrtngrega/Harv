@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { AutoLightsStatus, HarvSettings, LightControl } from '@harv/shared';
 import { IS_WINDOWS } from '../platform.ts';
@@ -207,6 +207,43 @@ export async function readPresence(): Promise<Presence | null> {
   }
 }
 
+// The moment the user is back (the user's wish, 2026-11-01: "the second I'm active"): one small
+// PowerShell stays running and reads the idle time four times a second (GetLastInputInfo, no
+// admin), and says "back" when input comes after a pause of at least `gapSec`, so the check runs
+// at once instead of on the next minute. It quits by itself when Harv's server is gone.
+const inputScript = (gapSec: number) => `Add-Type @'
+using System; using System.Runtime.InteropServices;
+public static class HarvInput {
+  [StructLayout(LayoutKind.Sequential)] struct LII { public uint cbSize; public uint dwTime; }
+  [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LII p);
+  public static uint Idle() { var l = new LII(); l.cbSize = (uint)Marshal.SizeOf(l); GetLastInputInfo(ref l); return unchecked((uint)Environment.TickCount - l.dwTime); }
+}
+'@
+$parent = [System.Diagnostics.Process]::GetProcessById(${process.pid})
+$prev = [uint32]0
+while (-not $parent.HasExited) {
+  $idle = [HarvInput]::Idle()
+  if ($idle -lt $prev -and $prev -ge ${gapSec * 1000}) { [Console]::Out.WriteLine('back'); [Console]::Out.Flush() }
+  $prev = $idle
+  Start-Sleep -Milliseconds 250
+}`;
+
+/** Calls `onBack` when the user touches the mouse or keyboard after `gapSec` without; returns a stop. */
+export function watchInput(gapSec: number, onBack: () => void, onExit: () => void): () => void {
+  if (!IS_WINDOWS) return () => {};
+  const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', inputScript(gapSec)], {
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk: string) => {
+    if (chunk.includes('back')) onBack();
+  });
+  child.on('exit', onExit);
+  child.on('error', onExit);
+  return () => child.kill();
+}
+
 export interface AutoDeps {
   settings: () => HarvSettings;
   log: (message: string) => void;
@@ -215,6 +252,16 @@ export interface AutoDeps {
   presence?: () => Promise<Presence | null>;
   weather?: (lat: number, lon: number) => Promise<Weather>;
   now?: () => number;
+  inputWatch?: typeof watchInput;
+}
+
+/**
+ * Open-Meteo's "current" sunlight is a quarter-hour value: read it again a minute after each
+ * quarter (:01, :16, :31, :46), so a change shows up within about a minute and no read is wasted.
+ */
+export function weatherDue(at: number, now: number): boolean {
+  const slot = (t: number) => Math.floor((t - 60_000) / 900_000);
+  return slot(now) !== slot(at);
 }
 
 /** What the presence signals add up to: idle time with gamepad input counted, and why the user counts as watching. */
@@ -225,6 +272,7 @@ export function present(p: Presence, gamepadAt: number | null, now: number): { i
 }
 
 const TICK_MS = 60_000;
+/** A sunlight reading older than this counts as a quarter hour missed (no internet). */
 const WEATHER_MS = 10 * 60_000;
 
 export class AutoLights {
@@ -241,6 +289,9 @@ export class AutoLights {
   private problem: string | undefined;
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  /** A check was asked for while one ran: run again right after. */
+  private again = false;
+  private stopWatch: (() => void) | null = null;
 
   constructor(
     private lights: LightsService,
@@ -281,6 +332,24 @@ export class AutoLights {
 
   stop(): void {
     if (this.timer) clearInterval(this.timer);
+    this.watch(false);
+  }
+
+  /** The input watcher runs while automatic lights are on; one that quit starts again on the next tick. */
+  private watch(on: boolean): void {
+    if (on && !this.stopWatch) {
+      const stop = (this.deps.inputWatch ?? watchInput)(
+        ACTIVE_SEC,
+        () => void this.tick(),
+        () => {
+          if (this.stopWatch === stop) this.stopWatch = null;
+        },
+      );
+      this.stopWatch = stop;
+    } else if (!on && this.stopWatch) {
+      this.stopWatch();
+      this.stopWatch = null;
+    }
   }
 
   status(): AutoLightsStatus {
@@ -311,14 +380,17 @@ export class AutoLights {
   /** One check: weather (every 10 min), presence, the light, then what to do. */
   async tick(): Promise<void> {
     const s = this.deps.settings();
-    if (!s.autoLights || !s.autoLightsPlace || this.running) {
+    this.watch(s.autoLights && !!s.autoLightsPlace);
+    if (!s.autoLights || !s.autoLightsPlace) return;
+    if (this.running) {
+      this.again = true;
       return;
     }
     this.running = true;
     try {
       const now = (this.deps.now ?? Date.now)();
       const place = `${s.autoLightsPlace.lat},${s.autoLightsPlace.lon}`;
-      if (!this.weather || this.weather.radiation === null || this.weatherFor !== place || now - this.weather.at > WEATHER_MS) {
+      if (!this.weather || this.weather.radiation === null || this.weatherFor !== place || weatherDue(this.weather.at, now)) {
         try {
           this.weather = await (this.deps.weather ?? fetchWeather)(s.autoLightsPlace.lat, s.autoLightsPlace.lon);
           this.weatherFor = place;
@@ -383,6 +455,10 @@ export class AutoLights {
     } finally {
       this.running = false;
       this.deps.changed();
+      if (this.again) {
+        this.again = false;
+        void this.tick();
+      }
     }
   }
 }

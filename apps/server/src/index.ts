@@ -320,7 +320,7 @@ const lights = new LightsService(devices, {
   watchers: () => clients.size,
 });
 lights.start();
-chats.lights = lightTools(lights);
+chats.lights = lightTools(lights, loadSettings);
 // Automatic lights: on when it's dark outside and the user is at this computer (docs/PLAN.md §6z).
 const autoLights = new AutoLights(lights, {
   settings: loadSettings,

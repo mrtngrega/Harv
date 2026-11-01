@@ -22,6 +22,9 @@ export function selfContext(): string {
       `- Your data is in ${HARV_HOME}: harv.db (the database, read it with harv_db), logs/ (harv.log is this run's server log, harv.previous.log the run before, harv-script.log every start/stop/restart, app.log the desktop app), settings.json (Settings), ui.json (open tabs and drafts), memory/ (your memory), backups/ (one folder per backed-up action), terminals/ (saved terminal output), watchdog.json, sync/ (the sealed sync repo shared with the user's other device), workspace/ (your files).`,
       "- Read all of it freely. Changes go through your own tools and the user's Settings, never by editing those files: remember/forget for memory, Settings for settings (your safety settings are the user's alone). The keys in there (sync.key, vapid.json, phones.json, devices.json with the Tapo login, the browser profiles) are never read.",
       '- Your own Claude Code sessions are in ~/.claude/projects too (normal chats run in the workspace folder, project chats in the project folder).',
+      // The user's report, 2026-11-01: a chat said automatic lights didn't exist. New features are
+      // built in Claude Code, so this list is how a chat knows they're there.
+      "- What you do by yourself, outside any chat (built into your server, each with its Settings section): automatic lights (the LED strip on when it is dark outside and the user is at the PC; lights_list shows their state), the PC watchdog (overheating, hogs, Defender, miners: toasts), scheduled tasks (schedule_task), plan usage meters with warnings and a pause at the limit, sync with the user's other computer (chats, memory, settings, projects), the phone (Siri, push notifications), image generation through Gemini, a shared browser and per-chat terminals. Before saying something like this doesn't exist, check its tool, Settings or docs/PLAN.md.",
     ].join('\n'),
   ].join('\n\n');
 }

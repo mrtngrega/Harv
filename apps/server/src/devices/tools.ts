@@ -1,4 +1,4 @@
-import type { LightChange, LightState } from '@harv/shared';
+import type { AutoLightsStatus, HarvSettings, LightChange, LightControlBy, LightState } from '@harv/shared';
 import { COLOR_NAMES, parseColor } from './colors.ts';
 import type { LightsService } from './lights.ts';
 
@@ -27,6 +27,51 @@ export function describeLight(l: LightState): string {
   return `${l.name}: on, ${l.brightness}% brightness, ${look}`;
 }
 
+const WHO: Record<LightControlBy, string> = {
+  auto: 'automatic lights',
+  you: 'the user (dashboard)',
+  chat: 'a chat or Siri',
+  outside: 'outside Harv (Tapo app, its button, the other computer)',
+};
+const clock = (t: number) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+/**
+ * Automatic lights for the model (the user's report, 2026-11-01: a chat said "no auto-light rule
+ * exists" because it only looked at scheduled tasks): what they are, the settings and what they
+ * see and did right now.
+ */
+export function describeAuto(
+  auto: AutoLightsStatus | undefined,
+  cfg: Pick<HarvSettings, 'autoLights' | 'autoLightsPlace' | 'autoLightsDark' | 'autoLightsSunset' | 'autoLightsAway'>,
+  lights: LightState[],
+): string {
+  const lines = [
+    'Automatic lights (built into Harv, Settings › Devices; not a scheduled task): the strip goes on when it’s dark outside (Open-Meteo sunlight on the ground below the threshold, or from a while before sunset until sunrise) and the user is at this computer (input in the last 2 minutes, or a video/full-screen app/gamepad), at the moment they touch the mouse or keyboard; it goes off when they’re away, at daylight, or when the computer sleeps, but only if automatic lights were the last to switch it. Switched off by hand, it stays off until the next dark spell.',
+  ];
+  if (!cfg.autoLights) return [...lines, 'State: switched off in Settings.'].join('\n');
+  lines.push(
+    `Settings: on; place ${cfg.autoLightsPlace?.name ?? 'not set'}; dark below ${cfg.autoLightsDark} W/m²; ${cfg.autoLightsSunset} min before sunset; away after ${cfg.autoLightsAway} min.`,
+  );
+  if (auto) {
+    const seen = [
+      auto.sunlight !== undefined
+        ? `sunlight ${auto.sunlight} W/m²${auto.weatherAt ? ` (read ${clock(auto.weatherAt)})` : ''}`
+        : 'no sunlight reading',
+      auto.sunset ? `sunset ${clock(auto.sunset)}` : '',
+      auto.dark ? 'counts as dark' : 'counts as light',
+      auto.idleSec !== undefined ? `last input ${auto.idleSec} s ago` : '',
+      auto.watching ?? '',
+    ].filter(Boolean);
+    lines.push(`Now: ${seen.join('; ')}. Doing: ${auto.why || 'nothing yet'}.`);
+    if (auto.last) lines.push(`Last switch: ${auto.last.action} at ${clock(auto.last.at)} (${auto.last.why}).`);
+    if (auto.problem) lines.push(`Problem: ${auto.problem}`);
+  }
+  for (const l of lights)
+    if (l.control)
+      lines.push(`${l.name} was last switched by ${WHO[l.control.by]} at ${clock(l.control.seenAt ?? l.control.at)}: ${l.control.what}.`);
+  return lines.join('\n');
+}
+
 /** The request as the strip takes it, or a reason it can't be. */
 export function toChange(request: LightRequest): LightChange | string {
   const change: LightChange = {};
@@ -42,7 +87,7 @@ export function toChange(request: LightRequest): LightChange | string {
   return Object.keys(change).length ? change : 'Say what to change: on/off, brightness, a colour or an effect.';
 }
 
-export function lightTools(service: LightsService): LightTools {
+export function lightTools(service: LightsService, settings: () => HarvSettings): LightTools {
   return {
     async describe() {
       const status = service.status();
@@ -52,9 +97,13 @@ export function lightTools(service: LightsService): LightTools {
       const lights = await service.refresh();
       if (!status.lights.length) return 'Harv controls no lights yet: the user picks them in Settings › Devices.';
       const effects = lights.find((l) => l.effects?.length)?.effects;
-      return [...(lights.length ? lights : status.lights).map(describeLight), ...(effects ? [`Effects: ${effects.join(', ')}`] : [])].join(
-        '\n',
-      );
+      const shown = lights.length ? lights : status.lights;
+      return [
+        ...shown.map(describeLight),
+        ...(effects ? [`Effects: ${effects.join(', ')}`] : []),
+        '',
+        describeAuto(service.status().auto, settings(), shown),
+      ].join('\n');
     },
     async set(light, request) {
       const targets = service.match(light);

@@ -307,7 +307,7 @@ export function harvServer(
         ? [
             tool(
               'lights_list',
-              "The user's light strip(s) Harv controls (Tapo, on the home Wi-Fi): each one's name and state right now (on/off, brightness, colour or white, effect), and the effects it has.",
+              "The user's light strip(s) Harv controls (Tapo, on the home Wi-Fi): each one's name and state right now (on/off, brightness, colour or white, effect), the effects it has, who switched it last, and Harv's automatic lights (on when dark + the user is at the PC): their settings, the sunlight reading and what they're doing now. Use it for any question about the lights or automatic lights.",
               {},
               async () => text(await lights.describe()),
             ),
