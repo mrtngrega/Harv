@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { queryHarvDb, selfContext } from './harvSelf.ts';
+import { queryHarvDb, recentWork, selfContext } from './harvSelf.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'harv-self-'));
 const file = join(dir, 'harv.db');
@@ -38,5 +38,21 @@ describe('harv_db', () => {
     expect(text).toContain('harv-script.log');
     expect(text).toContain('docs/PLAN.md');
     expect(text).toMatch(/sync\.key.*never read/);
+  });
+
+  it('knows the newest work from the plan’s status lines, kept short (what the dev sessions built)', () => {
+    const plan = join(dir, 'PLAN.md');
+    const long = 'x'.repeat(2000);
+    writeFileSync(
+      plan,
+      `# Plan\n\nStatus (today): automatic lights built.\n\nStatus (yesterday): ${long}\n\nStatus (older): a\n\nStatus (oldest): b\n`,
+    );
+    const text = recentWork(plan);
+    expect(text).toContain('## Recent work on you');
+    expect(text).toContain('- Status (today): automatic lights built.');
+    expect(text).toContain(`- Status (yesterday): ${'x'.repeat(1480)}…\n`);
+    expect(text).not.toContain('oldest');
+    expect(recentWork(join(dir, 'missing.md'))).toBe('');
+    expect(selfContext()).toContain('## Recent work on you');
   });
 });

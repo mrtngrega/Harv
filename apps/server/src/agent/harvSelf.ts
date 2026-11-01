@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +14,27 @@ export const HARV_REPO = fileURLToPath(new URL('../../../../', import.meta.url))
 const DB_ROWS = 200;
 const DB_CHARS = 12_000;
 
+/**
+ * What was built and decided lately (the user's wish, 2026-11-01: "make it so that Harv also
+ * remembers everything we talk about"): Harv is developed in Claude Code sessions, and each one
+ * ends with a status line at the top of docs/PLAN.md, so the newest few go into every chat. A git
+ * pull brings them to the other computer too.
+ */
+export function recentWork(plan = join(HARV_REPO, 'docs', 'PLAN.md'), count = 3, max = 1500): string {
+  if (!existsSync(plan)) return '';
+  const lines = readFileSync(plan, 'utf8')
+    .split(/\r?\n/)
+    .filter((l) => l.startsWith('Status ('))
+    .slice(0, count)
+    .map((l) => `- ${l.length > max ? `${l.slice(0, max)}…` : l}`);
+  if (!lines.length) return '';
+  return [
+    '## Recent work on you',
+    "The newest status lines of your plan (docs/PLAN.md), written at the end of each session the user and Claude Code spend building you. It's what you can do now and what was decided; the plan has the details and the older history, and those sessions' own notes are in ~/.claude/projects (the Harv repo's folder, its memory/ notes and transcripts). Check there before saying something doesn't exist or wasn't discussed.",
+    ...lines,
+  ].join('\n');
+}
+
 /** The prompt section: what Harv is made of and where everything about it lives. */
 export function selfContext(): string {
   return [
@@ -26,7 +48,10 @@ export function selfContext(): string {
       // built in Claude Code, so this list is how a chat knows they're there.
       "- What you do by yourself, outside any chat (built into your server, each with its Settings section): automatic lights (the LED strip on when it is dark outside and the user is at the PC; lights_list shows their state), the PC watchdog (overheating, hogs, Defender, miners: toasts), scheduled tasks (schedule_task), plan usage meters with warnings and a pause at the limit, sync with the user's other computer (chats, memory, settings, projects), the phone (Siri, push notifications), image generation through Gemini, a shared browser and per-chat terminals. Before saying something like this doesn't exist, check its tool, Settings or docs/PLAN.md.",
     ].join('\n'),
-  ].join('\n\n');
+    recentWork(),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 /** harv_db: a read-only SQL query on harv.db, or its tables when no query is given. */
