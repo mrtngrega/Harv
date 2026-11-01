@@ -15,6 +15,7 @@ The user's hardware: Ryzen 7 5700X3D (8 cores / 16 threads), RTX 3060 Ti 8 GB, 3
 **The behaviour taught in these dev sessions IS Harv.** `harv/persona.md` is Harv's shared rulebook. The runtime Harv loads it into its system prompt, and you (Claude Code working in this repo) follow it too.
 - When the user teaches a new behaviour rule that applies to Harv generally, add it to `harv/persona.md` as well as saving it to memory. Dev-work rules that apply to every project (testing method, wrap-up, build first…) go in `harv/dev-rules.md`, which Harv loads in project chats.
 - Dev-only rules (git, tests, wrap-up chores) stay in dev memory or here.
+- Harv's own skills live in `harv/skills/<name>/` (public, no personal data) and are copied to `~/.claude/skills` on every start (`agent/ownSkills.ts`); edit them there, never the installed copy (`docs/PLAN.md` §6ab).
 - `harv/persona.md` is public, so it must never contain personal data.
 - The runtime Harv's private facts live in `~/.harv/memory/*.md`. That folder is also **your** source of truth about the user, so read it when user context matters and update it there. It reads them into its prompt at session start and changes them via its `remember`/`forget` tools (`apps/server/src/agent/memory.ts`), which can only write in that folder.
 
