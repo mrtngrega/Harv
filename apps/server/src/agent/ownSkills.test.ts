@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -33,10 +33,14 @@ describe("Harv's own skills", () => {
     expect(readFileSync(join(dest, 'diagnose', 'SKILL.md'), 'utf8')).toBe('v2');
   });
 
-  it('the repo’s skills each have a name and a "use when" description matching their folder', () => {
-    for (const name of ['diagnose', 'deslop']) {
+  it('the repo’s skills each have a name matching their folder and a "Use …" description', () => {
+    const names = readdirSync(OWN_SKILLS_SRC, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+    expect(names).toEqual(expect.arrayContaining(['diagnose', 'deslop', 'ui-check', 'learn-from-session', 'image-prompt']));
+    for (const name of names) {
       const text = readFileSync(join(OWN_SKILLS_SRC, name, 'SKILL.md'), 'utf8');
-      expect(text).toMatch(new RegExp(`^---\\r?\\nname: ${name}\\r?\\ndescription: .*Use when`, 'm'));
+      expect(text).toMatch(new RegExp(`^---\\r?\\nname: ${name}\\r?\\ndescription: .*\\bUse `, 'm'));
     }
   });
 });
