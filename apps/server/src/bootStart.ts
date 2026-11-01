@@ -22,8 +22,8 @@ export function unitText(script: string): string {
     '# Made by Harv (Settings › This computer › Startup). Turning the switch off removes it.',
     '[Unit]',
     'Description=Harv',
-    'After=network-online.target',
-    'Wants=network-online.target',
+    // No network ordering: the user manager has no network-online.target. Harv's phone access and
+    // sync retry on their own once the network (and Tailscale) is up.
     '',
     '[Service]',
     'Type=oneshot',
