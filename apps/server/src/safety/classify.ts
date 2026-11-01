@@ -154,12 +154,18 @@ export function isSensitivePath(p: string): boolean {
   return (SENSITIVE_PATHS.some((re) => re.test(p)) || hasKeyFile(p)) && !isClaudeHistory(p);
 }
 
-/** A command's shell lines mention a credential file (key files only as whole command words, like `cat server.key`). */
-function mentionsSecret(shell: string): boolean {
+/**
+ * A command's shell lines mention a credential file (key files only as whole command words, like
+ * `cat server.key`). In PowerShell an unquoted `$x.Key` / `$_.Pem` is a property, not a file
+ * (a sensor script's `$_.Key -match …` was blocked, 2026-11-01); in Bash `$f.pem` is a file name.
+ */
+const PS_PROPERTY = /^\$[\w:]+(\.\w+)+$/;
+function mentionsSecret(shell: string, powershell = false): boolean {
   const text = withoutAllowedClaude(shell);
   if (SENSITIVE_PATHS.some((re) => re.test(text.replace(/["']/g, ' ')))) return true;
   return words(text).some((w) => {
     const file = unquote(w).split('=').at(-1)!;
+    if (powershell && PS_PROPERTY.test(w)) return false;
     return !/[\s(){}<>,;]/.test(file) && hasKeyFile(file);
   });
 }
@@ -1167,7 +1173,7 @@ function classifyCommandAsIs(command: string, description: string, ctx: Classify
   // Heredoc bodies are scripts or data: the shell rules below read only the shell lines around them.
   const { shell, bodies } = ctx.shell === 'powershell' ? { shell: command, bodies: [] } : splitHeredocs(command);
   const parts = splitCommand(shell).map((segment) => words(segment).map(unquote));
-  if (mentionsSecret(shell) || reachesSecret(parts, cwd) || bodies.some((b) => scriptPaths(b.text).some(isSensitivePath))) {
+  if (mentionsSecret(shell, ctx.shell === 'powershell') || reachesSecret(parts, cwd) || bodies.some((b) => scriptPaths(b.text).some(isSensitivePath))) {
     return verdict('blocked', 'Blocked: it touches files that may hold credentials or secrets.', summary);
   }
 

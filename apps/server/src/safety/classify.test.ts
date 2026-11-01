@@ -774,6 +774,17 @@ describe('heredocs are scripts or data, not shell commands', () => {
     expect(cmd('openssl x509 --in=certs/site.pem')).toBe('blocked');
     expect(tier('Read', { file_path: 'C:\\keys\\server.ppk' })).toBe('blocked');
   });
+
+  it('PowerShell property access is no key file (a sensor-sampling script was blocked, 2026-11-01)', () => {
+    const ps = (command: string) => classify('PowerShell', { command }).tier;
+    expect(ps("$vals.GetEnumerator() | Where-Object { $_.Key -match 'GPU Core$' -and $_.Key -match 'Temperatures' }")).not.toBe('blocked');
+    expect(ps('Write-Output $cert.Pem')).not.toBe('blocked');
+    // Still key files: a path, a quoted string that expands into a name, Bash's `$f.pem`.
+    expect(ps('Get-Content $env:USERPROFILE\\keys\\server.key')).toBe('blocked');
+    expect(ps('Get-Content "$name.key"')).toBe('blocked');
+    expect(ps('Get-Content server.key')).toBe('blocked');
+    expect(cmd('cat $f.pem')).toBe('blocked');
+  });
 });
 
 describe('more read-only commands (the user’s wish 2026-10-25: looking never asks)', () => {
