@@ -94,7 +94,9 @@ function otherChats(chat: ChatContext): string {
  * browsers, computer use, /loop, /schedule) only cost context there; project chats keep them all.
  * Each name twice: as Claude Code lists it and as the claude.ai plugin names it.
  * Since 2026-10-31 also the reviewed outside skills that fit outside a project (docs/PLAN.md §6ab,
- * copied into ~/.claude/skills): Harv picks them by itself when a task matches.
+ * copied into ~/.claude/skills): Harv picks them by itself when a task matches. Since 2026-11-01
+ * Harv's own `diagnose` (harv/skills, it also covers PC and app problems) replaces
+ * systematic-debugging here; `deslop` is for projects only.
  */
 export const CHAT_SKILLS = [
   'find-docs',
@@ -102,7 +104,7 @@ export const CHAT_SKILLS = [
   'grilling',
   'teach',
   'impeccable',
-  'systematic-debugging',
+  'diagnose',
   'docx',
   'xlsx',
   'pptx',

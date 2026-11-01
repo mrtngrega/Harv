@@ -69,6 +69,7 @@ import { SyncStore } from './sync/store.ts';
 import { LiveLink } from './sync/live.ts';
 import { Scheduler } from './schedule/scheduler.ts';
 import { applyBootStart } from './bootStart.ts';
+import { installOwnSkills } from './agent/ownSkills.ts';
 
 /** The file API's answer for passwords, keys and logins: the same rule as Harv's own tools. */
 const SENSITIVE = 'Harv never opens or sends files with passwords, keys or logins (the same rule its own tools follow).';
@@ -321,6 +322,13 @@ const lights = new LightsService(devices, {
 });
 lights.start();
 chats.lights = lightTools(lights, loadSettings);
+// Harv's own skills: harv/skills → ~/.claude/skills, only what changed (docs/PLAN.md §6ab).
+try {
+  const written = installOwnSkills();
+  if (written.length) app.log.info(`Own skills updated: ${written.join(', ')}`);
+} catch (err) {
+  app.log.warn(`Own skills not installed: ${(err as Error).message}`);
+}
 // Automatic lights: on when it's dark outside and the user is at this computer (docs/PLAN.md §6z).
 const autoLights = new AutoLights(lights, {
   settings: loadSettings,
