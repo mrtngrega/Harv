@@ -90,6 +90,8 @@ export interface HarvSettings {
   startSensors: boolean;
   /** Bring back the tabs, tools and drafts after a restart, like Chrome. */
   restoreTabs: boolean;
+  /** Start Harv when the computer turns on, before anyone logs in (Linux: a systemd user service + linger). */
+  startAtBoot: boolean;
 
   // Watchdog
   /** Warn about overheating, background apps hogging the CPU/GPU, and dangerous software. */
@@ -154,6 +156,7 @@ export const DEFAULT_SETTINGS: HarvSettings = {
   projectsDir: '',
   startSensors: true,
   restoreTabs: true,
+  startAtBoot: false,
   watchdog: true,
   watchdogIgnored: [],
   syncEnabled: false,

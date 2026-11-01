@@ -88,6 +88,7 @@ export function cleanSettings(raw: Raw, base: HarvSettings = DEFAULT_SETTINGS): 
     projectsDir: folder(raw.projectsDir, base.projectsDir),
     startSensors: bool(raw.startSensors, base.startSensors),
     restoreTabs: bool(raw.restoreTabs, base.restoreTabs),
+    startAtBoot: bool(raw.startAtBoot, base.startAtBoot),
     watchdog: bool(raw.watchdog, base.watchdog),
     watchdogIgnored: Array.isArray(raw.watchdogIgnored)
       ? [

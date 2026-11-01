@@ -1340,7 +1340,8 @@ function ProtectedFolders() {
 /** Harv's settings, shown as a tab in the chat bar. Saved in ~/.harv/settings.json and applied at once in every window. */
 export function SettingsView() {
   const settings = useSettings();
-  const onWindows = useConnection().platform === 'windows';
+  const platform = useConnection().platform;
+  const onWindows = platform === 'windows';
   const lookChanged = LOOK_KEYS.some((k) => settings[k] !== DEFAULT_SETTINGS[k]);
   const resetLook = () => updateSettings(Object.fromEntries(LOOK_KEYS.map((k) => [k, DEFAULT_SETTINGS[k]])) as Partial<HarvSettings>);
 
@@ -1603,6 +1604,14 @@ export function SettingsView() {
             hint="After a restart, bring back the tabs, their files and terminals, and unsent messages."
             onChange={(restoreTabs) => updateSettings({ restoreTabs })}
           />
+          {platform === 'linux' && (
+            <Toggle
+              on={settings.startAtBoot}
+              label="Start Harv when the computer turns on"
+              hint="Harv starts at boot, before you log in, so chats, the phone and Siri work right away. Syncing through GitHub waits until you log in (its login is in your keyring)."
+              onChange={(startAtBoot) => updateSettings({ startAtBoot })}
+            />
+          )}
           {onWindows && (
             <Toggle
               on={settings.startSensors}

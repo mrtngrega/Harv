@@ -68,6 +68,7 @@ import { WORKSPACE } from './safety/paths.ts';
 import { SyncStore } from './sync/store.ts';
 import { LiveLink } from './sync/live.ts';
 import { Scheduler } from './schedule/scheduler.ts';
+import { applyBootStart } from './bootStart.ts';
 
 /** The file API's answer for passwords, keys and logins: the same rule as Harv's own tools. */
 const SENSITIVE = 'Harv never opens or sends files with passwords, keys or logins (the same rule its own tools follow).';
@@ -612,6 +613,17 @@ app.post('/api/gemini/signin', async (_req, reply) => {
 // Stopping and restarting Harv (scripts/harv.ps1, harv.sh on Linux, the desktop shortcuts and Settings' Restart button).
 const HARV_SCRIPT = fileURLToPath(new URL('../../../scripts/harv.ps1', import.meta.url));
 const HARV_SH = fileURLToPath(new URL('../../../scripts/harv.sh', import.meta.url));
+// Start at boot (Settings › This computer › Startup, Linux only): kept in line with the switch, also on every start.
+const syncBootStart = (on: boolean) =>
+  void applyBootStart(on, HARV_SH).then((problem) => {
+    if (!problem) return;
+    app.log.warn(problem);
+    broadcast({ type: 'project.notice', message: problem });
+  });
+syncBootStart(loadSettings().startAtBoot);
+onSettingsChange((before, after) => {
+  if (before.startAtBoot !== after.startAtBoot) syncBootStart(after.startAtBoot);
+});
 const shutdown = (reason: string) => {
   app.log.info({ reason }, 'Shutting down');
   setTimeout(() => {
