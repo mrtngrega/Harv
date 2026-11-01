@@ -21,6 +21,7 @@ const read = await next((s) => s.lights.every((l) => l.at));
 const line = (l) =>
   `${l.name}: ${l.reachable ? (l.on ? `on ${l.brightness}% ${l.temp ? `${l.temp}K` : `hue ${l.hue}`}` : 'off') : `unreachable (${l.error})`}`;
 console.log('setup:', read?.setup, '|', read?.lights.map(line).join('; ') || 'no lights', read?.problem ? `| ${read.problem}` : '');
+if (read?.auto) console.log('automatic lights:', JSON.stringify(read.auto));
 if (process.argv.includes('--touch') && read?.lights[0]?.reachable) {
   const l = read.lights[0];
   const since = Date.now();
