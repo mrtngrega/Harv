@@ -1,5 +1,7 @@
 # Harv: build plan
 
+Status (2026-11-01): start at boot built for Linux (§6p, a switch per device, off on the notebook); the Windows version is planned, later (the user's call, the PC stays on "open when I log in"). The whole skills plan is decided and written down, not built (§6ab "The skills plan": our own skills made as well as they can be, outside ones only where ours can't do better). README brought up to date. **Next:** the user picks: the skills (in the §6ab order, after a weekly reset), voice (§6q 4), Siri tips (§6q 5).
+
 Status (2026-10-31, late): §6ab built: the user's 15 skill links reviewed; 12 reviewed skills as plain folders in ~/.claude/skills on both computers (mattpocock, impeccable, 2 superpowers, context7 find-docs), Harv picks them by itself (persona rule 13; normal chats list 6 of them). Second round reviewed, not installed: deslop-GPT, replica-skill (6 of its 11), the CAN bus skills (wanted; need a CAN interface), the Android reverse-engineering skill. Ideas for Harv's own skills written down (§6ab, start with deslop + debug). **Next:** the user picks: install the second round, our own skills, or voice (§6q 4).
 
 Status (2026-10-31, evening): built today: "start" as the session-start keyword (dev-rules); §6q items 1–3 (Siri waits 8 s then "on it" + a push that reads the answer; the phone comes back to its chat and scroll after iOS reloads it; `project_status` for any chat); §6aa (fewer walls: ~/.claude read and changed like the user's files, never its login or a billing switch; skills by name; Harv knows itself: "About yourself" + `harv_db`); §6z the LED strip (L.E.D only, Tapo TPAP through a reviewed python-kasa commit, on both computers) with automatic lights (dark by Open-Meteo sunlight or sunset + the user at the PC; the log of who took control last decides; the overnight case). Then a full test pass in the PC app, the emulated phone and the notebook (all green: layout at 4 widths, chat, queue, /btw, AUTO, rewind, /clear, views, history, cards, plan mode, scheduled tasks, phone end to end, sync, server input checks); its 4 findings fixed and checked in the app (readable start card, malformed dashboard messages dropped, lights log shows when a change was noticed, Settings text). Before that: the three automatic-lights gaps closed (§6z: off at sleep/shutdown through the app, a film or a gamepad counts as here, sun times without internet). **Next:** §6q items 4–5 (better voice with Whisper + Kokoro/Piper and Slovak; Siri tips in Settings). Still not built: M10d hub, §6t items 1, 2, 5, the lights extras.
@@ -672,3 +674,70 @@ Cost check after building: a new normal chat was 18.9k tokens (§6u); measure ag
 9. **can-decode** (with the CSS-Electronics skills): the Golf's own signals once there's a CAN interface (car_radio project only).
 
 Start with 1 and 3 (most use in daily dev work), measure that Harv really picks them, then the rest one by one when the user wants them.
+
+### The skills plan (decided 2026-11-01, not built yet)
+
+**The user's decision:** write it all down now, build later; **every skill as good as it can be** (the reverse-engineering one is the example), not quick versions. So Harv writes its **own** skills, using the reviewed outside ones as sources, and installs outside skills only where nothing of ours would do better.
+
+**Outside skills, final verdicts**
+
+| Skill | Verdict |
+|---|---|
+| deslop-GPT | **Not installed**: its method (evidence chain, audit before apply) goes into our `deslop`. Read in full when building it. |
+| replica-skill | **Not installed**: its 6 build skills (recon, architect, design, build, test, diff) are the source for our `clone`. Read in full when building it; the 5 selling ones are left out. |
+| CSS-Electronics CAN bus skills | **Installed into car_radio only** (`.claude/skills`), once there's a CAN adapter or a log. Our `can-decode` sits on top. |
+| Android reverse engineering (jadx) | **Option** for car_radio (`com.syu.ms`), installed there only when needed, with Java 17 + jadx kept inside the project. |
+
+**How every skill of ours is made**
+
+- **Source in the repo:** `harv/skills/<name>/SKILL.md` + `references/*.md` (public, so no personal data; personal bits come from Harv's memory at run time). Harv copies them to `~/.claude/skills` on both computers when it starts (only when changed), so a `git pull` updates both.
+- **Short "use when…" description** so Harv picks it by itself (persona rule 13) and says which one it used. Normal chats list the ones that fit outside projects (`CHAT_SKILLS`); project chats list all.
+- **Small main file, details in references** that load only when a step needs them (progressive disclosure, cheap on Pro). No extra model runs and no subagents unless the user asks.
+- **Harv's rules built in:** subscription only, the safety gate, Windows + Fedora, report honestly, propose before big changes, small changes (dev rule 8).
+- **Quality loop (skill-creator's method):** read every source skill in full → write it with `writing-for-agents` → 3–5 realistic test prompts per skill with what a good answer must do → run with and without the skill (Sonnet, to save usage) and compare → check that Harv picks it by itself in a normal and a project chat → fix and rerun → the user tries it on a real task. Each round uses plan usage, so do it after a weekly reset.
+
+**The skills**
+
+1. **debug** (from systematic-debugging, mattpocock's diagnosing-bugs, verification-before-completion):
+   - Reproduce first: an exact command or steps, the smallest case that shows it. Read the whole error and the logs.
+   - Ranked hypotheses, one change at a time, the root cause, not the symptom. After 3 wrong guesses, stop and rethink from the evidence.
+   - A failing test first where it's practical (`tdd`), then the fix, then proof with real output (tests, a run, a screenshot); look for the same bug elsewhere.
+   - Write the gotcha into the project's docs. Works with Harv's struggle watch (AUTO steps up a stuck reply).
+   - `references/gotchas.md`: what we've hit: Git Bash eating backslashes, CRLF from Python text mode, PowerShell 5.1 quirks, orphan node/vite on ports, the Vite watcher missing changes on Windows, node-pty, Windows file locks, Fedora permissions/SELinux, WebKitGTK.
+2. **deslop** (from deslop-GPT, karpathy's rules, Claude Code's `simplify`):
+   - Map first: what exists, who calls it, its tests and docs.
+   - An evidence chain for every candidate: callers, exports, public API, config, tests, docs. Keep anything with a real or uncertain contract.
+   - What it hunts: duplicate code, dead code, abstractions with one user, options nobody sets, checks that can't fail, fallbacks that hide failures, duplicate or pointless tests, comments that repeat the code, stale docs.
+   - A report first (what, where, why, risk, lines saved) → the user's OK → applied in clusters, the checks after each, a cluster reverted if they fail, one commit per cluster. Never changes behaviour.
+3. **ui-check** (from impeccable's critique/audit + Harv's test passes):
+   - In the real app, not a browser tab: CDP `attach()`, PrintWindow capture on Windows, `spectacle` on KDE.
+   - Widths 420 / 1100 / 1280 / 1500+, many tabs and items, long text, empty states, motion off, keyboard use, a reload and a restart; live panels watched 30–60 s for layout shifts.
+   - impeccable's vocabulary for the look (hierarchy, spacing, contrast, type). Report first, fix after the OK.
+4. **clone**, reverse engineer an app and build our own (from replica-skill's build skills; **the flagship, made the most thorough**):
+   - **Recon**, public sources only: docs, help centre, changelogs, marketing pages, screenshots and videos, and the user's own use of the app on their computer (screenshots, Harv's browser, later desktop control). It never decompiles closed apps or scrapes behind logins.
+   - What recon produces: a feature inventory by area (must / should / could), a map of screens and flows, components, a guessed data model, shortcuts, file formats (e.g. `.docx` through open libraries), speed/offline expectations.
+   - **Scope with the user**: the first version's features and the target (web, Tauri desktop, phone PWA). A few sharp questions, like `grilling`.
+   - **Architect**: stack (default Harv's: TypeScript, React + Vite + Tailwind, Tauri), data model, modules, open-source parts to reuse (for a Word clone: TipTap/ProseMirror, a docx library), milestones that each end in something visible.
+   - **Design**: our own tokens inspired by the original's feel (`impeccable`), our own name, logo and assets.
+   - **Build** milestone by milestone in a new project (`start_project`, private/public asked), `tdd` for the logic.
+   - **Test**: Playwright end-to-end per recon flow + `ui-check`.
+   - **Parity**: a score per feature (done / partial / missing), side-by-side screenshots, the next list.
+   - Rules: personal use, never the original's name, logos, assets or code, nothing to sell.
+   - One reference file per phase so only the current one is loaded.
+5. **learn-from-session** (from one-skill-to-rule-them-all), only at "bye" and the fresh routine:
+   - Looks for the session's corrections ("no", "don't", redone work), repeated instructions and gotchas.
+   - Proposes, for the user to approve one by one: a persona or dev rule, a memory, a skill change, a CLAUDE.md gotcha. Never applies anything by itself.
+6. **video** (from Agent-Reach, without its logins):
+   - YouTube subtitles with `yt-dlp` (auto subtitles, Slovak/English, chapters; no video download) → summary, notes or timestamps.
+   - `yt-dlp` in a venv under `~/.harv/tools`, installed with the user's OK. No subtitles → Whisper once voice is built (§6q 4).
+7. **image-prompt** (from prompt-master), before `generate_image`:
+   - Turns a rough wish into subject, style, composition, light, aspect ratio and any text in the picture.
+   - Gemini's quirks; 2–3 variants when the wish is vague. The user's style picks are saved to memory.
+8. **invest-watch** (from trader-skill, read-only, later):
+   - Free sources only: SEC EDGAR 13F, House Clerk trade disclosures, RSS news, ETF holdings pages. The user's holdings come from memory, never balances.
+   - A scheduled task (weekly or daily, on a cheap model) with a phone push digest. It never orders anything; the facts are separate from opinion.
+9. **can-decode** (car_radio only, after the hardware):
+   - On top of the CSS-Electronics skills: the Golf VII (MQB) is a special case, since the OBD2 port sits behind the gateway (J533) and gives only diagnostics. Raw signals come from the infotainment/comfort CAN at the radio's harness, where the RZC box already taps.
+   - Step 0 (just reading, can be done any time): which adapter, CSS's CANsub.2 vs a cheap candleLight/CANable for python-can, the bus speeds, where to connect.
+
+**Order when we build:** debug + deslop → ui-check → clone → learn-from-session → image-prompt → video → invest-watch → can-decode (with the hardware). The CAN adapter research can come earlier on its own.
