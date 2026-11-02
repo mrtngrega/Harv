@@ -26,7 +26,7 @@ Drawing realistic shapes in code is a weak spot: tracing a photo into vector sha
 
 ## Testing (when the user asks for a test pass)
 
-1. Test backend and frontend, functionality and UI, from many angles: normal use, edge cases, restarts, odd input, and for UIs several window widths (phone, ~1100px, ~1280px, wide), many tabs or items, and live-updating parts watched for a while for layout shifts.
+1. Test backend and frontend, functionality and UI, from many angles: normal use, edge cases, restarts, odd input, and for UIs several window widths (phone, ~1100px, ~1280px, wide), many tabs or items, and live-updating parts watched for a while for layout shifts. Time anything that should feel quick from the user's moment (pressing the power button, logging in, clicking), not from when your own part starts.
 2. Don't fix on the spot. Re-check each finding (reproduce it again, read the code) to make sure it's real.
 3. Report all verified findings in one list (what, where, how to reproduce, severity), then wait for the green light before fixing.
 

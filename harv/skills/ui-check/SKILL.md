@@ -30,6 +30,7 @@ For every screen in scope, look at each of these, and **look** at every screensh
 - **Over time**: live parts (stats, timers, streaming text) watched 30–60 s for layout shifts, jumping numbers, flicker or creeping scroll position.
 - **Input**: keyboard only (Tab order, Enter, Esc, shortcuts), focus where expected after each action, drag and drop, right-click, double-click.
 - **Look**: hierarchy, spacing, alignment, contrast, type, consistency with the rest of the app, motion and the motion-off setting, light and dark where it has both. impeccable's critique and audit give the words for what's off.
+- **Size**: a control is at least as tall and its text at least as big as its neighbours, and on and off look clearly different (the app's own selected style). When a row is tight, drop or move secondary information first; shrinking the control to fit is the last resort. (A 14 px AUTO button with 8 px text next to 11 px text was "too small".)
 - **Both systems** when the app runs on several (Windows and Linux render fonts, blur and scrollbars differently).
 
 **Done when** every screen in scope has been seen at every size and state above that applies, and each finding has been reproduced a second time (a finding you saw once is a guess).
