@@ -5,9 +5,18 @@
 //! broadcasts): `WM_POWERBROADCAST` / `PBT_APMSUSPEND` for sleep, `WM_QUERYENDSESSION` for
 //! shutdown and logoff. The call to Harv is synchronous there, so the light is off before Windows
 //! goes on; Harv's server answers in about a second (its light helper is already logged in).
+//! At shutdown the server is often gone already (Windows closes its hidden console first, seen
+//! 2026-11-01): then the app runs the light helper itself, from the plan the server keeps in
+//! ~/.harv/lights-leaving.json (there only while automatic lights are on) and the Tapo login.
 
 use crate::harv;
+use serde_json::{json, Value};
+use std::io::{BufRead, BufReader, Write};
+use std::os::windows::process::CommandExt;
+use std::process::{Command, Stdio};
 use std::ptr::null_mut;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Power::RegisterSuspendResumeNotification;
@@ -26,13 +35,101 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-/// Asks Harv to turn off what automatic lights turned on. `why` is sleep, shutdown or logoff.
+/// Asks Harv to turn the lights off (automatic lights on). `why` is sleep, shutdown or logoff.
 fn leaving(why: &str) {
     let answer = harv::post_json("/api/lights/leaving", &format!("{{\"why\":\"{why}\"}}"));
     harv::log(&format!(
         "Windows: {why}; lights asked to turn off ({})",
         answer.map_or("Harv didn't answer".into(), |c| format!("HTTP {c}"))
     ));
+    if answer.is_none() {
+        harv::log(&format!("Windows: {why}; {}", off_directly()));
+    }
+}
+
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+fn read_json(name: &str) -> Option<Value> {
+    serde_json::from_str(&std::fs::read_to_string(harv::harv_home().join(name)).ok()?).ok()
+}
+
+/// Harv's server is gone: the light helper turns the lights off, the same way the server would.
+fn off_directly() -> String {
+    let Some(plan) = read_json("lights-leaving.json") else {
+        return "no lights to turn off (automatic lights off)".into();
+    };
+    let Some(tapo) = read_json("devices.json").and_then(|d| d.get("tapo").cloned()) else {
+        return "no Tapo login".into();
+    };
+    let lights = plan["lights"].as_array().cloned().unwrap_or_default();
+    let (Some(python), Some(helper)) = (plan["python"].as_str(), plan["helper"].as_str()) else {
+        return "the plan names no helper".into();
+    };
+    let child = Command::new(python)
+        .args(["-I", helper])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
+    let mut child = match child {
+        Ok(c) => c,
+        Err(e) => return format!("the light helper didn't start: {e}"),
+    };
+    let mut asks =
+        vec![json!({"op": "login", "email": tapo["email"], "password": tapo["password"], "id": 0})];
+    for (i, light) in lights.iter().enumerate() {
+        let mut ask = json!({"op": "set", "mac": light["mac"], "targets": plan["targets"], "change": {"on": false}, "id": i + 1});
+        if light.get("ip").is_some() {
+            ask["ip"] = light["ip"].clone();
+        }
+        asks.push(ask);
+    }
+    if let Some(mut stdin) = child.stdin.take() {
+        for ask in &asks {
+            let _ = writeln!(stdin, "{ask}");
+        }
+    }
+    // The answers, each line on a thread so a light that never answers can't hold up the shutdown.
+    let (tx, rx) = mpsc::channel();
+    if let Some(out) = child.stdout.take() {
+        std::thread::spawn(move || {
+            for line in BufReader::new(out).lines().map_while(Result::ok) {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let (mut off, mut failed) = (0, Vec::new());
+    for _ in 0..asks.len() {
+        let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+            break;
+        };
+        let Ok(line) = rx.recv_timeout(left) else {
+            break;
+        };
+        let answer: Value = serde_json::from_str(&line).unwrap_or_default();
+        if answer["id"] == 0 {
+            continue;
+        }
+        if answer["ok"] == true {
+            off += 1;
+        } else {
+            failed.push(answer["error"].as_str().unwrap_or("no answer").to_string());
+        }
+    }
+    let _ = child.kill();
+    format!(
+        "the app turned {off} of {} light(s) off itself{}",
+        lights.len(),
+        if failed.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", failed.join("; "))
+        }
+    )
 }
 
 unsafe extern "system" fn wnd_proc(

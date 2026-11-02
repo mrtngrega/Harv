@@ -325,6 +325,10 @@ export function harvServer(
                     'A colour or white: a name (red, orange, teal, blue, purple, pink…, warm white, white, cool white, daylight), a hex code (#ff8800) or kelvin (2700K)',
                   ),
                 effect: z.string().optional().describe('A built-in effect by name (see lights_list), or "off" to stop it'),
+                auto: z
+                  .boolean()
+                  .optional()
+                  .describe('Automatic lights: false pauses them until Harv starts again ("auto off"), true turns them back on'),
               },
               async ({ light, ...request }) => text(await lights.set(light, request)),
             ),

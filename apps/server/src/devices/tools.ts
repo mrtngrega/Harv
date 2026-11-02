@@ -13,6 +13,8 @@ export interface LightRequest {
   color?: string;
   /** A built-in effect's name, or "off". */
   effect?: string;
+  /** Automatic lights: false pauses them (until Harv starts again), true turns them back on. */
+  auto?: boolean;
 }
 
 export interface LightTools {
@@ -46,9 +48,10 @@ export function describeAuto(
   lights: LightState[],
 ): string {
   const lines = [
-    'Automatic lights (built into Harv, Settings › Devices; not a scheduled task): the strip goes on when it’s dark outside (Open-Meteo sunlight on the ground below the threshold, or from a while before sunset until sunrise) and the user is at this computer (input in the last 2 minutes, or a video/full-screen app/gamepad), at the moment they touch the mouse or keyboard; it goes off when they’re away, at daylight, or when the computer sleeps, but only if automatic lights were the last to switch it. Switched off by hand, it stays off until the next dark spell.',
+    'Automatic lights (built into Harv, Settings › Devices; not a scheduled task): the strip goes on when it’s dark outside (Open-Meteo sunlight on the ground below the threshold, or from a while before sunset until sunrise) and the user is at this computer (input in the last 2 minutes, or a video/full-screen app/gamepad), at the moment they touch the mouse or keyboard; it goes off when they’re away, at daylight, or when the computer sleeps or shuts down. Always in charge: whoever switched the light, it acts again at its next change (the user leaves, comes back, it gets dark or light); a hand switch in between holds until then. The AUTO button next to the strip’s switch (or lights_set auto) pauses it until Harv starts again.',
   ];
   if (!cfg.autoLights) return [...lines, 'State: switched off in Settings.'].join('\n');
+  if (auto?.paused) lines.push('Paused right now (the AUTO button), until it’s pressed again or Harv starts again.');
   lines.push(
     `Settings: on; place ${cfg.autoLightsPlace?.name ?? 'not set'}; dark below ${cfg.autoLightsDark} W/m²; ${cfg.autoLightsSunset} min before sunset; away after ${cfg.autoLightsAway} min.`,
   );
@@ -114,9 +117,15 @@ export function lightTools(service: LightsService, settings: () => HarvSettings)
             .map((l) => l.name)
             .join(', ') || 'none yet'
         }.`;
-      const change = toChange(request);
-      if (typeof change === 'string') return change;
+      const { auto, ...look } = request;
       const out: string[] = [];
+      if (auto !== undefined) {
+        service.autoPause?.(!auto);
+        out.push(auto ? 'Automatic lights are back on.' : 'Automatic lights are paused until they’re turned back on or Harv starts again.');
+        if (!Object.keys(look).length) return out.join('\n');
+      }
+      const change = toChange(look);
+      if (typeof change === 'string') return change;
       for (const t of targets) {
         try {
           out.push(describeLight(await service.set(t.id, change, 'chat')));

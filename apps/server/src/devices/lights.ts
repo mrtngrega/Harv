@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -22,6 +22,12 @@ export const KASA_SOURCE = 'https://github.com/ZeliardM/python-kasa/archive/844e
 const HELPER = fileURLToPath(new URL('./kasa_helper.py', import.meta.url));
 const VENV = join(HARV_HOME, 'kasa', 'venv');
 const venvPython = () => join(VENV, ...(IS_WINDOWS ? ['Scripts', 'python.exe'] : ['bin', 'python']));
+/**
+ * What the Harv app needs to turn the lights off by itself when Windows shuts down and Harv's server
+ * is already gone (its console is closed before the app hears it): the helper and each light's
+ * address, never the login (the app reads that from devices.json at that moment).
+ */
+export const LEAVING_PLAN = join(HARV_HOME, 'lights-leaving.json');
 
 const ASK_MS = 25_000;
 /** How often the lights are read again while a dashboard is open. */
@@ -77,6 +83,8 @@ export class LightsService {
   private timer: NodeJS.Timeout | null = null;
   /** Automatic lights' state, shown with the lights (set by the server). */
   autoStatus: (() => AutoLightsStatus) | null = null;
+  /** Pauses or resumes automatic lights (the AUTO button; chats through lights_set). */
+  autoPause: ((paused: boolean) => void) | null = null;
 
   constructor(
     private store: DeviceStore,
@@ -304,6 +312,23 @@ export class LightsService {
     this.states.set(id, next);
     this.publish();
     return next;
+  }
+
+  /** Keeps `LEAVING_PLAN` up to date: there while automatic lights are on in Settings, gone when off. */
+  saveLeavingPlan(enabled: boolean, file = LEAVING_PLAN): void {
+    const lights = enabled ? this.chosen().filter((id) => !this.allowed(id)) : [];
+    const old = existsSync(file) ? readFileSync(file, 'utf8') : null;
+    if (!lights.length) {
+      if (old !== null) rmSync(file, { force: true });
+      return;
+    }
+    const plan = JSON.stringify({
+      python: venvPython(),
+      helper: HELPER,
+      targets: broadcastTargets(),
+      lights: lights.map((mac) => ({ mac, ...(this.ips.get(mac) ? { ip: this.ips.get(mac) } : {}) })),
+    });
+    if (plan !== old) writeFileSync(file, plan);
   }
 
   async choose(id: string, chosen: boolean): Promise<void> {

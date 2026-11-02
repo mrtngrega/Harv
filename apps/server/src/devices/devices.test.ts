@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -111,6 +111,17 @@ describe('only the chosen light, never one that refused the login', () => {
     expect(service.match('ec750ceaf19f').map((l) => l.id)).toEqual([MINE]);
     expect(service.match('desk')).toEqual([]);
   });
+
+  it('keeps the shutdown plan for the app (the helper and the lights, never the login), gone when automatic lights are off', () => {
+    const file = join(dir, 'leaving.json');
+    service.saveLeavingPlan(true, file);
+    const plan = JSON.parse(readFileSync(file, 'utf8')) as { python: string; helper: string; lights: { mac: string }[] };
+    expect(plan.lights).toEqual([{ mac: MINE }]);
+    expect(plan.helper).toMatch(/kasa_helper\.py$/);
+    expect(readFileSync(file, 'utf8')).not.toMatch(/pw|example\.com/);
+    service.saveLeavingPlan(false, file);
+    expect(existsSync(file)).toBe(false);
+  });
 });
 
 describe('what a chat asks for', () => {
@@ -133,7 +144,7 @@ describe('what a chat asks for', () => {
     const cfg = { ...DEFAULT_SETTINGS, autoLights: true, autoLightsPlace: { name: 'Geča', lat: 48.6, lon: 21.3 } };
     const on = { id: MINE, at: 1, by: 'auto' as const, on: true, what: 'on (little sunlight (86 W/m²))' };
     const text = describeAuto(
-      { enabled: true, supported: true, sunlight: 86, weatherAt: 1, dark: true, idleSec: 3, why: 'dark, light on' },
+      { enabled: true, paused: false, supported: true, sunlight: 86, weatherAt: 1, dark: true, idleSec: 3, why: 'dark, light on' },
       cfg,
       [{ id: MINE, name: 'L.E.D', reachable: true, on: true, control: on }],
     );

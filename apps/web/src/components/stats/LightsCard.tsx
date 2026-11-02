@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { swatch, type LightState } from '@harv/shared';
+import { swatch, type AutoLightsStatus, type LightState } from '@harv/shared';
 import { lights, QUICK_COLORS, useLights } from '../../lib/lights.ts';
 import { Card } from './parts.tsx';
 
@@ -24,6 +24,33 @@ function Switch({ light }: { light: LightState }) {
   );
 }
 
+/**
+ * Automatic lights' on/off, next to the light's switch (the user's wish, 2026-11-02). Off pauses
+ * them until it's pressed again or Harv starts again. Shown only while they're on in Settings.
+ */
+function AutoButton({ auto }: { auto: AutoLightsStatus | undefined }) {
+  if (!auto?.enabled || !auto.supported) return null;
+  const on = !auto.paused;
+  return (
+    <button
+      type="button"
+      onClick={() => lights.auto(!on)}
+      aria-pressed={on}
+      aria-label={on ? 'Automatic lights on, pause them' : 'Automatic lights paused, turn them back on'}
+      title={
+        on
+          ? `Automatic lights: ${auto.why || 'on'}. Click to pause until Harv starts again.`
+          : 'Automatic lights paused. Click to turn them back on.'
+      }
+      className={`flex-none cursor-pointer rounded border px-[3px] text-[8px] leading-[12px] ${
+        on ? 'border-accent/60 text-accent' : 'border-line text-faint line-through'
+      }`}
+    >
+      AUTO
+    </button>
+  );
+}
+
 /** One row per light in the narrow panel. */
 export function LightsCompact() {
   const status = useLights();
@@ -36,8 +63,14 @@ export function LightsCompact() {
           <span className="min-w-0 truncate text-muted" title={l.name}>
             {l.name}
           </span>
-          <span className="flex flex-none items-center gap-1.5 tabular-nums">
-            <span className={l.reachable ? 'text-ink' : 'text-faint'}>{!l.reachable ? '—' : l.on ? `${l.brightness ?? ''}%` : 'off'}</span>
+          <span className="flex flex-none items-center gap-1 tabular-nums">
+            {/* The brightness only without the AUTO button: both don't fit next to the name (the switch shows on/off). */}
+            {!l.reachable ? (
+              <span className="text-faint">—</span>
+            ) : !status.auto?.enabled || !status.auto.supported ? (
+              <span className="text-ink">{l.on ? `${l.brightness ?? ''}%` : 'off'}</span>
+            ) : null}
+            <AutoButton auto={status.auto} />
             <Switch light={l} />
           </span>
         </div>
@@ -100,6 +133,7 @@ export function LightsCard() {
         >
           <div className="flex items-center gap-3">
             <Switch light={l} />
+            <AutoButton auto={status.auto} />
             <span className="text-[11px] text-muted">{l.on ? 'Tap to turn off' : 'Tap to turn on'}</span>
           </div>
           {l.reachable && (

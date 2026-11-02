@@ -5,8 +5,8 @@ import { HARV_HOME } from '../paths.ts';
 
 // Who took control of each light last (the user's idea, 2026-10-31): every change Harv makes is
 // written down with who asked for it, and a change Harv didn't make (the Tapo app, the strip's
-// button, the other computer) is noticed on the next read. Automatic lights follow it: a light is
-// Harv's to turn off only while automatic lights were the last to touch it. Kept in
+// button, the other computer) is noticed on the next read; automatic lights name it when they
+// say why they leave a light as it is. Kept in
 // ~/.harv/lights-log.json (this computer's own; the other computer's changes show up here as
 // "outside"), with automatic lights' own state, so all of it survives a restart.
 
@@ -14,8 +14,8 @@ const KEEP = 60;
 
 interface LogFile {
   entries: LightControl[];
-  /** Automatic lights: it counted as dark, and since when (ms). */
-  auto?: { dark: boolean; darkSince: number };
+  /** Automatic lights: it counted as dark. */
+  auto?: { dark: boolean };
   /** The last sunrise and sunset times read (ms) and the place ("lat,lon"), for days without internet. */
   sun?: SunTimes;
 }
@@ -42,7 +42,7 @@ export class ControlLog {
         : [];
       return {
         entries,
-        ...(raw.auto && typeof raw.auto.darkSince === 'number' ? { auto: { dark: !!raw.auto.dark, darkSince: raw.auto.darkSince } } : {}),
+        ...(raw.auto && typeof raw.auto === 'object' ? { auto: { dark: !!raw.auto.dark } } : {}),
         ...(raw.sun && typeof raw.sun.place === 'string' && times(raw.sun.sunrise) && times(raw.sun.sunset)
           ? { sun: { place: raw.sun.place, sunrise: raw.sun.sunrise, sunset: raw.sun.sunset } }
           : {}),
@@ -71,13 +71,13 @@ export class ControlLog {
     return this.read().entries.slice(-n).reverse();
   }
 
-  autoState(): { dark: boolean; darkSince: number } | null {
+  autoState(): { dark: boolean } | null {
     return this.read().auto ?? null;
   }
 
-  setAutoState(auto: { dark: boolean; darkSince: number }): void {
+  setAutoState(auto: { dark: boolean }): void {
     const now = this.read();
-    if (now.auto?.dark === auto.dark && now.auto.darkSince === auto.darkSince) return;
+    if (now.auto?.dark === auto.dark) return;
     this.write({ ...now, auto });
   }
 

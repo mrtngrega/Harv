@@ -76,6 +76,8 @@ export interface LightsStatus {
 /** What automatic lights see and did, for Settings › Devices. */
 export interface AutoLightsStatus {
   enabled: boolean;
+  /** The AUTO button is off: paused until it's pressed again or Harv starts again. */
+  paused: boolean;
   /** It needs to know the user is at the computer: Windows only for now. */
   supported: boolean;
   /** Sunlight on the ground now (W/m²), and when the weather was read. */
@@ -110,7 +112,8 @@ export type LightsClientMessage =
   | { type: 'lights.set'; id: string; change: LightChange }
   | { type: 'lights.scan' }
   /** Harv controls this light (true) or leaves it alone (false). */
-  | { type: 'lights.choose'; id: string; chosen: boolean };
+  | { type: 'lights.choose'; id: string; chosen: boolean }
+  | { type: 'lights.auto'; on: boolean };
 
 export type LightsServerMessage = { type: 'lights'; status: LightsStatus };
 

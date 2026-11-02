@@ -336,6 +336,7 @@ const autoLights = new AutoLights(lights, {
   changed: () => lights.publish(),
 });
 lights.autoStatus = () => autoLights.status();
+lights.autoPause = (paused) => autoLights.setPaused(paused);
 autoLights.start();
 chats.images = {
   async generate(prompt, images) {
@@ -583,8 +584,8 @@ app.post('/api/devices/place', async (req, reply) => {
     return reply.code(502).send({ error: `The place search didn’t answer: ${(err as Error).message}` });
   }
 });
-// The Harv app hears Windows going to sleep, shutting down or logging off: a light automatic lights
-// turned on goes off first, or it stays on all night (docs/PLAN.md §6z).
+// The Harv app hears Windows going to sleep, shutting down or logging off: with automatic lights on,
+// the light goes off first, or it stays on all night (docs/PLAN.md §6z).
 app.post('/api/lights/leaving', async (req) => {
   const { why } = (req.body ?? {}) as { why?: unknown };
   const reason =
@@ -794,6 +795,9 @@ app.get('/ws', { websocket: true }, (socket, req) => {
         break;
       case 'lights.scan':
         void lights.scan();
+        break;
+      case 'lights.auto':
+        autoLights.setPaused(msg.on !== true);
         break;
       case 'lights.choose':
         if (typeof msg.id === 'string') void lights.choose(msg.id, msg.chosen === true);

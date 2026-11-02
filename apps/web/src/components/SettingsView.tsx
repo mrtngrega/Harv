@@ -1108,7 +1108,7 @@ function AutoLightsSettings() {
       <Toggle
         on={settings.autoLights}
         label="Turn the light on when it’s dark and I’m here"
-        hint="Dark: clouds, rain or dusk, from the sunlight where you live (Open-Meteo, free), or around sunset. Here: you used this computer’s mouse, keyboard or gamepad lately, or a video or full-screen app is on (for up to 4 hours without input). It goes off when you leave or the computer sleeps, only if Harv turned it on; switched off by hand, it stays off until it gets light."
+        hint="Dark: clouds, rain or dusk, from the sunlight where you live (Open-Meteo, free), or around sunset. Here: you used this computer’s mouse, keyboard or gamepad lately, or a video or full-screen app is on (for up to 4 hours without input). It goes off when you leave, at daylight, or when the computer sleeps or shuts down. Always in charge: a hand switch holds until the next change (you leave, come back, it gets dark or light). The AUTO button next to the light in the stats panel pauses it until Harv starts again."
         onChange={(autoLights) => updateSettings({ autoLights })}
       />
       <form

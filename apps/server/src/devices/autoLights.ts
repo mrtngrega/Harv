@@ -7,9 +7,11 @@ import type { LightsService } from './lights.ts';
 // Automatic lights (the user's wish, 2026-10-31; docs/PLAN.md §6z "Automatic lights"): the light
 // goes on when it's dark outside (little sunlight on the ground: clouds, rain, dusk; or from a
 // while before sunset until sunrise) and the user is at this computer; off when they leave, or when
-// daylight is back, but only if Harv turned it on. Switched off by hand, it stays off until the
-// next dark spell. No model calls: the weather is Open-Meteo (free, no key), presence is the time
-// since the last mouse or keyboard input. Pure logic in `decide`, tested with a fake clock.
+// daylight is back. Always in charge (the user's wish, 2026-11-02): whoever switched the light last,
+// it acts at its next change; a hand switch in between holds until then. The AUTO button pauses it
+// until Harv starts again (`paused`, never saved). No model calls: the weather is Open-Meteo (free,
+// no key), presence is the time since the last mouse or keyboard input. Pure logic in `decide`,
+// tested with a fake clock.
 
 export interface Weather {
   /** Sunlight on the ground now, W/m²; null without a fresh reading (no internet: the sun times only). */
@@ -20,18 +22,13 @@ export interface Weather {
   at: number;
 }
 
-/**
- * Automatic lights' own state, kept in the control log's file so it survives a restart. Whose the
- * light is comes from the log of who took control last (`LightControl`), not from here.
- */
+/** Automatic lights' own state, kept in the control log's file so it survives a restart. */
 export interface AutoMemory {
   /** It counted as dark at the last check (kept between the on and off thresholds). */
   dark: boolean;
-  /** When this dark spell began (ms): switched off by the user since then, it stays off. */
-  darkSince: number;
 }
 
-export const FRESH_MEMORY: AutoMemory = { dark: false, darkSince: 0 };
+export const FRESH_MEMORY: AutoMemory = { dark: false };
 
 export interface AutoInput {
   now: number;
@@ -45,7 +42,7 @@ export interface AutoInput {
   watching?: string;
   weather: Weather;
   light: { on: boolean };
-  /** Who changed the light last (null: nobody Harv knows of). */
+  /** Who changed the light last (null: nobody Harv knows of), for saying why. */
   last: Pick<LightControl, 'by' | 'on' | 'at'> | null;
   cfg: Pick<HarvSettings, 'autoLightsDark' | 'autoLightsSunset' | 'autoLightsAway'>;
 }
@@ -82,47 +79,45 @@ export function sunDark(now: number, w: Weather, beforeMin: number): boolean {
 
 const WHO: Record<LightControl['by'], string> = { auto: 'automatic lights', you: 'you', chat: 'a chat', outside: 'outside Harv' };
 
-export function decide(input: AutoInput, before: AutoMemory): { action: 'on' | 'off' | null; why: string; mem: AutoMemory } {
+export function decide(
+  input: AutoInput,
+  before: AutoMemory,
+  /** What automatic lights wanted at the last check; null after a start or a resume (then it acts whatever the light is). */
+  prevWant: boolean | null,
+): { action: 'on' | 'off' | null; why: string; mem: AutoMemory; want: boolean | null } {
   const { now, idleSec, weather, light, last, cfg } = input;
   const mem = { ...before };
   const bySun = sunDark(now, weather, cfg.autoLightsSunset);
   const sunlight = weather.radiation;
-  if (bySun || (sunlight !== null && sunlight < cfg.autoLightsDark)) {
-    // A new dark spell: it was light at the last check, or the sun rose since this one began (the PC
-    // was off through the morning, so Harv never saw the daylight in between).
-    const sunRoseSince = weather.sunrise.some((t) => t > mem.darkSince && t <= now);
-    if (!mem.dark || sunRoseSince) mem.darkSince = now;
-    mem.dark = true;
-    // Without a sunlight reading only the sun decides (a cloudy-day spell ends with no way to tell).
-  } else if (sunlight === null || sunlight > cfg.autoLightsDark * BRIGHT_FACTOR) mem.dark = false;
-  // Harv's to turn off only while automatic lights were the last to change it.
-  const mine = last?.by === 'auto';
+  if (bySun || (sunlight !== null && sunlight < cfg.autoLightsDark)) mem.dark = true;
+  // Without a sunlight reading only the sun decides (a cloudy-day spell ends with no way to tell).
+  else if (sunlight === null || sunlight > cfg.autoLightsDark * BRIGHT_FACTOR) mem.dark = false;
   const idleAway = idleSec >= cfg.autoLightsAway * 60;
   const watched = !!input.watching && idleSec < WATCH_MAX_SEC;
   const away = idleAway && !watched;
+  const here = idleSec <= ACTIVE_SEC || watched;
+  const who = WHO[last?.by ?? 'outside'];
 
-  if (!mem.dark) {
-    if (mine && light.on) return { action: 'off', why: 'daylight is back', mem };
-    return { action: null, why: 'light outside', mem };
+  // What the light should be now; null between "here" and "away" (keeps the last wish).
+  const want = !mem.dark || away ? false : here ? true : prevWant;
+  // It acts only when its wish changes (or right after a start or resume): a hand switch in
+  // between holds until the next change (the user leaves, comes back, it gets light or dark).
+  const act = want !== null && want !== prevWant && light.on !== want;
+  if (act && want) {
+    const reason = bySun || sunlight === null ? 'sunset' : `little sunlight (${Math.round(sunlight)} W/m²)`;
+    return { action: 'on', why: idleSec > ACTIVE_SEC ? `${reason}; ${input.watching}` : reason, mem, want };
   }
-  if (away) {
-    if (mine && light.on) return { action: 'off', why: `away for ${Math.round(idleSec / 60)} min`, mem };
-    return {
-      action: null,
-      why: light.on ? `dark, you’re away, but ${WHO[last?.by ?? 'outside']} turned it on` : 'dark, but you’re away',
-      mem,
-    };
-  }
-  const seen = idleAway && watched ? ` (${input.watching}, so you count as here)` : '';
-  if (light.on)
-    return { action: null, why: mine ? `dark, light on${seen}` : `dark, on (${last ? `${WHO[last.by]} turned it on` : 'it was on'})`, mem };
-  // Switched off by someone else since it got dark: theirs until it gets light again.
-  if (last && !mine && !last.on && last.at >= mem.darkSince) {
-    return { action: null, why: `dark, but ${WHO[last.by]} switched it off (until it gets light)`, mem };
-  }
-  if (idleSec > ACTIVE_SEC && !watched) return { action: null, why: 'dark, waiting until you’re back at the computer', mem };
-  const reason = bySun || sunlight === null ? 'sunset' : `little sunlight (${Math.round(sunlight)} W/m²)`;
-  return { action: 'on', why: idleSec > ACTIVE_SEC ? `${reason}; ${input.watching}` : reason, mem };
+  if (act) return { action: 'off', why: !mem.dark ? 'daylight is back' : `away for ${Math.round(idleSec / 60)} min`, mem, want };
+
+  let why: string;
+  if (!mem.dark) why = light.on ? `light outside, but ${who} turned it on` : 'light outside';
+  else if (away) why = light.on ? `dark, you’re away, but ${who} turned it on` : 'dark, but you’re away';
+  else if (want === true)
+    why = light.on
+      ? `dark, light on${idleAway && watched ? ` (${input.watching}, so you count as here)` : ''}`
+      : `dark, but ${who} switched it off (on again when you’re back after being away)`;
+  else why = light.on ? 'dark, light on' : 'dark, waiting until you’re back at the computer';
+  return { action: null, why, mem, want };
 }
 
 /** Open-Meteo: sunlight now, sunrise and sunset (free, no key; only the coordinates leave). */
@@ -292,6 +287,10 @@ export class AutoLights {
   /** A check was asked for while one ran: run again right after. */
   private again = false;
   private stopWatch: (() => void) | null = null;
+  /** What it wanted at the last check (`decide`); null after a start or a resume. */
+  private want: boolean | null = null;
+  /** The AUTO button is off: until it's pressed again or Harv starts again. */
+  private paused = false;
 
   constructor(
     private lights: LightsService,
@@ -305,12 +304,16 @@ export class AutoLights {
 
   /**
    * The computer is going to sleep, shutting down or logging off (the Harv app hears Windows say
-   * so): a light automatic lights turned on goes off now, or it would stay on all night.
+   * so): with automatic lights on in Settings the light goes off now, whoever switched it on and
+   * even while paused, or it would stay on all night.
    */
   async leaving(reason: string): Promise<number> {
+    if (!this.deps.settings().autoLights) return 0;
+    // Back from sleep it counts as a new wish: on again once the user is at the computer.
+    this.want = false;
     let n = 0;
     for (const light of this.lights.status().lights) {
-      if (!light.reachable || !light.on || light.control?.by !== 'auto') continue;
+      if (!light.reachable || !light.on) continue;
       try {
         await this.lights.set(light.id, { on: false }, 'auto', `off (${reason})`);
         this.last = { action: 'off', why: reason, at: (this.deps.now ?? Date.now)() };
@@ -322,6 +325,16 @@ export class AutoLights {
     }
     this.deps.changed();
     return n;
+  }
+
+  /** The AUTO button next to the light's switch. Back on, it acts at once, whatever the light is. */
+  setPaused(paused: boolean): void {
+    if (paused === this.paused) return;
+    this.paused = paused;
+    this.want = null;
+    this.deps.log(`Automatic lights ${paused ? 'paused' : 'back on'} (the AUTO button)`);
+    if (paused) this.deps.changed();
+    else void this.tick();
   }
 
   start(): void {
@@ -356,6 +369,7 @@ export class AutoLights {
     const s = this.deps.settings();
     return {
       enabled: s.autoLights,
+      paused: this.paused,
       supported: IS_WINDOWS,
       ...(this.weather
         ? {
@@ -366,7 +380,7 @@ export class AutoLights {
       ...(this.idleSec !== null ? { idleSec: this.idleSec } : {}),
       ...(this.watching ? { watching: this.watching } : {}),
       dark: this.mem.dark,
-      why: this.why,
+      why: this.paused ? 'paused (the AUTO button; on again when Harv starts)' : this.why,
       ...(this.last ? { last: this.last } : {}),
       ...(this.problem ? { problem: this.problem } : {}),
     };
@@ -380,8 +394,9 @@ export class AutoLights {
   /** One check: weather (every 10 min), presence, the light, then what to do. */
   async tick(): Promise<void> {
     const s = this.deps.settings();
-    this.watch(s.autoLights && !!s.autoLightsPlace);
-    if (!s.autoLights || !s.autoLightsPlace) return;
+    this.watch(s.autoLights && !!s.autoLightsPlace && !this.paused);
+    this.lights.saveLeavingPlan(s.autoLights);
+    if (!s.autoLights || !s.autoLightsPlace || this.paused) return;
     if (this.running) {
       this.again = true;
       return;
@@ -439,6 +454,7 @@ export class AutoLights {
           cfg: s,
         },
         this.mem,
+        this.want,
       );
       this.mem = result.mem;
       this.lights.log.setAutoState(this.mem);
@@ -448,10 +464,12 @@ export class AutoLights {
           await this.lights.set(light.id, { on: result.action === 'on' }, 'auto', `${result.action} (${result.why})`);
           this.last = { action: result.action, why: result.why, at: now };
           this.deps.log(`Automatic lights: ${light.name} ${result.action} (${result.why})`);
+          this.want = result.want;
         } catch (err) {
+          // The wish stays unmet: tried again on the next check.
           this.problem = (err as Error).message;
         }
-      }
+      } else this.want = result.want;
     } finally {
       this.running = false;
       this.deps.changed();

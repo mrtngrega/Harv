@@ -30,8 +30,16 @@ const weather = (radiation: number): Weather => ({
 });
 const cfg = { autoLightsDark: 100, autoLightsSunset: 30, autoLightsAway: 10 };
 type Last = Pick<LightControl, 'by' | 'on' | 'at'> | null;
-const run = (now: number, radiation: number, idleSec: number, on: boolean, last: Last = null, mem: AutoMemory = FRESH_MEMORY) =>
-  decide({ now, idleSec, weather: weather(radiation), light: { on }, last, cfg }, mem);
+const run = (
+  now: number,
+  radiation: number,
+  idleSec: number,
+  on: boolean,
+  prevWant: boolean | null = null,
+  last: Last = null,
+  mem: AutoMemory = FRESH_MEMORY,
+) => decide({ now, idleSec, weather: weather(radiation), light: { on }, last, cfg }, mem, prevWant);
+const dark = { dark: true };
 
 describe('dark by the sun', () => {
   it('from 30 min before sunset until sunrise', () => {
@@ -44,11 +52,12 @@ describe('dark by the sun', () => {
 });
 
 describe('automatic lights', () => {
-  it('turns on at sunset when the user is at the computer, and remembers when it got dark', () => {
+  it('turns on at sunset when the user is at the computer, and remembers it’s dark', () => {
     const r = run(day(15, 50), 300, 20, false);
     expect(r.action).toBe('on');
     expect(r.why).toBe('sunset');
-    expect(r.mem).toEqual({ dark: true, darkSince: day(15, 50) });
+    expect(r.mem).toEqual({ dark: true });
+    expect(r.want).toBe(true);
   });
 
   it('turns on on a dark cloudy afternoon, not on a bright one', () => {
@@ -60,76 +69,57 @@ describe('automatic lights', () => {
     const r = run(day(18), 0, 400, false);
     expect(r.action).toBeNull();
     expect(r.why).toMatch(/waiting until you’re back/);
-    expect(run(day(18), 0, 30, false, null, r.mem).action).toBe('on');
+    expect(r.want).toBeNull();
+    expect(run(day(18), 0, 30, false, r.want, null, r.mem).action).toBe('on');
   });
 
-  it('turns its own light off when the user leaves, and on again when they’re back', () => {
-    const mem = run(day(18), 0, 10, false).mem;
-    const away = run(day(18, 20), 0, 11 * 60, true, { by: 'auto', on: true, at: day(18) }, mem);
+  it('turns the light off when the user leaves, and on again when they’re back', () => {
+    const away = run(day(18, 20), 0, 11 * 60, true, true, { by: 'auto', on: true, at: day(18) }, dark);
     expect(away.action).toBe('off');
     expect(away.why).toBe('away for 11 min');
-    expect(run(day(18, 40), 0, 5, false, { by: 'auto', on: false, at: day(18, 20) }, away.mem).action).toBe('on');
+    expect(run(day(18, 40), 0, 5, false, away.want, { by: 'auto', on: false, at: day(18, 20) }, away.mem).action).toBe('on');
   });
 
-  it('leaves a light on that someone else switched on last, whoever it was', () => {
+  it('always in charge: off when the user leaves, whoever switched it on', () => {
     for (const by of ['you', 'chat', 'outside'] as const) {
-      const r = run(day(18), 0, 20 * 60, true, { by, on: true, at: day(17) });
-      expect(r.action).toBeNull();
+      expect(run(day(18), 0, 20 * 60, true, true, { by, on: true, at: day(17) }, dark).action).toBe('off');
     }
-    // Nobody Harv knows of (it was on before Harv logged anything): left alone too.
-    expect(run(day(18), 0, 20 * 60, true).action).toBeNull();
+    expect(run(day(18), 0, 20 * 60, true, true, null, dark).action).toBe('off');
   });
 
-  it('a light automatic lights turned on is still theirs after a restart (it’s in the log)', () => {
-    const r = run(day(19), 0, 15 * 60, true, { by: 'auto', on: true, at: day(16) }, { dark: true, darkSince: day(15, 46) });
-    expect(r.action).toBe('off');
-  });
-
-  it('switched off by someone else since it got dark: stays off until it gets light, then works again', () => {
-    const mem = { dark: true, darkSince: day(15, 46) };
+  it('a hand switch-off holds until the next change, then it works again', () => {
     const off = { by: 'you' as const, on: false, at: day(18, 5) };
-    const r = run(day(22), 0, 10, false, off, mem);
+    const r = run(day(18, 6), 0, 5, false, true, off, dark);
     expect(r.action).toBeNull();
     expect(r.why).toMatch(/you switched it off/);
-    // Morning: light again; the next dark spell starts later than that switch-off.
-    const morning = run(day(24 + 9), 400, 10, false, off, r.mem);
-    expect(morning.mem.dark).toBe(false);
-    const evening = run(day(24 + 16), 300, 10, false, off, morning.mem);
-    expect(evening.action).toBe('on');
+    // The user leaves (nothing to do, it's off) and comes back: on again.
+    const left = run(day(19), 0, 15 * 60, false, r.want, off, dark);
+    expect(left.action).toBeNull();
+    expect(left.want).toBe(false);
+    expect(run(day(19, 30), 0, 3, false, left.want, off, dark).action).toBe('on');
   });
 
-  it('the user’s night: switched off by hand, the PC off overnight, on again after dark the next day', () => {
-    // Tonight: dark since 15:46, the user switches the strip off at 22:00 and shuts the PC down.
-    const tonight = { dark: true, darkSince: day(15, 46) };
-    const off = { by: 'you' as const, on: false, at: day(22) };
-    expect(run(day(22, 1), 0, 5, false, off, tonight).action).toBeNull();
-    // Tomorrow at 18:00 the PC starts again: Harv never saw the morning, but the sun rose since.
-    const tomorrow = run(day(24 + 18), 0, 5, false, off, tonight);
-    expect(tomorrow.mem.darkSince).toBe(day(24 + 18));
-    expect(tomorrow.action).toBe('on');
-    // Started during the day instead: also on once it gets dark.
-    const noon = run(day(24 + 12), 400, 5, false, off, tonight);
+  it('a hand switch-on in daylight holds, and is turned off once it’s dark and the user leaves', () => {
+    const on = { by: 'you' as const, on: true, at: day(12) };
+    const noon = run(day(12), 400, 5, true, false, on);
     expect(noon.action).toBeNull();
-    expect(run(day(24 + 16), 300, 5, false, off, noon.mem).action).toBe('on');
+    expect(noon.why).toMatch(/light outside, but you turned it on/);
+    const evening = run(day(16), 300, 5, true, noon.want, on, noon.mem);
+    expect(evening.action).toBeNull();
+    expect(evening.want).toBe(true);
+    expect(run(day(18), 0, 11 * 60, true, evening.want, on, evening.mem).action).toBe('off');
   });
 
-  it('a hand switch-off earlier the same night still holds after a Harv restart', () => {
-    const tonight = { dark: true, darkSince: day(15, 46) };
-    const r = run(day(23), 0, 5, false, { by: 'you', on: false, at: day(21) }, tonight);
-    expect(r.action).toBeNull();
-    expect(r.mem.darkSince).toBe(day(15, 46));
+  it('after a start or a resume it acts whatever the light is (the user’s wish: auto again)', () => {
+    expect(run(day(18), 0, 5, false, null, { by: 'you', on: false, at: day(17) }, dark).action).toBe('on');
+    expect(run(day(12), 400, 5, true, null, { by: 'you', on: true, at: day(11) }).action).toBe('off');
   });
 
-  it('a switch-off from before it got dark doesn’t keep it off', () => {
-    const r = run(day(16), 300, 10, false, { by: 'you', on: false, at: day(10) }, { dark: false, darkSince: 0 });
-    expect(r.action).toBe('on');
-  });
-
-  it('turns its own light off when daylight is back, without flickering on a passing cloud', () => {
+  it('turns the light off when daylight is back, without flickering on a passing cloud', () => {
     const mem = run(day(13), 60, 5, false).mem;
     const mine = { by: 'auto' as const, on: true, at: day(13) };
-    expect(run(day(13, 10), 120, 5, true, mine, mem).action).toBeNull();
-    const bright = run(day(13, 20), 200, 5, true, mine, mem);
+    expect(run(day(13, 10), 120, 5, true, true, mine, mem).action).toBeNull();
+    const bright = run(day(13, 20), 200, 5, true, true, mine, mem);
     expect(bright.action).toBe('off');
     expect(bright.why).toBe('daylight is back');
   });
@@ -137,9 +127,12 @@ describe('automatic lights', () => {
 
 describe('watching without touching anything (a film, a controller game)', () => {
   const mine = { by: 'auto' as const, on: true, at: day(18) };
-  const mem = { dark: true, darkSince: day(15, 46) };
   const watch = (idleSec: number, watching?: string) =>
-    decide({ now: day(20), idleSec, ...(watching ? { watching } : {}), weather: weather(0), light: { on: true }, last: mine, cfg }, mem);
+    decide(
+      { now: day(20), idleSec, ...(watching ? { watching } : {}), weather: weather(0), light: { on: true }, last: mine, cfg },
+      dark,
+      true,
+    );
 
   it('a video keeping the screen on or a full-screen app counts as being here', () => {
     expect(watch(40 * 60).action).toBe('off');
@@ -164,6 +157,7 @@ describe('watching without touching anything (a film, a controller game)', () =>
         cfg,
       },
       FRESH_MEMORY,
+      null,
     );
     expect(r.action).toBe('on');
     expect(r.why).toBe('sunset; a full-screen app is in front');
@@ -201,6 +195,7 @@ describe('the moment the user is back', () => {
         return light;
       },
       status: () => ({ lights: [light] }),
+      saveLeavingPlan: () => {},
     } as unknown as LightsService;
     let idleSec = 300;
     let back: (() => void) | null = null;
@@ -223,7 +218,7 @@ describe('the moment the user is back', () => {
         return () => watchers--;
       },
     });
-    return { auto, sets, here: () => (idleSec = 0), back: () => back?.(), watchers: () => watchers };
+    return { auto, sets, light, here: () => (idleSec = 0), back: () => back?.(), watchers: () => watchers };
   };
 
   it('turns the light on at once when the user touches the mouse, without waiting for the minute', async () => {
@@ -253,6 +248,32 @@ describe('the moment the user is back', () => {
     t.auto.stop();
   });
 
+  it('the AUTO button pauses it (no watcher, nothing switched) and back on it acts at once', async () => {
+    const t = setup();
+    t.here();
+    t.auto.setPaused(true);
+    await t.auto.tick();
+    expect(t.sets).toEqual([]);
+    expect(t.watchers()).toBe(0);
+    expect(t.auto.status()).toMatchObject({ paused: true, why: expect.stringMatching(/paused/) });
+    t.auto.setPaused(false);
+    await vi.waitFor(() => expect(t.sets).toEqual([true]));
+    expect(t.auto.status().paused).toBe(false);
+    t.auto.stop();
+  });
+
+  it('sleep or shutdown turns the light off whoever switched it on, even while paused; back, it goes on again', async () => {
+    const t = setup();
+    t.light.on = true;
+    t.auto.setPaused(true);
+    expect(await t.auto.leaving('the computer is shutting down')).toBe(1);
+    expect(t.sets).toEqual([false]);
+    t.auto.setPaused(false);
+    t.here();
+    await vi.waitFor(() => expect(t.sets).toEqual([false, true]));
+    t.auto.stop();
+  });
+
   it('reads the sunlight a minute after each quarter hour, when Open-Meteo has a new value', () => {
     expect(weatherDue(day(15, 1), day(15, 14))).toBe(false);
     expect(weatherDue(day(15, 14), day(15, 16))).toBe(true);
@@ -273,12 +294,15 @@ describe('no internet', () => {
 
   it('without a sunlight reading it goes on at sunset and its light goes off at sunrise', () => {
     const noLight = (now: number, on: boolean, last: Last, mem: AutoMemory) =>
-      decide({ now, idleSec: 10, weather: sunOnly(weather(0), now, 0), light: { on }, last, cfg }, mem);
+      decide({ now, idleSec: 10, weather: sunOnly(weather(0), now, 0), light: { on }, last, cfg }, mem, want);
+    let want: boolean | null = null;
     const noon = noLight(day(12), false, null, FRESH_MEMORY);
     expect(noon.action).toBeNull();
+    want = noon.want;
     const evening = noLight(day(15, 50), false, null, noon.mem);
     expect(evening.action).toBe('on');
     expect(evening.why).toBe('sunset');
+    want = evening.want;
     const morning = noLight(day(24 + 7), true, { by: 'auto', on: true, at: day(15, 50) }, evening.mem);
     expect(morning.action).toBe('off');
     expect(morning.mem.dark).toBe(false);
@@ -297,10 +321,10 @@ describe('the log of who took control', () => {
     log.record('A', 'outside', false, 'off', 3);
     expect(log.last('A')).toMatchObject({ by: 'outside', on: false, at: 3 });
     expect(log.recent(2).map((e) => e.at)).toEqual([3, 2]);
-    log.setAutoState({ dark: true, darkSince: 5 });
+    log.setAutoState({ dark: true });
     // A fresh reader (a restart) sees all of it.
     const again = new ControlLog(join(dir, 'log.json'));
-    expect(again.autoState()).toEqual({ dark: true, darkSince: 5 });
+    expect(again.autoState()).toEqual({ dark: true });
     expect(again.last('B')?.by).toBe('you');
   });
 

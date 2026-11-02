@@ -19,6 +19,8 @@ export const lights = {
   set: (id: string, change: LightChange) => sendMessage({ type: 'lights.set', id, change }),
   scan: () => sendMessage({ type: 'lights.scan' }),
   choose: (id: string, chosen: boolean) => sendMessage({ type: 'lights.choose', id, chosen }),
+  /** The AUTO button: pause automatic lights (until Harv starts again) or turn them back on. */
+  auto: (on: boolean) => sendMessage({ type: 'lights.auto', on }),
 };
 
 /** Quick picks for the card: whites first, then colours. */
