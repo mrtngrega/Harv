@@ -228,6 +228,9 @@ fn main() {
             if !hidden {
                 show(handle);
             }
+            // After dark the light goes on first, before Harv's server is even started.
+            #[cfg(windows)]
+            power::on_at_start();
             harv::boot(handle.clone());
             #[cfg(windows)]
             power::watch();

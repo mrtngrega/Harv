@@ -7,7 +7,9 @@
 //! goes on; Harv's server answers in about a second (its light helper is already logged in).
 //! At shutdown the server is often gone already (Windows closes its hidden console first, seen
 //! 2026-11-01): then the app runs the light helper itself, from the plan the server keeps in
-//! ~/.harv/lights-leaving.json (there only while automatic lights are on) and the Tapo login.
+//! ~/.harv/lights-app.json (there only while automatic lights are on) and the Tapo login.
+//! The same helper turns the light on the moment the app opens after dark (`on_at_start`, the
+//! user's wish 2026-11-02: "start instantly"), instead of waiting ~15 s for Harv's server.
 
 use crate::harv;
 use serde_json::{json, Value};
@@ -55,9 +57,66 @@ fn read_json(name: &str) -> Option<Value> {
 
 /// Harv's server is gone: the light helper turns the lights off, the same way the server would.
 fn off_directly() -> String {
-    let Some(plan) = read_json("lights-leaving.json") else {
-        return "no lights to turn off (automatic lights off)".into();
+    match read_json("lights-app.json") {
+        Some(plan) => switch_directly(&plan, false),
+        None => "no lights to turn off (automatic lights off)".into(),
+    }
+}
+
+const DAY_MS: f64 = 86_400_000.0;
+
+/// Dark by the last sun times Harv read (like the server's `sunOnly` + `sunDark`): from the margin
+/// before sunset until sunrise, the times moved on by whole days to today. None without sun times.
+fn sun_dark(plan: &Value, now: f64) -> Option<bool> {
+    let times = |key: &str| -> Option<Vec<f64>> {
+        Some(
+            plan[key]
+                .as_array()?
+                .iter()
+                .filter_map(Value::as_f64)
+                .collect(),
+        )
     };
+    let (rise, set) = (times("sunrise")?, times("sunset")?);
+    let days = ((now - rise.first()?) / DAY_MS).floor().max(0.0);
+    let rise: Vec<f64> = rise.iter().map(|t| t + days * DAY_MS).collect();
+    let set: Vec<f64> = set.iter().map(|t| t + days * DAY_MS).collect();
+    let before = plan["beforeSunsetMin"].as_f64().unwrap_or(30.0) * 60_000.0;
+    if now < rise[0] {
+        return Some(true);
+    }
+    Some(
+        set.iter()
+            .enumerate()
+            .any(|(i, s)| now >= s - before && rise.get(i + 1).is_none_or(|r| now < *r)),
+    )
+}
+
+/// The app just opened and Harv isn't running yet (a PC start): after dark the light goes on at
+/// once; Harv's automatic lights take over when the server is up. Cloudy-day darkness needs the
+/// weather, so that case still waits for the server.
+pub fn on_at_start() {
+    std::thread::spawn(|| {
+        if harv::is_up() {
+            return;
+        }
+        let Some(plan) = read_json("lights-app.json") else {
+            return;
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0.0, |d| d.as_millis() as f64);
+        if sun_dark(&plan, now) == Some(true) {
+            harv::log(&format!(
+                "Start after dark: {}",
+                switch_directly(&plan, true)
+            ));
+        }
+    });
+}
+
+/// Runs the light helper for every light in the plan: on or off.
+fn switch_directly(plan: &Value, on: bool) -> String {
     let Some(tapo) = read_json("devices.json").and_then(|d| d.get("tapo").cloned()) else {
         return "no Tapo login".into();
     };
@@ -79,7 +138,7 @@ fn off_directly() -> String {
     let mut asks =
         vec![json!({"op": "login", "email": tapo["email"], "password": tapo["password"], "id": 0})];
     for (i, light) in lights.iter().enumerate() {
-        let mut ask = json!({"op": "set", "mac": light["mac"], "targets": plan["targets"], "change": {"on": false}, "id": i + 1});
+        let mut ask = json!({"op": "set", "mac": light["mac"], "targets": plan["targets"], "change": {"on": on}, "id": i + 1});
         if light.get("ip").is_some() {
             ask["ip"] = light["ip"].clone();
         }
@@ -102,7 +161,7 @@ fn off_directly() -> String {
         });
     }
     let deadline = Instant::now() + Duration::from_secs(10);
-    let (mut off, mut failed) = (0, Vec::new());
+    let (mut done, mut failed) = (0, Vec::new());
     for _ in 0..asks.len() {
         let Some(left) = deadline.checked_duration_since(Instant::now()) else {
             break;
@@ -115,15 +174,16 @@ fn off_directly() -> String {
             continue;
         }
         if answer["ok"] == true {
-            off += 1;
+            done += 1;
         } else {
             failed.push(answer["error"].as_str().unwrap_or("no answer").to_string());
         }
     }
     let _ = child.kill();
     format!(
-        "the app turned {off} of {} light(s) off itself{}",
+        "the app turned {done} of {} light(s) {} itself{}",
         lights.len(),
+        if on { "on" } else { "off" },
         if failed.is_empty() {
             String::new()
         } else {

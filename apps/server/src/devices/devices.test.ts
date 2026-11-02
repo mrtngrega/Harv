@@ -112,14 +112,16 @@ describe('only the chosen light, never one that refused the login', () => {
     expect(service.match('desk')).toEqual([]);
   });
 
-  it('keeps the shutdown plan for the app (the helper and the lights, never the login), gone when automatic lights are off', () => {
-    const file = join(dir, 'leaving.json');
-    service.saveLeavingPlan(true, file);
+  it('keeps the app’s plan (the helper, the lights and the sun times, never the login), gone when automatic lights are off', () => {
+    const file = join(dir, 'app-plan.json');
+    service.log.setSunTimes({ place: '48.6,21.3', sunrise: [1, 3], sunset: [2, 4] });
+    service.saveAppPlan(true, 30, file);
     const plan = JSON.parse(readFileSync(file, 'utf8')) as { python: string; helper: string; lights: { mac: string }[] };
     expect(plan.lights).toEqual([{ mac: MINE }]);
+    expect(plan).toMatchObject({ sunrise: [1, 3], sunset: [2, 4], beforeSunsetMin: 30 });
     expect(plan.helper).toMatch(/kasa_helper\.py$/);
     expect(readFileSync(file, 'utf8')).not.toMatch(/pw|example\.com/);
-    service.saveLeavingPlan(false, file);
+    service.saveAppPlan(false, 30, file);
     expect(existsSync(file)).toBe(false);
   });
 });

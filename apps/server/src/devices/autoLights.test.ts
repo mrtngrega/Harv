@@ -195,7 +195,7 @@ describe('the moment the user is back', () => {
         return light;
       },
       status: () => ({ lights: [light] }),
-      saveLeavingPlan: () => {},
+      saveAppPlan: () => {},
     } as unknown as LightsService;
     let idleSec = 300;
     let back: (() => void) | null = null;
@@ -272,6 +272,36 @@ describe('the moment the user is back', () => {
     t.here();
     await vi.waitFor(() => expect(t.sets).toEqual([false, true]));
     t.auto.stop();
+  });
+
+  it('started after dark: on at once by the last sun times, without waiting for the weather', async () => {
+    const log = new ControlLog(join(dir, `${Math.random()}.json`));
+    log.setSunTimes({ place: '48.6,21.3', sunrise: weather(0).sunrise, sunset: weather(0).sunset });
+    const light = { id: 'A', name: 'L.E.D', reachable: true, on: false };
+    const sets: boolean[] = [];
+    const lights = {
+      log,
+      refresh: async () => [light],
+      set: async (_id: string, change: { on: boolean }) => (sets.push(change.on), light),
+      status: () => ({ lights: [light] }),
+      saveAppPlan: () => {},
+    } as unknown as LightsService;
+    let asked = 0;
+    const auto = new AutoLights(lights, {
+      settings: () => ({ ...DEFAULT_SETTINGS, autoLights: true, autoLightsPlace: { name: 'Geča', lat: 48.6, lon: 21.3 } }),
+      log: () => {},
+      changed: () => {},
+      now: () => day(18),
+      // Open-Meteo never answers (no network yet right after boot).
+      weather: () => (asked++, new Promise<Weather>(() => {})),
+      presence: async () => ({ idleSec: 3, display: false, fullScreen: false, pads: '' }),
+      inputWatch: () => () => {},
+    });
+    await auto.tick();
+    expect(sets).toEqual([true]);
+    await auto.tick();
+    expect(asked).toBe(1);
+    auto.stop();
   });
 
   it('reads the sunlight a minute after each quarter hour, when Open-Meteo has a new value', () => {

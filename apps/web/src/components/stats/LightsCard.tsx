@@ -18,7 +18,7 @@ function Switch({ light }: { light: LightState }) {
       aria-label={`${light.name}: ${light.on ? 'on, turn off' : 'off, turn on'}`}
       aria-pressed={!!light.on}
       title={light.reachable ? (light.on ? 'Turn off' : 'Turn on') : (light.error ?? 'Not reachable')}
-      className="size-4 flex-none cursor-pointer rounded-full border border-[rgb(220_232_245/0.35)] disabled:cursor-default disabled:opacity-40"
+      className="size-[18px] flex-none cursor-pointer rounded-full border border-[rgb(220_232_245/0.35)] disabled:cursor-default disabled:opacity-40"
       style={{ background: colorOf(light), boxShadow: light.on ? `0 0 8px ${colorOf(light)}` : undefined }}
     />
   );
@@ -42,8 +42,8 @@ function AutoButton({ auto }: { auto: AutoLightsStatus | undefined }) {
           ? `Automatic lights: ${auto.why || 'on'}. Click to pause until Harv starts again.`
           : 'Automatic lights paused. Click to turn them back on.'
       }
-      className={`flex-none cursor-pointer rounded border px-[3px] text-[8px] leading-[12px] ${
-        on ? 'border-accent/60 text-accent' : 'border-line text-faint line-through'
+      className={`flex h-[18px] flex-none cursor-pointer items-center rounded-full border px-2 text-[10px] tracking-wider transition-colors ${
+        on ? 'border-accent bg-accent font-semibold text-[#0f1620]' : 'border-line text-faint hover:text-muted'
       }`}
     >
       AUTO
@@ -63,7 +63,7 @@ export function LightsCompact() {
           <span className="min-w-0 truncate text-muted" title={l.name}>
             {l.name}
           </span>
-          <span className="flex flex-none items-center gap-1 tabular-nums">
+          <span className="flex flex-none items-center gap-2 tabular-nums">
             {/* The brightness only without the AUTO button: both don't fit next to the name (the switch shows on/off). */}
             {!l.reachable ? (
               <span className="text-faint">—</span>

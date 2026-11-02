@@ -291,6 +291,8 @@ export class AutoLights {
   private want: boolean | null = null;
   /** The AUTO button is off: until it's pressed again or Harv starts again. */
   private paused = false;
+  /** A weather read running behind a check that went by the sun times. */
+  private fetching = false;
 
   constructor(
     private lights: LightsService,
@@ -391,11 +393,36 @@ export class AutoLights {
     return this.weather?.sunset.find((t) => t > now - 3 * 3600_000);
   }
 
+  /** Open-Meteo's weather, or the last sun times without internet; false when there's nothing to go by. */
+  private async readWeather(place: string, at: { lat: number; lon: number }, now: number): Promise<boolean> {
+    try {
+      this.weather = await (this.deps.weather ?? fetchWeather)(at.lat, at.lon);
+      this.weatherFor = place;
+      this.lights.log.setSunTimes({ place, sunrise: this.weather.sunrise, sunset: this.weather.sunset });
+      this.problem = undefined;
+    } catch (err) {
+      // No internet: the sunlight reading is good for half an hour, then the sun times carry on
+      // alone (the last ones read, for this place, moved on to today).
+      const sun = this.lights.log.sunTimes();
+      const stale = !this.weather || this.weather.radiation === null || now - this.weather.at > 3 * WEATHER_MS;
+      if (stale) {
+        if (!sun || sun.place !== place) {
+          this.problem = `No weather: ${(err as Error).message}`;
+          return false;
+        }
+        this.weather = sunOnly(sun, now, this.weather?.at ?? 0);
+        this.weatherFor = place;
+      }
+      this.problem = `No weather (${(err as Error).message})${stale ? ': going by sunset and sunrise only' : ''}`;
+    }
+    return true;
+  }
+
   /** One check: weather (every 10 min), presence, the light, then what to do. */
   async tick(): Promise<void> {
     const s = this.deps.settings();
     this.watch(s.autoLights && !!s.autoLightsPlace && !this.paused);
-    this.lights.saveLeavingPlan(s.autoLights);
+    this.lights.saveAppPlan(s.autoLights, s.autoLightsSunset);
     if (!s.autoLights || !s.autoLightsPlace || this.paused) return;
     if (this.running) {
       this.again = true;
@@ -406,26 +433,20 @@ export class AutoLights {
       const now = (this.deps.now ?? Date.now)();
       const place = `${s.autoLightsPlace.lat},${s.autoLightsPlace.lon}`;
       if (!this.weather || this.weather.radiation === null || this.weatherFor !== place || weatherDue(this.weather.at, now)) {
-        try {
-          this.weather = await (this.deps.weather ?? fetchWeather)(s.autoLightsPlace.lat, s.autoLightsPlace.lon);
+        const sun = this.lights.log.sunTimes();
+        // Already dark by the last sun times read (Harv starting after dark, the user's wish 2026-11-02:
+        // "start instantly"): decide now and let the weather come in behind, instead of waiting for it.
+        if (this.weather?.radiation === null && sun?.place === place && sunDark(now, sunOnly(sun, now, 0), s.autoLightsSunset)) {
+          this.weather = sunOnly(sun, now, this.weather.at);
           this.weatherFor = place;
-          this.lights.log.setSunTimes({ place, sunrise: this.weather.sunrise, sunset: this.weather.sunset });
-          this.problem = undefined;
-        } catch (err) {
-          // No internet: the sunlight reading is good for half an hour, then the sun times carry on
-          // alone (the last ones read, for this place, moved on to today).
-          const sun = this.lights.log.sunTimes();
-          const stale = !this.weather || this.weather.radiation === null || now - this.weather.at > 3 * WEATHER_MS;
-          if (stale) {
-            if (!sun || sun.place !== place) {
-              this.problem = `No weather: ${(err as Error).message}`;
-              return;
-            }
-            this.weather = sunOnly(sun, now, this.weather?.at ?? 0);
-            this.weatherFor = place;
+          if (!this.fetching) {
+            this.fetching = true;
+            void this.readWeather(place, s.autoLightsPlace, now).finally(() => {
+              this.fetching = false;
+              this.deps.changed();
+            });
           }
-          this.problem = `No weather (${(err as Error).message})${stale ? ': going by sunset and sunrise only' : ''}`;
-        }
+        } else if (!(await this.readWeather(place, s.autoLightsPlace, now))) return;
       }
       const seen = await (this.deps.presence ?? readPresence)();
       if (!seen) {
@@ -472,6 +493,8 @@ export class AutoLights {
       } else this.want = result.want;
     } finally {
       this.running = false;
+      // Again after the check: the light's address is known only once it has been read.
+      this.lights.saveAppPlan(s.autoLights, s.autoLightsSunset);
       this.deps.changed();
       if (this.again) {
         this.again = false;
