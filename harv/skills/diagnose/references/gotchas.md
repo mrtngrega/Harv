@@ -4,7 +4,7 @@ Traps already hit while building things on a Windows 11 PC and a Fedora (KDE Pla
 
 ## Windows shells
 
-- **Git Bash eats backslashes**: heredocs (even quoted `<<'EOF'`) and `node -e '…'` strings can lose `\` or turn `\\n` into something else, so Windows paths and escapes silently change. → Write scripts to a file with the editor, or use forward slashes.
+- **Git Bash eats backslashes**: heredocs (even quoted `<<'EOF'`), `sed -i` replacements and `node -e '…'` strings can lose `\` or turn `\\n` into something else, so Windows paths and escapes silently change. → Write scripts to a file with the editor, or use forward slashes.
 - **Git Bash turns `/word` arguments into paths** (`/model` → `C:/Program Files/Git/model`). → `MSYS_NO_PATHCONV=1` before the command.
 - **PowerShell 5.1**: no `&&`/`||` (use `; if ($?) { … }`), no `?:` or `??`; `2>&1` on a native program wraps stderr lines in errors and sets `$?` false even on exit code 0; `Set-Content` writes the ANSI code page (pass `-Encoding utf8`).
 - **A process search finds itself**: `pgrep -f "<text>"` or a CIM query on `CommandLine -like '*text*'` matches the shell running the search, since its own command line contains the text. → `pgrep -x <name>`, or search from a script file.

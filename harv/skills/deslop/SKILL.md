@@ -12,7 +12,7 @@ Say in a few words that you're using it ("using deslop"). The user isn't a progr
 Two modes:
 
 - **Audit** (the default, and always first): read-only. Map, gather evidence, report. Nothing is edited.
-- **Apply**: only after the user said yes to the report (or to part of it), and only what they said yes to.
+- **Apply**: only after the user said yes to the report (or to part of it), and only what they said yes to. "Clean it up", "slim it down" or "deslop X" ask for the audit; "apply what's safe", "go ahead" or "I trust you" approve the HIGH clusters only, never MEDIUM ones.
 
 ## 1. Scope and map
 
@@ -38,6 +38,8 @@ Every candidate gets a chain, written down in the report:
 An **independent reason** is one of: a current user requirement, a real caller outside the cluster, a public API or file format, a protocol or spec, a security or trust boundary, stored data, a resource limit, a numerical invariant. A test is no reason for the code it tests, and the code is no reason for its test: when code and tests only justify each other (a fallback that exists for its test, a test that exists for the fallback), that's a **closed loop**, and the whole loop goes together.
 
 Prove reachability from something real: a config that's actually set, a request a user can make, a stored record, a command someone runs. A test flipping a flag doesn't make a branch live. And not finding a caller is missing evidence, not proof: callers can be outside the repo (a user typing a CLI command, another device, a phone).
+
+"Can't fail" and "gives the same result anyway" are claims to prove with a run, not by reading. For every fallback, retry, catch, default or clean-up step, name the input it was written for (stray whitespace, a byte-order mark, an empty or broken file, a missing field, an old format, a dropped connection), feed that input in before and after the cut, and compare. A different result is behaviour, not slop: the candidate is KEEP, or MEDIUM with a question. (A notes app's "trim and parse again" retry looked pointless; it was what loaded files saved with a BOM, and three cleanups that removed it turned such a file into an empty list, wiped on the next save.)
 
 Confidence decides what apply may do:
 
