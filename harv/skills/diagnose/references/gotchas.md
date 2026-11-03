@@ -37,6 +37,7 @@ Traps already hit while building things on a Windows 11 PC and a Fedora (KDE Pla
 - **CDP screenshots of a Tauri/WebView2 app miss child webviews**: capture the screen (PrintWindow) to see what the user sees.
 - **WebKitGTK (Linux Tauri) has no CDP**: screenshot with `spectacle -b -n -f -o <file>` and drive it some other way. Linux stacks a window's webviews in a vertical box unless they're moved into an overlay.
 - **Tauri's `dragDropEnabled`** takes drops from the page: with it on, HTML5 drag and drop inside the page breaks on Windows.
+- **A terminal window keeps popping up**: find who starts it by logging new processes with their parent (poll `Win32_Process`); a visible one shows as `OpenConsole.exe -Embedding` (Windows Terminal) next to it. A venv's `python.exe` started with no console (`DETACHED_PROCESS`) is only a launcher, and the real python under it opens a visible window. → Start `pythonw.exe` (no console, pipes still work), or a hidden console (`CREATE_NO_WINDOW` / Node's `windowsHide`).
 
 ## Fedora / Linux
 
