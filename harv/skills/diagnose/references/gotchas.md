@@ -8,6 +8,8 @@ Traps already hit while building things on a Windows 11 PC and a Fedora (KDE Pla
 - **Git Bash turns `/word` arguments into paths** (`/model` → `C:/Program Files/Git/model`). → `MSYS_NO_PATHCONV=1` before the command.
 - **PowerShell 5.1**: no `&&`/`||` (use `; if ($?) { … }`), no `?:` or `??`; `2>&1` on a native program wraps stderr lines in errors and sets `$?` false even on exit code 0; `Set-Content` writes the ANSI code page (pass `-Encoding utf8`).
 - **A process search finds itself**: `pgrep -f "<text>"` or a CIM query on `CommandLine -like '*text*'` matches the shell running the search, since its own command line contains the text. → `pgrep -x <name>`, or search from a script file.
+- **Headless Chrome/Edge screenshots from Git Bash**: `--screenshot=…` from Git Bash wrote no file in two runs (2026-11-03); the same command from PowerShell worked. → Take browser screenshots from PowerShell (or with Playwright/CDP).
+- **A skill's text is loaded once per Claude Code session**: after editing a skill, the Skill tool (and subagents started from that session) still get the old text. → Test an edited skill in a new session, or have the test read the SKILL.md file directly.
 - **No new programs during a Windows shutdown**: a process started after `WM_QUERYENDSESSION` fails with 0xc0000142 ("unable to start correctly", an error popup in the event log as Application Popup 26). → Start what the shutdown needs beforehand and keep it waiting.
 - **`FindWindowW` with a null class** from PowerShell needs `[NullString]::Value`, not `$null` (which becomes an empty string).
 - **Python on Windows can't see Git Bash's `/tmp`** (it reads `/tmp/x` as `C:/tmp/x` or the user's Temp). → Pass Windows paths, or files inside the working folder.
