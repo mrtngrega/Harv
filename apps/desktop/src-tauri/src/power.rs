@@ -10,14 +10,18 @@
 //! ~/.harv/lights-app.json (there only while automatic lights are on) and the Tapo login.
 //! The same helper turns the light on the moment the app opens after dark (`on_at_start`, the
 //! user's wish 2026-11-02: "start instantly"), instead of waiting ~15 s for Harv's server.
+//! The helper is started early and kept waiting (`keep_warm`) while automatic lights are on:
+//! Windows refuses to start new programs during a shutdown (python.exe failed with 0xc0000142
+//! and an error popup, 2026-11-02), so at shutdown the app only writes to the running helper.
 
 use crate::harv;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::os::windows::process::CommandExt;
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::ptr::null_mut;
-use std::sync::mpsc;
+use std::sync::mpsc::{self, Receiver};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -49,10 +53,178 @@ fn leaving(why: &str) {
     }
 }
 
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// No console at all: a hidden console would make Windows end the helper with the consoles,
+/// before the app hears the shutdown.
+const DETACHED_PROCESS: u32 = 0x0000_0008;
 
 fn read_json(name: &str) -> Option<Value> {
     serde_json::from_str(&std::fs::read_to_string(harv::harv_home().join(name)).ok()?).ok()
+}
+
+/// The light helper, started and logged in, waiting for asks on its stdin.
+struct Helper {
+    child: Child,
+    stdin: ChildStdin,
+    answers: Receiver<String>,
+    /// Which python and helper file it runs: a changed plan starts a new one.
+    runs: (String, String),
+    next_id: u64,
+}
+
+impl Helper {
+    fn start(plan: &Value) -> Result<Helper, String> {
+        let tapo = read_json("devices.json")
+            .and_then(|d| d.get("tapo").cloned())
+            .ok_or("no Tapo login")?;
+        let (Some(python), Some(helper)) = (plan["python"].as_str(), plan["helper"].as_str())
+        else {
+            return Err("the plan names no helper".into());
+        };
+        let mut child = Command::new(python)
+            .args(["-I", helper])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .creation_flags(DETACHED_PROCESS)
+            .spawn()
+            .map_err(|e| format!("the light helper didn't start: {e}"))?;
+        let mut stdin = child.stdin.take().ok_or("no stdin")?;
+        let out = child.stdout.take().ok_or("no stdout")?;
+        let (tx, answers) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(out).lines().map_while(Result::ok) {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let login =
+            json!({"op": "login", "email": tapo["email"], "password": tapo["password"], "id": 0});
+        writeln!(stdin, "{login}").map_err(|e| format!("the light helper didn't listen: {e}"))?;
+        Ok(Helper {
+            child,
+            stdin,
+            answers,
+            runs: (python.into(), helper.into()),
+            next_id: 1,
+        })
+    }
+
+    fn alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
+
+    /// Every light in the plan on or off; answers within 10 s, so a light that never answers
+    /// can't hold up a shutdown.
+    fn switch(&mut self, plan: &Value, on: bool) -> String {
+        let lights = plan["lights"].as_array().cloned().unwrap_or_default();
+        let mut waiting = Vec::new();
+        for light in &lights {
+            let id = self.next_id;
+            self.next_id += 1;
+            let mut ask = json!({"op": "set", "mac": light["mac"], "targets": plan["targets"], "change": {"on": on}, "id": id});
+            if light.get("ip").is_some() {
+                ask["ip"] = light["ip"].clone();
+            }
+            if writeln!(self.stdin, "{ask}").is_err() {
+                break;
+            }
+            waiting.push(id);
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let (mut done, mut failed) = (0, Vec::new());
+        while !waiting.is_empty() {
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                break;
+            };
+            let Ok(line) = self.answers.recv_timeout(left) else {
+                break;
+            };
+            let answer: Value = serde_json::from_str(&line).unwrap_or_default();
+            let Some(pos) = waiting.iter().position(|id| answer["id"] == *id) else {
+                continue; // the login's answer, or a late one from an earlier ask
+            };
+            waiting.remove(pos);
+            if answer["ok"] == true {
+                done += 1;
+            } else {
+                failed.push(answer["error"].as_str().unwrap_or("no answer").to_string());
+            }
+        }
+        if !waiting.is_empty() {
+            failed.push(format!("{} didn't answer", waiting.len()));
+        }
+        format!(
+            "turned {done} of {} light(s) {}{}",
+            lights.len(),
+            if on { "on" } else { "off" },
+            if failed.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", failed.join("; "))
+            }
+        )
+    }
+}
+
+impl Drop for Helper {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+    }
+}
+
+/// The waiting helper, there while automatic lights are on (`lights-app.json` exists).
+static WARM: Mutex<Option<Helper>> = Mutex::new(None);
+
+/// Starts, keeps or drops the waiting helper to match the plan; returns the plan.
+fn warm_up() -> Option<Value> {
+    let plan = read_json("lights-app.json");
+    let mut warm = WARM.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(plan) = plan else {
+        *warm = None;
+        return None;
+    };
+    let runs = (
+        plan["python"].as_str().unwrap_or_default().to_string(),
+        plan["helper"].as_str().unwrap_or_default().to_string(),
+    );
+    let fine = warm.as_mut().is_some_and(|h| h.alive() && h.runs == runs);
+    if !fine {
+        *warm = None;
+        match Helper::start(&plan) {
+            Ok(h) => *warm = Some(h),
+            Err(e) => harv::log(&format!("lights: {e}")),
+        }
+    }
+    Some(plan)
+}
+
+/// Checks every minute that the helper is waiting while automatic lights are on.
+fn keep_warm() {
+    std::thread::spawn(|| loop {
+        warm_up();
+        std::thread::sleep(Duration::from_secs(60));
+    });
+}
+
+/// Runs the plan through the waiting helper; without one (it died, or none could start) a new
+/// helper is tried, which works any time but during a shutdown.
+fn switch_directly(plan: &Value, on: bool) -> String {
+    let mut warm = WARM.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(h) = warm.as_mut() {
+        if h.alive() {
+            return format!("the app {} itself", h.switch(plan, on));
+        }
+    }
+    *warm = None;
+    match Helper::start(plan) {
+        Ok(mut h) => {
+            let said = h.switch(plan, on);
+            *warm = Some(h);
+            format!("the app {said} itself (with a new helper)")
+        }
+        Err(e) => e,
+    }
 }
 
 /// Harv's server is gone: the light helper turns the lights off, the same way the server would.
@@ -92,15 +264,16 @@ fn sun_dark(plan: &Value, now: f64) -> Option<bool> {
     )
 }
 
-/// The app just opened and Harv isn't running yet (a PC start): after dark the light goes on at
-/// once; Harv's automatic lights take over when the server is up. Cloudy-day darkness needs the
-/// weather, so that case still waits for the server.
+/// The app just opened: the light helper starts waiting (`keep_warm`), and if Harv isn't running
+/// yet (a PC start) and it's dark, the light goes on at once; Harv's automatic lights take over
+/// when the server is up. Cloudy-day darkness needs the weather, so that case still waits for
+/// the server.
 pub fn on_at_start() {
     std::thread::spawn(|| {
-        if harv::is_up() {
-            return;
-        }
-        let Some(plan) = read_json("lights-app.json") else {
+        let up = harv::is_up();
+        let plan = warm_up();
+        keep_warm();
+        let Some(plan) = plan.filter(|_| !up) else {
             return;
         };
         let now = std::time::SystemTime::now()
@@ -113,83 +286,6 @@ pub fn on_at_start() {
             ));
         }
     });
-}
-
-/// Runs the light helper for every light in the plan: on or off.
-fn switch_directly(plan: &Value, on: bool) -> String {
-    let Some(tapo) = read_json("devices.json").and_then(|d| d.get("tapo").cloned()) else {
-        return "no Tapo login".into();
-    };
-    let lights = plan["lights"].as_array().cloned().unwrap_or_default();
-    let (Some(python), Some(helper)) = (plan["python"].as_str(), plan["helper"].as_str()) else {
-        return "the plan names no helper".into();
-    };
-    let child = Command::new(python)
-        .args(["-I", helper])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn();
-    let mut child = match child {
-        Ok(c) => c,
-        Err(e) => return format!("the light helper didn't start: {e}"),
-    };
-    let mut asks =
-        vec![json!({"op": "login", "email": tapo["email"], "password": tapo["password"], "id": 0})];
-    for (i, light) in lights.iter().enumerate() {
-        let mut ask = json!({"op": "set", "mac": light["mac"], "targets": plan["targets"], "change": {"on": on}, "id": i + 1});
-        if light.get("ip").is_some() {
-            ask["ip"] = light["ip"].clone();
-        }
-        asks.push(ask);
-    }
-    if let Some(mut stdin) = child.stdin.take() {
-        for ask in &asks {
-            let _ = writeln!(stdin, "{ask}");
-        }
-    }
-    // The answers, each line on a thread so a light that never answers can't hold up the shutdown.
-    let (tx, rx) = mpsc::channel();
-    if let Some(out) = child.stdout.take() {
-        std::thread::spawn(move || {
-            for line in BufReader::new(out).lines().map_while(Result::ok) {
-                if tx.send(line).is_err() {
-                    break;
-                }
-            }
-        });
-    }
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let (mut done, mut failed) = (0, Vec::new());
-    for _ in 0..asks.len() {
-        let Some(left) = deadline.checked_duration_since(Instant::now()) else {
-            break;
-        };
-        let Ok(line) = rx.recv_timeout(left) else {
-            break;
-        };
-        let answer: Value = serde_json::from_str(&line).unwrap_or_default();
-        if answer["id"] == 0 {
-            continue;
-        }
-        if answer["ok"] == true {
-            done += 1;
-        } else {
-            failed.push(answer["error"].as_str().unwrap_or("no answer").to_string());
-        }
-    }
-    let _ = child.kill();
-    format!(
-        "the app turned {done} of {} light(s) {} itself{}",
-        lights.len(),
-        if on { "on" } else { "off" },
-        if failed.is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", failed.join("; "))
-        }
-    )
 }
 
 unsafe extern "system" fn wnd_proc(
