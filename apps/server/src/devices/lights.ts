@@ -23,6 +23,12 @@ const HELPER = fileURLToPath(new URL('./kasa_helper.py', import.meta.url));
 const VENV = join(HARV_HOME, 'kasa', 'venv');
 const venvPython = () => join(VENV, ...(IS_WINDOWS ? ['Scripts', 'python.exe'] : ['bin', 'python']));
 /**
+ * The app starts its helper with no console (DETACHED_PROCESS); the venv's python.exe is only a
+ * launcher, and the real python under it then opens a visible terminal window. pythonw.exe has
+ * no console at all.
+ */
+const appPython = () => (IS_WINDOWS ? join(VENV, 'Scripts', 'pythonw.exe') : venvPython());
+/**
  * What the Harv app needs to switch the lights by itself, without Harv's server: off when Windows
  * shuts down and the server is already gone (its console is closed before the app hears it), on
  * the moment the app opens after dark (the server takes ~15 s to start). The helper, each light's
@@ -325,7 +331,7 @@ export class LightsService {
     }
     const sun = this.log.sunTimes();
     const plan = JSON.stringify({
-      python: venvPython(),
+      python: appPython(),
       helper: HELPER,
       targets: broadcastTargets(),
       lights: lights.map((mac) => ({ mac, ...(this.ips.get(mac) ? { ip: this.ips.get(mac) } : {}) })),

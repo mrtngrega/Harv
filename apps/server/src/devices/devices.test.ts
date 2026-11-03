@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS, swatch } from '@harv/shared';
 import { fitTemp, parseColor } from './colors.ts';
 import { broadcastTargets, describeChange, LightsService } from './lights.ts';
 import { DeviceStore } from './store.ts';
+import { IS_WINDOWS } from '../platform.ts';
 import { ControlLog } from './controlLog.ts';
 import { describeAuto, describeLight, toChange } from './tools.ts';
 
@@ -120,6 +121,9 @@ describe('only the chosen light, never one that refused the login', () => {
     expect(plan.lights).toEqual([{ mac: MINE }]);
     expect(plan).toMatchObject({ sunrise: [1, 3], sunset: [2, 4], beforeSunsetMin: 30 });
     expect(plan.helper).toMatch(/kasa_helper\.py$/);
+    // The app starts it with no console: on Windows the venv's python.exe then opens a visible
+    // terminal window for the real python (the user's "a terminal always pops up", 2026-11-03).
+    if (IS_WINDOWS) expect(plan.python).toMatch(/pythonw\.exe$/);
     expect(readFileSync(file, 'utf8')).not.toMatch(/pw|example\.com/);
     service.saveAppPlan(false, 30, file);
     expect(existsSync(file)).toBe(false);
