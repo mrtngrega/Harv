@@ -161,5 +161,15 @@ async def main() -> None:
         sys.stdout.flush()
 
 
+def last_at_shutdown() -> None:
+    """Windows: be ended after the Harv app at shutdown (0x100, the lowest level apps may use),
+    so the app can still ask for "off" (see power.rs, FIRST_AMONG_APPS)."""
+    if sys.platform == "win32":
+        import ctypes
+
+        ctypes.windll.kernel32.SetProcessShutdownParameters(0x100, 0)
+
+
 if __name__ == "__main__":
+    last_at_shutdown()
     asyncio.run(main())

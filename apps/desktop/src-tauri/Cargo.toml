@@ -25,7 +25,7 @@ tauri-plugin-dialog = "2"
 # Windows: a hidden window that hears sleep and shutdown, to turn off a light automatic lights
 # turned on (src/power.rs). The same windows-sys Tauri already pulls in.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_LibraryLoader", "Win32_System_Shutdown", "Win32_System_Power"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_LibraryLoader", "Win32_System_Shutdown", "Win32_System_Power", "Win32_System_Threading"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"

@@ -27,6 +27,7 @@ use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Power::RegisterSuspendResumeNotification;
 use windows_sys::Win32::System::Shutdown::{ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy};
+use windows_sys::Win32::System::Threading::SetProcessShutdownParameters;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, RegisterClassW,
     TranslateMessage, DEVICE_NOTIFY_WINDOW_HANDLE, MSG, WNDCLASSW,
@@ -315,8 +316,19 @@ unsafe extern "system" fn wnd_proc(
     }
 }
 
+/// Windows ends programs one by one at shutdown, highest shutdown level first, in no set order
+/// within a level. At the default level the windowless light helper was often ended before the app
+/// heard the shutdown (every real shutdown 2026-11-03..05 found it gone), so the app asks to go
+/// first among programs (0x3FF, the top of the range apps may use) and the helper asks to go last.
+const FIRST_AMONG_APPS: u32 = 0x3FF;
+
 /// Starts the listener on its own thread; it lives as long as the app.
 pub fn watch() {
+    unsafe {
+        if SetProcessShutdownParameters(FIRST_AMONG_APPS, 0) == 0 {
+            harv::log("power watch: couldn't ask Windows to hear the shutdown first");
+        }
+    }
     std::thread::spawn(|| unsafe {
         let instance = GetModuleHandleW(null_mut());
         let class = wide("HarvPowerWatch");
