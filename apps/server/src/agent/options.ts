@@ -109,6 +109,7 @@ export const CHAT_SKILLS = [
   'image-prompt',
   'learn-from-session',
   'video',
+  'resolve',
   'clone',
   'docx',
   'xlsx',
