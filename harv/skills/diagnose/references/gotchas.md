@@ -38,6 +38,7 @@ Traps already hit while building things on a Windows 11 PC and a Fedora (KDE Pla
 - **WebKitGTK (Linux Tauri) has no CDP**: screenshot with `spectacle -b -n -f -o <file>` and drive it some other way. Linux stacks a window's webviews in a vertical box unless they're moved into an overlay.
 - **Tauri's `dragDropEnabled`** takes drops from the page: with it on, HTML5 drag and drop inside the page breaks on Windows.
 - **A terminal window keeps popping up**: find who starts it by logging new processes with their parent (poll `Win32_Process`); a visible one shows as `OpenConsole.exe -Embedding` (Windows Terminal) next to it. A venv's `python.exe` started with no console (`DETACHED_PROCESS`) is only a launcher, and the real python under it opens a visible window. → Start `pythonw.exe` (no console, pipes still work), or a hidden console (`CREATE_NO_WINDOW` / Node's `windowsHide`).
+- **Something that must happen at shutdown finds a helper process already gone**: Windows ends programs one by one by shutdown level, in no set order within one, and a windowless process is simply ended when its turn comes. A fake `WM_QUERYENDSESSION` sent to one window can't show this. → `SetProcessShutdownParameters`: the program that acts asks for 0x3FF (first), its helpers 0x100 (last). Proof is a real shutdown's log.
 
 ## Fedora / Linux
 
