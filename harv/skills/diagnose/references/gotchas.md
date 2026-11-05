@@ -47,3 +47,5 @@ Traps already hit while building things on a Windows 11 PC and a Fedora (KDE Pla
 - **SSH commands that start a long-running program hang** the SSH call. → `nohup … >log 2>&1 </dev/null &`.
 - **Non-login SSH shells miss PATH entries** from `~/.bashrc` (user-installed Node, CLIs). → Export PATH in the command.
 - **A Wi-Fi password kept in KWallet** (user-only connection) means no network until the user logs in: anything at boot can't reach the internet.
+- **A command over SSH (or a child process) never returns after `wl-copy`**: wl-copy stays behind to serve the clipboard and keeps the caller's stdout/stderr open. → Run it with stdin/stdout/stderr to `/dev/null` (`subprocess.DEVNULL`).
+- **A KWin script's `print()` shows up nowhere** you can read (not in `journalctl --user`). → Use the script only to act (raise a window); read state another way, e.g. `xprop -root _NET_CLIENT_LIST` + `xprop -id <id> _NET_WM_NAME` for X11 apps under Xwayland.

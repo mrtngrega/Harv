@@ -50,6 +50,11 @@ Harv runs only on the user's Claude subscription, which reaches Claude through t
 - The git default branch is `main`.
 - Any local secrets go in `.env`, which is gitignored (the repo is public). Commit only an `.env.example` that shows the variable names.
 
+## DaVinci Resolve (the `resolve` skill)
+
+- Both computers run free **Resolve 21.1 (21.1.0.17)**: the PC normally, the notebook in the `davincibox` toolbox container (AMD iGPU). **Never update Resolve**: from 21.1.1 on, the free Console's Lua lost `dofile`/`io`/`ffi` and Harv's bridge can't answer (checked 21.1.2 and 21.2). See `harv/skills/resolve/` and `docs/PLAN.md` §6ab round 5.
+- Test in a throwaway project, never the user's; Studio-only calls open a blocking dialog; on Linux renders go to `~/Videos/Harv` and ffmpeg (RPM Fusion's) converts phone clips in and MP4s out.
+
 ## Sensors setup on the user's PC
 
 - LibreHardwareMonitor 0.9.6 was installed with winget, under `%LOCALAPPDATA%\Microsoft\WinGet\Packages\LibreHardwareMonitor.LibreHardwareMonitor_*`.
