@@ -36,8 +36,10 @@ function heartbeat() {
   }
 }
 
+// The bridge's Resolve process is alive. Without a pid (bmd.getpid is missing in some versions,
+// e.g. Linux 21.1) any running Resolve counts.
 function alive(pid) {
-  if (!pid) return false;
+  if (!pid) return resolveRunning();
   try {
     process.kill(pid, 0);
     return true;
@@ -54,34 +56,68 @@ const up = () => {
 };
 
 function resolveRunning() {
-  if (!WIN) return spawnSync('pgrep', ['-x', 'resolve']).status === 0;
+  // Linux: its main thread is named "GUI Thread", so match the command line.
+  if (!WIN) return spawnSync('pgrep', ['-f', '^/opt/resolve/bin/resolve']).status === 0;
   const r = spawnSync('tasklist', ['/FI', 'IMAGENAME eq Resolve.exe', '/NH'], { encoding: 'utf8' });
   return /Resolve\.exe/i.test(r.stdout ?? '');
+}
+
+// Linux: Resolve runs in the davincibox toolbox container (docs/PLAN.md §6ab round 5).
+const LINUX_LAUNCH = ['toolbox', 'run', '-c', 'davincibox', '/usr/bin/run-davinci', '/opt/resolve/bin/resolve'];
+
+/** Linux: the desktop session's environment, taken from Plasma (Harv may run without it, e.g. started over SSH). */
+function sessionEnv() {
+  const env = { ...process.env };
+  const pid = spawnSync('pgrep', ['-u', String(process.getuid()), '-x', 'plasmashell'], { encoding: 'utf8' })
+    .stdout.trim()
+    .split('\n')[0];
+  if (!pid) return env;
+  try {
+    for (const kv of readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0')) {
+      const i = kv.indexOf('=');
+      const k = kv.slice(0, i);
+      if (['DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS'].includes(k)) env[k] = kv.slice(i + 1);
+    }
+  } catch {
+    // keep our own
+  }
+  return env;
+}
+
+function launchResolve() {
+  if (WIN) {
+    if (!existsSync(RESOLVE_EXE)) throw new Error(`DaVinci Resolve isn't installed at ${RESOLVE_EXE}`);
+    spawn(RESOLVE_EXE, [], { detached: true, stdio: 'ignore' }).unref();
+    return;
+  }
+  const has = spawnSync('toolbox', ['list', '-c'], { encoding: 'utf8' });
+  if (has.status !== 0 || !/\bdavincibox\b/.test(has.stdout))
+    throw new Error('DaVinci Resolve isn\'t installed here (no "davincibox" toolbox container)');
+  spawn(LINUX_LAUNCH[0], LINUX_LAUNCH.slice(1), { detached: true, stdio: 'ignore', env: sessionEnv() }).unref();
+}
+
+/** Types the line into Resolve's Console: TYPED, PROJECT_MANAGER, NO_WINDOW, NO_CONSOLE or an error. */
+function typeLine(line) {
+  const b64 = Buffer.from(line, 'utf8').toString('base64');
+  const r = WIN
+    ? spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(HERE, 'console.ps1'), b64], { encoding: 'utf8' })
+    : spawnSync('python3', ['-I', join(HERE, 'console_linux.py'), b64], { encoding: 'utf8', env: sessionEnv() });
+  return (r.stdout || r.stderr || '').trim();
 }
 
 async function start() {
   mkdirSync(DIR, { recursive: true });
   if (up()) return say('bridge: already running');
   const line = `dofile([[${BRIDGE.replaceAll('\\', '/')}]])`;
-  if (!WIN) {
-    say(`Free Resolve on Linux: ask the user to open Workspace > Console (F6) and run this line:\n${line}`);
-    process.exit(1);
-  }
   if (!resolveRunning()) {
-    if (!existsSync(RESOLVE_EXE)) throw new Error(`DaVinci Resolve isn't installed at ${RESOLVE_EXE}`);
     say('starting DaVinci Resolve…');
-    spawn(RESOLVE_EXE, [], { detached: true, stdio: 'ignore' }).unref();
+    launchResolve();
   }
-  const ps = join(HERE, 'console.ps1');
-  const b64 = Buffer.from(line, 'utf8').toString('base64');
   rmSync(BEAT, { force: true }); // a stale one must not pass for the new bridge
   const deadline = Date.now() + 120_000;
   let last = '';
   while (Date.now() < deadline) {
-    const r = spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps, b64], {
-      encoding: 'utf8',
-    });
-    last = (r.stdout || r.stderr || '').trim();
+    last = typeLine(line);
     if (last.endsWith('TYPED')) {
       for (let i = 0; i < 40; i++) {
         await sleep(250);
@@ -96,6 +132,10 @@ async function start() {
       throw new Error(
         'Resolve shows its Project Manager: no project is open, and the Console only exists inside one. ' +
           'Ask the user which project to open (or to open it), then run start again.',
+      );
+    if (last.endsWith('WELCOME'))
+      throw new Error(
+        'Resolve shows its first-start welcome screen: ask the user to click through it and open a project, then run start again.',
       );
     // NO_WINDOW / NO_CONSOLE: Resolve is still starting (splash screen). Wait.
     await sleep(3000);

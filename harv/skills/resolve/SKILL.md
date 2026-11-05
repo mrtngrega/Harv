@@ -9,13 +9,15 @@ Harv works in DaVinci Resolve through a small **bridge**: a Lua script running i
 
 Say in a few words that you're using it ("using resolve"). `<this skill>` is the folder this file is in (`~/.claude/skills/resolve`).
 
+**Only free Resolve 21.1 (21.1.0) works, and Studio.** From 21.1.1 on, the free version's Console Lua lost `dofile`, `io` and `ffi`: the bridge can neither load nor answer (checked on 21.1.2 and 21.2, 2026-11-05). So never install or accept a Resolve update for the user, and when `start` fails on a newer version, say this plainly: going back to 21.1 (Blackmagic's support page lists it) or Studio are the ways back.
+
 ## 1. Connect
 
 `node <this skill>/scripts/resolve.mjs start`
 
 - It starts Resolve if it's closed, opens the Console (F6) and types the bridge's start line there (one keystroke burst in Resolve's window; tell the user it's you). **Done when** it prints `bridge: running`.
 - `Resolve shows its Project Manager`: no project is open and the Console exists only inside one. Ask the user which project (or let them open it), then `start` again.
-- On Linux it prints the line instead: ask the user to run it in Workspace › Console.
+- On Linux (Fedora KDE, Resolve in the `davincibox` container) it does the same through KWin and a virtual keyboard. There Resolve can't read phone video or write MP4 itself: convert with ffmpeg on the way in and out (the reference's Linux section).
 - `status` says whether the bridge runs; `stop` ends it. It also ends by itself after 2 hours without requests, and keeps running when a project is switched (`pm:LoadProject(name)`).
 
 ## 2. Look before you change

@@ -1,6 +1,6 @@
 # Resolve scripting: what works, how, and the traps
 
-Tested through the bridge on **free DaVinci Resolve 21.1** (Windows, 2026-11-05). The full typed API is `DaVinciResolveScript.pyi` next to Resolve's scripting README (`C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting\`); grep it for a call's exact name and arguments. Python names there are the same in Lua (`obj:Method(...)`, Python lists → Lua `{ ... }`, dicts → `{ Key = value }`).
+Tested through the bridge on **free DaVinci Resolve 21.1** (Windows, and Linux in a container, 2026-11-05). The full typed API is `DaVinciResolveScript.pyi` next to Resolve's scripting README (`C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting\`); grep it for a call's exact name and arguments. Python names there are the same in Lua (`obj:Method(...)`, Python lists → Lua `{ ... }`, dicts → `{ Key = value }`).
 
 ## Finding things
 
@@ -13,7 +13,16 @@ Tested through the bridge on **free DaVinci Resolve 21.1** (Windows, 2026-11-05)
 
 ## Seeing the picture
 
-`project:ExportCurrentFrameAsStill(path .. ".png")` writes the frame under the playhead as the viewer shows it, grade included (a 1920×1080 PNG of the timeline). Read it to check a grade, a title or a cut by eye. Downscale big ones before reading.
+`project:ExportCurrentFrameAsStill(path .. ".png")` writes the frame under the playhead as the viewer shows it, grade included (a 1920×1080 PNG of the timeline). It works from the Color page (`resolve:OpenPage("color")` first; on the Deliver page it returns `false`). Read it to check a grade, a title or a cut by eye. Downscale big ones before reading.
+
+## Linux (the notebook): ffmpeg in, ffmpeg out
+
+Resolve runs there in the `davincibox` toolbox container (tested 2026-11-05 on the AMD iGPU, 21.1.0.17 like the PC). Free Resolve on Linux reads no H.264/H.265 and no AAC: a phone clip imports as **audio only**. Its renders offer ProRes and DNxHR in `.mov`, no H.264/H.265.
+
+- **In:** convert first, then import the converted file: `ffmpeg -i clip.mp4 -c:v dnxhd -profile:v dnxhr_sq -pix_fmt yuv422p -c:a pcm_s16le "clip (Resolve).mov"` next to the original (about 1.1 GB per minute at 1080p30; 10 s took 3.7 s). Say how big they'll get before converting a lot.
+- **Out:** render with the "ProRes 422 HQ" preset (or a DNxHR codec), then `ffmpeg -i render.mov -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p -c:a aac -b:a 192k -movflags +faststart render.mp4`.
+- **Where:** renders go to `~/Videos/Harv` (a render into `~/.harv/…` was refused with "render path inaccessible", a dialog the user had to close).
+- The client starts Resolve through the container and types the Console line with KWin and a virtual keyboard (`console_linux.py`); the first start shows a welcome screen only the user clicks through.
 
 ## Editing (tested)
 
@@ -45,7 +54,7 @@ Tested through the bridge on **free DaVinci Resolve 21.1** (Windows, 2026-11-05)
 ## Rendering (tested)
 
 1. `project:LoadRenderPreset("H.264 Master")` (list: `project:GetRenderPresetList()`; YouTube/TikTok/Vimeo 720p–2160p, ProRes, Audio Only…).
-2. `project:SetRenderSettings({ TargetDir = dir, CustomName = name, MarkIn = f1, MarkOut = f2 })` (leave MarkIn/Out out for the whole timeline). A new `CustomName` each time: renders never overwrite.
+2. `project:SetRenderSettings({ TargetDir = dir, CustomName = name, MarkIn = f1, MarkOut = f2 })` with `dir` = the user's `Videos/Harv` folder unless they name another (leave MarkIn/Out out for the whole timeline). A new `CustomName` each time: renders never overwrite.
 3. `local job = project:AddRenderJob()`, then `project:StartRendering({ job }, false)`. Return right away.
 4. Check from outside in later requests: `project:IsRenderingInProgress()`, `project:GetRenderJobStatus(job)` → `{ JobStatus = "Complete", CompletionPercentage = 100 }`. Then the file in `TargetDir` exists (H.264 Master writes `.mov`).
 5. `project:DeleteRenderJob(job)` to keep the user's render queue clean.
