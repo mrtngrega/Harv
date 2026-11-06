@@ -15,6 +15,8 @@ export interface DesktopControl {
   tabId: string;
   action: string;
   since: number;
+  /** Where on the screen (physical pixels across all monitors): the app's pill goes to that monitor. */
+  at?: [number, number];
 }
 
 const store = createStore<SafetyState>({ approvals: [], actions: {}, desktop: null });
@@ -32,7 +34,7 @@ onServerMessage((msg) => {
       store.set((s) => ({
         ...s,
         desktop: msg.action
-          ? { tabId: msg.tabId, action: msg.action, since: msg.since ?? Date.now() }
+          ? { tabId: msg.tabId, action: msg.action, since: msg.since ?? Date.now(), ...(msg.at ? { at: msg.at } : {}) }
           : s.desktop?.tabId === msg.tabId
             ? null
             : s.desktop,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { actsOnDesktop, classifyDesktop, DESKTOP_TOOLS } from './desktop.ts';
+import { actsOnDesktop, classifyDesktop, contains, DESKTOP_TOOLS, monitorLabel, namesAMonitor, pointsOf, workArea } from './desktop.ts';
 import { classify, isSending } from './classify.ts';
 
 const d = (name: string) => `mcp__desktop__${name}`;
@@ -49,5 +49,55 @@ describe('desktop control (Windows-MCP)', () => {
     expect(classify(d('Snapshot'), {}).tier).toBe('green');
     expect(isSending(d('Notification'), {})).toBe(false);
     expect(isSending(d('Type'), { text: 'send it' })).toBe(false);
+  });
+});
+
+describe('monitors', () => {
+  // The user's PC: a big main monitor on the left, a smaller one on the right, a bit lower.
+  const left = { device: 'D1', primary: true, left: 0, top: 0, right: 2560, bottom: 1440 };
+  const right = { device: 'D2', primary: false, left: 2560, top: 147, right: 4480, bottom: 1227 };
+  const both = [left, right];
+
+  it('names monitors the way the user would', () => {
+    expect(monitorLabel(left, both)).toBe('left · main');
+    expect(monitorLabel(right, both)).toBe('right');
+    expect(monitorLabel(left, [left])).toBe('your monitor');
+  });
+
+  it('works on the smallest monitor unless the user picked one', () => {
+    expect(workArea(both)).toMatchObject({ device: 'D2', label: 'right', region: [2560, 147, 4480, 1227], count: 2 });
+    expect(workArea(both, 'D1')?.device).toBe('D1');
+    expect(workArea(both, 'gone')?.device).toBe('D2');
+    expect(workArea([])).toBeNull();
+  });
+
+  it('finds every point an action lands on', () => {
+    expect(pointsOf({ loc: [10, 20] })).toEqual([[10, 20]]);
+    expect(pointsOf({ loc: '[3000, 400]', from_loc: '5,6' })).toEqual([
+      [3000, 400],
+      [5, 6],
+    ]);
+    expect(pointsOf({ locs: '[[1,2],[3,4]]' })).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
+    expect(pointsOf({ mode: 'resize', window_loc: [100, 100] })).toEqual([[100, 100]]);
+    expect(pointsOf({ label: 7 })).toEqual([]);
+    expect(contains(right, [3000, 400])).toBe(true);
+    expect(contains(right, [100, 100])).toBe(false);
+  });
+
+  it('notices when the user names a monitor (English and Slovak), not a left click', () => {
+    for (const said of [
+      'do it on the left monitor',
+      'use the main screen',
+      'both displays',
+      'on monitor 1',
+      'na ľavom monitore',
+      'na hlavnej obrazovke',
+    ])
+      expect(namesAMonitor(said)).toBe(true);
+    for (const said of ['left click the button', 'what is on my screen?', 'open Discord', 'take a screenshot'])
+      expect(namesAMonitor(said)).toBe(false);
   });
 });

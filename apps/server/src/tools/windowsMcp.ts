@@ -1,11 +1,11 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { McpStdioServerConfig } from '@anthropic-ai/claude-agent-sdk';
 import { HARV_HOME } from '../paths.ts';
 import { IS_WINDOWS } from '../platform.ts';
-import { DESKTOP_TOOLS } from '../safety/desktop.ts';
+import { DESKTOP_TOOLS, monitorLabel, workArea, type Monitor, type WorkArea } from '../safety/desktop.ts';
 import { loadSettings } from '../settings.ts';
 
 // Desktop control (docs/PLAN.md §6t item 1): Windows-MCP (CursorTouch, MIT) gives chats the screen
@@ -22,6 +22,8 @@ const EXE = join(VENV, 'Scripts', 'windows-mcp.exe');
 const PYTHON = join(VENV, 'Scripts', 'python.exe');
 /** Starts it without its own glow and notice pill: Harv's pill is the indicator (windows_mcp_quiet.py). */
 const QUIET = fileURLToPath(new URL('./windows_mcp_quiet.py', import.meta.url));
+/** Lists the monitors in Windows-MCP's coordinates (windows_displays.py). */
+const DISPLAYS = fileURLToPath(new URL('./windows_displays.py', import.meta.url));
 
 /**
  * How the server is started. Its telemetry (PostHog, on unless told otherwise; it sends every
@@ -45,13 +47,37 @@ export interface DesktopStatus {
   installing: boolean;
   /** Why the last install failed. */
   error?: string;
+  /** The monitors (once installed), named for the user, and which one Harv works on. */
+  monitors?: { device: string; label: string; size: string; work: boolean }[];
 }
 
 export class WindowsMcp {
   private installing = false;
   private error: string | undefined;
+  private monitors: Monitor[] = [];
 
-  constructor(private onChange: (status: DesktopStatus) => void = () => {}) {}
+  constructor(private onChange: (status: DesktopStatus) => void = () => {}) {
+    this.refreshMonitors();
+  }
+
+  /** Reads the monitors again in the background (at start, and whenever Settings asks). */
+  refreshMonitors(): void {
+    if (!this.installed()) return;
+    execFile(PYTHON, ['-I', DISPLAYS], { windowsHide: true, timeout: 10_000 }, (err, stdout) => {
+      if (err) return;
+      try {
+        const list = JSON.parse(stdout) as Monitor[];
+        if (Array.isArray(list) && list.length) this.monitors = list;
+      } catch {
+        // Keep the last good list.
+      }
+    });
+  }
+
+  /** The monitor chats work on: the user's pick in Settings, else the smallest (null until known). */
+  area(): WorkArea | null {
+    return workArea(this.monitors, loadSettings().desktopScreen);
+  }
 
   installed(): boolean {
     return IS_WINDOWS && existsSync(EXE);
@@ -63,7 +89,18 @@ export class WindowsMcp {
       installed: this.installed(),
       installing: this.installing,
       ...(this.error ? { error: this.error } : {}),
+      ...(this.monitors.length ? { monitors: this.describe() } : {}),
     };
+  }
+
+  private describe(): NonNullable<DesktopStatus['monitors']> {
+    const work = this.area();
+    return this.monitors.map((m) => ({
+      device: m.device,
+      label: monitorLabel(m, this.monitors),
+      size: `${m.right - m.left}×${m.bottom - m.top}`,
+      work: m.device === work?.device,
+    }));
   }
 
   /** What chats load, when the user turned it on and it's installed (else nothing). */
@@ -90,6 +127,7 @@ export class WindowsMcp {
         `windows-mcp==${WINDOWS_MCP_VERSION}`,
       ]);
       if (!existsSync(EXE)) throw new Error('windows-mcp.exe is missing after the install.');
+      this.refreshMonitors();
     } catch (err) {
       this.error = (err as Error).message;
     } finally {

@@ -114,6 +114,8 @@ export interface HarvSettings {
   // Desktop control (docs/PLAN.md §6t item 1), per device, Windows only.
   /** Chats may read the screen and use the mouse and keyboard (Windows-MCP); the first action of each reply asks. Off by default. */
   desktopControl: boolean;
+  /** The monitor Harv works on (Windows device name, e.g. "\\.\DISPLAY2"); '' = the smallest. Others only when the user's message names one. */
+  desktopScreen: string;
 
   // Automatic lights (docs/PLAN.md §6z "Automatic lights"), per device: it needs the user at this computer.
   /** Turn the user's light on when it's dark outside and they're at this computer, off when they leave. */
@@ -168,6 +170,7 @@ export const DEFAULT_SETTINGS: HarvSettings = {
   deviceName: '',
   phoneAccess: false,
   desktopControl: false,
+  desktopScreen: '',
   autoLights: false,
   autoLightsPlace: null,
   autoLightsDark: 100,

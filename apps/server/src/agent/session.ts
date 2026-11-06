@@ -15,7 +15,7 @@ import type { ContentBlockParam } from './attachments.ts';
 import type { BrowserTools, Delegate, ImageTools, PhoneTools, ProjectTools, ScheduleTools, TerminalTools } from './chatTools.ts';
 import { toCommandInfo } from './commands.ts';
 import { describeTool, MEMORY_TOOLS } from './guard.ts';
-import { DESKTOP_SERVER, isDesktopTool } from '../safety/desktop.ts';
+import { DESKTOP_SERVER, isDesktopTool, type WorkArea } from '../safety/desktop.ts';
 import { memoryChanges, memorySnapshot } from './memory.ts';
 import { buildOptions, SUBSCRIPTION_KEY_SOURCES } from './options.ts';
 import { AsyncQueue } from './queue.ts';
@@ -145,6 +145,7 @@ export class ChatSession {
       browser?: BrowserTools;
       phone?: PhoneTools;
       desktop?: McpStdioServerConfig;
+      desktopArea?: WorkArea | null;
     } = {},
   ) {
     this.resume = start.resume;

@@ -19,7 +19,7 @@ import {
 } from './classify.ts';
 import { IS_WINDOWS } from '../platform.ts';
 import { SCHEDULED_TAG } from '../schedule/schedule.ts';
-import { actsOnDesktop } from './desktop.ts';
+import { actsOnDesktop, contains, isDesktopTool, namesAMonitor, pointsOf, type WorkArea } from './desktop.ts';
 import { fullPath, isInside, loadSettings, PLANS_DIR, WORKSPACE } from './paths.ts';
 
 /** How Harv's own folder is named to the model in a block message. */
@@ -65,6 +65,8 @@ export interface GateHooks {
   allow?: (rules: string[]) => void;
   /** A chat went into plan mode (Claude's EnterPlanMode, /plan) or out of it (the user approved the plan). */
   onPlanMode?: (tabId: string, on: boolean) => void;
+  /** The monitor desktop control works on (docs/PLAN.md §6t item 1), when there's one to keep to. */
+  desktopArea?: () => WorkArea | null;
 }
 
 type Decision = {
@@ -171,7 +173,7 @@ export class SafetyGate {
   /** Chats whose current reply the user let use the mouse and keyboard (the desktop card, once per reply). */
   private desktopTurns = new Set<string>();
   /** The chat using the desktop right now (the pill), until its reply ends or is stopped. */
-  private controlling: { tabId: string; action: string; since: number } | null = null;
+  private controlling: { tabId: string; action: string; since: number; at?: [number, number] } | null = null;
 
   constructor(
     private actions: ActionStore,
@@ -263,6 +265,24 @@ export class SafetyGate {
       this.publish(id);
       return deny(`${reason} Tell the user what you wanted to do on the desktop; they can ask for it when they're there.`);
     }
+    // One monitor (the user's pick, else the smallest): looking is limited to it, and acting on
+    // another one needs the user's message to name it ("on the left monitor").
+    const area = isDesktopTool(tool) && verdict.tier !== 'blocked' ? this.hooks.desktopArea?.() : null;
+    const oneMonitor = area && area.count > 1 && !namesAMonitor(this.turnText.get(tabId) ?? '') ? area : null;
+    let looksAt: Record<string, unknown> | undefined;
+    if (oneMonitor) {
+      const away = pointsOf(input).find((p) => !contains(oneMonitor, p));
+      if (away) {
+        const reason = `(${away.join(', ')}) is on another monitor than the ${oneMonitor.label} one Harv works on.`;
+        this.actions.add({ id, tabId, at, tool, tier: 'blocked', summary: verdict.summary, reason, status: 'blocked', input });
+        this.publish(id);
+        return deny(
+          `${reason} Work on the ${oneMonitor.label} monitor (region [${oneMonitor.region.join(', ')}]): find what you need there (move a window there with App mode resize if it's elsewhere), or ask the user whether you may use the other monitor. Only their message naming it ("on the left monitor") lets you.`,
+        );
+      }
+      if (/__(Snapshot|Screenshot)$/.test(tool) && input.region == null && input.display == null)
+        looksAt = { ...input, region: oneMonitor.region };
+    }
     const asks =
       ((verdict.tier === 'red' && settings.askRisky && !desktop) ||
         (verdict.tier === 'yellow' && settings.confirmYellow) ||
@@ -281,7 +301,10 @@ export class SafetyGate {
         );
       return deny(`${verdict.reason} Tell the user it was blocked and why; don't try another way around it.`);
     }
-    if (verdict.tier === 'green') return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } };
+    if (verdict.tier === 'green')
+      return {
+        hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', ...(looksAt ? { updatedInput: looksAt } : {}) },
+      };
 
     if (!asks) {
       if (verdict.tier === 'red') {
@@ -292,7 +315,7 @@ export class SafetyGate {
       }
       this.backup(id, verdict.targets, tool, input);
       this.publish(id);
-      if (desktop) this.takeOver(tabId, verdict.summary);
+      if (desktop) this.takeOver(tabId, verdict.summary, pointsOf(input)[0], area);
       return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } };
     }
 
@@ -351,7 +374,7 @@ export class SafetyGate {
     this.approved.add(id);
     if (desktop) {
       this.desktopTurns.add(tabId);
-      this.takeOver(tabId, verdict.summary);
+      this.takeOver(tabId, verdict.summary, pointsOf(input)[0], area);
     }
     this.actions.update(id, { status: 'running' });
     this.publish(id);
@@ -471,15 +494,22 @@ export class SafetyGate {
   }
 
   /** Who is using the desktop now (for a dashboard that connects mid-way). */
-  desktopControl(): { tabId: string; action: string; since: number } | null {
+  desktopControl(): { tabId: string; action: string; since: number; at?: [number, number] } | null {
     return this.controlling;
   }
 
   /** A chat's desktop action is about to run: the pill shows it (the first one of a reply starts the clock). */
-  private takeOver(tabId: string, action: string): void {
-    const since = this.controlling?.tabId === tabId ? this.controlling.since : Date.now();
-    this.controlling = { tabId, action, since };
-    this.hooks.broadcast({ type: 'desktop.control', tabId, action, since });
+  private takeOver(tabId: string, action: string, at?: [number, number], area?: WorkArea | null): void {
+    const mine = this.controlling?.tabId === tabId ? this.controlling : null;
+    const since = mine?.since ?? Date.now();
+    // Where it acts (the pill goes to that monitor): the action's point, else where the last one was,
+    // else the middle of the monitor Harv works on.
+    const middle: [number, number] | undefined = area
+      ? [Math.round((area.left + area.right) / 2), Math.round((area.top + area.bottom) / 2)]
+      : undefined;
+    const where = at ?? mine?.at ?? middle;
+    this.controlling = { tabId, action, since, ...(where ? { at: where } : {}) };
+    this.hooks.broadcast({ type: 'desktop.control', tabId, action, since, ...(where ? { at: where } : {}) });
   }
 
   /** The chat's reply ended or was stopped: it's no longer using the desktop. */

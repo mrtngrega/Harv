@@ -511,3 +511,69 @@ describe('desktop control signal (the pill)', () => {
     expect(controls(sent)).toEqual([]);
   });
 });
+
+describe('desktop control on one monitor', () => {
+  // The user's smaller right monitor, the one Harv works on by default.
+  const right = { device: 'D2', primary: false, left: 2560, top: 147, right: 4480, bottom: 1227 };
+  const area = { ...right, label: 'right', region: [2560, 147, 4480, 1227] as [number, number, number, number], count: 2 };
+  function setupOn() {
+    const store = new ActionStore(':memory:');
+    const sent: SafetyServerMessage[] = [];
+    const gate = new SafetyGate(store, { broadcast: (m) => sent.push(m), notice: () => {}, onChange: () => {}, desktopArea: () => area });
+    return { gate, store, sent };
+  }
+
+  it('limits looking to the work monitor unless the call already says where', async () => {
+    writeSettings({ askRisky: false });
+    const { gate } = setupOn();
+    gate.setTurn('tab', 'what does Discord show?');
+    expect(decision(await gate.preToolUse('tab', 'mcp__desktop__Snapshot', {}, 'm1', signal()))?.updatedInput).toEqual({
+      region: [2560, 147, 4480, 1227],
+    });
+    expect(
+      decision(await gate.preToolUse('tab', 'mcp__desktop__Screenshot', { display: [0] }, 'm2', signal()))?.updatedInput,
+    ).toBeUndefined();
+    // The user named a monitor: the whole desktop.
+    gate.setTurn('tab', 'look at both monitors');
+    expect(decision(await gate.preToolUse('tab', 'mcp__desktop__Snapshot', {}, 'm3', signal()))?.updatedInput).toBeUndefined();
+  });
+
+  it('refuses acting on another monitor unless the message names it, before any card', async () => {
+    writeSettings({ askRisky: false });
+    const { gate, store, sent } = setupOn();
+    gate.setTurn('tab', 'click the start button');
+    const out = await gate.preToolUse('tab', 'mcp__desktop__Click', { loc: [100, 1400] }, 'n1', signal());
+    expect(decision(out)?.permissionDecision).toBe('deny');
+    expect(store.get('n1')?.status).toBe('blocked');
+    expect(sent.some((m) => m.type === 'approval.request')).toBe(false);
+    // Moving a window onto another monitor counts too.
+    expect(
+      decision(await gate.preToolUse('tab', 'mcp__desktop__App', { mode: 'resize', name: 'X', window_loc: [10, 10] }, 'n2', signal()))
+        ?.permissionDecision,
+    ).toBe('deny');
+
+    gate.setTurn('tab', 'click the start button on the left monitor');
+    const named = gate.preToolUse('tab', 'mcp__desktop__Click', { loc: [100, 1400] }, 'n3', signal());
+    await vi.waitFor(() => expect(gate.waiting).toBe(1));
+    gate.answer('n3', true);
+    expect(decision(await named)?.permissionDecision).toBe('allow');
+  });
+
+  it('tells the pill where Harv acts: the point, else the last one, else the middle of the work monitor', async () => {
+    writeSettings({ askRisky: false });
+    const { gate, sent } = setupOn();
+    gate.setTurn('tab', 'type into it');
+    const first = gate.preToolUse('tab', 'mcp__desktop__Shortcut', { shortcut: 'ctrl+l' }, 'o1', signal());
+    await vi.waitFor(() => expect(gate.waiting).toBe(1));
+    gate.answer('o1', true);
+    await first;
+    await gate.preToolUse('tab', 'mcp__desktop__Click', { loc: [3000, 500] }, 'o2', signal());
+    await gate.preToolUse('tab', 'mcp__desktop__Type', { text: 'x', label: 4 }, 'o3', signal());
+    const ats = sent.flatMap((m) => (m.type === 'desktop.control' && m.action ? [m.at] : []));
+    expect(ats).toEqual([
+      [3520, 687],
+      [3000, 500],
+      [3000, 500],
+    ]);
+  });
+});

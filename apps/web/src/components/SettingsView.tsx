@@ -1322,11 +1322,13 @@ interface DesktopStatus {
   installed: boolean;
   installing: boolean;
   error?: string;
+  /** The PC's monitors once installed; `work`: the one Harv works on. */
+  monitors?: { device: string; label: string; size: string; work: boolean }[];
 }
 
 /** Settings › Desktop control (Windows): chats may read the screen and use the mouse and keyboard (docs/PLAN.md §6t item 1). */
 function DesktopControl() {
-  const { desktopControl } = useSettings();
+  const { desktopControl, desktopScreen } = useSettings();
   const [status, setStatus] = useState<DesktopStatus | null>(null);
   const load = () =>
     fetch('/api/desktop')
@@ -1371,6 +1373,23 @@ function DesktopControl() {
         </>
       )}
       {desktopControl && status.installed && <Note>Installed. Chats pick it up with their next message.</Note>}
+      {desktopControl && status.installed && (status.monitors?.length ?? 0) > 1 && (
+        <>
+          <Choice
+            label="Works on"
+            value={desktopScreen || status.monitors!.find((m) => m.work)?.device || ''}
+            options={status.monitors!.map((m) => ({ value: m.device, label: `${m.label} · ${m.size}` }))}
+            onChange={(device) => {
+              updateSettings({ desktopScreen: device });
+              setStatus((s) => (s?.monitors ? { ...s, monitors: s.monitors.map((m) => ({ ...m, work: m.device === device })) } : s));
+            }}
+          />
+          <Note>
+            Harv looks at and works on this monitor only (the smallest until you pick). It uses another one only when your message names it,
+            like “on the left monitor”.
+          </Note>
+        </>
+      )}
     </Sub>
   );
 }

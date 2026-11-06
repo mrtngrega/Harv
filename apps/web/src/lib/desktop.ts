@@ -96,15 +96,14 @@ if (inApp) {
   let pill = '';
   const showPill = () => {
     const { desktop: control } = getSafety();
-    const key = control
-      ? `${control.tabId}
-${control.action}`
-      : '';
+    // `at`: where it acts, so the pill sits on that monitor.
+    const key = control ? JSON.stringify([control.tabId, control.action, control.at]) : '';
     if (key === pill) return;
     pill = key;
-    void invoke('desktop_pill', control ? { action: control.action, chat: tabTitle(control.tabId) } : { action: null, chat: null }).catch(
-      () => {},
-    );
+    const args = control
+      ? { action: control.action, chat: tabTitle(control.tabId), at: control.at ?? null }
+      : { action: null, chat: null, at: null };
+    void invoke('desktop_pill', args).catch(() => {});
   };
   subscribeSafety(showPill);
   window.addEventListener('harv-pill-stop', () => {

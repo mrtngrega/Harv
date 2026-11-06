@@ -1,10 +1,12 @@
 //! Desktop control's pill (docs/PLAN.md §6t item 1 "The pill"): while Harv uses the mouse and
-//! keyboard, a small glass window floats over every other window, top centre, with what Harv is
-//! doing and a STOP button. It never takes the focus (Harv's typing has to land in the app it
+//! keyboard, a small glass window floats over every other window, top centre of the monitor Harv
+//! acts on (it follows the action across monitors), with what Harv is doing and a STOP button. It never takes the focus (Harv's typing has to land in the app it
 //! works in), stays out of screenshots (Windows-MCP's and the user's), and is the bundled
 //! `pill.html`, so it gets only the one command it needs (capabilities/pill.json).
 
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use std::sync::Mutex;
+
+use tauri::{AppHandle, Manager, Monitor, WebviewUrl, WebviewWindowBuilder};
 
 use crate::tray;
 
@@ -13,14 +15,22 @@ const WIDTH: f64 = 460.0;
 const HEIGHT: f64 = 64.0;
 /// Space between the top of the screen and the pill.
 const TOP: f64 = 14.0;
+/// The monitor the pill was last put on (it only moves when the action moves to another one).
+static PLACED_ON: Mutex<Option<String>> = Mutex::new(None);
 
-/// The pill's text, or `None` to hide it. Called by the dashboard (`desktop.control` events).
+/// The pill's text, or `None` to hide it. Called by the dashboard (`desktop.control` events);
+/// `at` is where Harv acts, in physical pixels of the whole desktop (Windows-MCP's coordinates).
 /// Async on purpose: a synchronous command runs on the main thread, and building a window there
 /// waits for that same thread, so the whole app froze on Windows (found in the first live test).
 #[tauri::command]
-pub async fn desktop_pill(app: AppHandle, action: Option<String>, chat: Option<String>) {
+pub async fn desktop_pill(
+    app: AppHandle,
+    action: Option<String>,
+    chat: Option<String>,
+    at: Option<(f64, f64)>,
+) {
     match action {
-        Some(action) => show(&app, &action, chat.as_deref().unwrap_or("")),
+        Some(action) => show(&app, &action, chat.as_deref().unwrap_or(""), at),
         None => hide(&app),
     }
 }
@@ -35,7 +45,7 @@ pub async fn pill_stop(app: AppHandle) {
     }
 }
 
-fn show(app: &AppHandle, action: &str, chat: &str) {
+fn show(app: &AppHandle, action: &str, chat: &str, at: Option<(f64, f64)>) {
     let text = serde_json::json!({ "action": action, "chat": chat }).to_string();
     let window = match app.get_webview_window(LABEL) {
         Some(window) => {
@@ -51,8 +61,16 @@ fn show(app: &AppHandle, action: &str, chat: &str) {
             }
         },
     };
-    if !window.is_visible().unwrap_or(false) {
-        place(app, &window);
+    let visible = window.is_visible().unwrap_or(false);
+    if let Some(monitor) = monitor_at(app, &window, at) {
+        let name = monitor.name().cloned().unwrap_or_default();
+        let mut placed = PLACED_ON.lock().unwrap();
+        if !visible || placed.as_deref() != Some(name.as_str()) {
+            place(&window, &monitor);
+            *placed = Some(name);
+        }
+    }
+    if !visible {
         show_quietly(&window);
     }
     tray::set_desktop(app, true);
@@ -85,21 +103,36 @@ fn create(app: &AppHandle, text: &str) -> tauri::Result<tauri::WebviewWindow> {
     Ok(window)
 }
 
-/// Top centre of the screen the main window is on (the primary one if there's none).
-fn place(app: &AppHandle, window: &tauri::WebviewWindow) {
-    let monitor = app
-        .get_window("main")
-        .and_then(|w| w.current_monitor().ok().flatten())
-        .or_else(|| window.primary_monitor().ok().flatten());
-    if let Some(monitor) = monitor {
-        let scale = monitor.scale_factor();
-        let size = monitor.size().to_logical::<f64>(scale);
-        let origin = monitor.position().to_logical::<f64>(scale);
-        let _ = window.set_position(tauri::LogicalPosition::new(
-            origin.x + (size.width - WIDTH) / 2.0,
-            origin.y + TOP,
-        ));
-    }
+/// The monitor with the point Harv acts on; without one, the monitor Harv's window is on (or the primary).
+fn monitor_at(
+    app: &AppHandle,
+    window: &tauri::WebviewWindow,
+    at: Option<(f64, f64)>,
+) -> Option<Monitor> {
+    let hit = at.and_then(|(x, y)| {
+        window.available_monitors().ok()?.into_iter().find(|m| {
+            let (p, s) = (m.position(), m.size());
+            x >= p.x as f64
+                && x < p.x as f64 + s.width as f64
+                && y >= p.y as f64
+                && y < p.y as f64 + s.height as f64
+        })
+    });
+    hit.or_else(|| {
+        app.get_window("main")
+            .and_then(|w| w.current_monitor().ok().flatten())
+    })
+    .or_else(|| window.primary_monitor().ok().flatten())
+}
+
+/// Top centre of that monitor, in its own pixels (monitors can have different scaling).
+fn place(window: &tauri::WebviewWindow, monitor: &Monitor) {
+    let scale = monitor.scale_factor();
+    let (p, s) = (monitor.position(), monitor.size());
+    let _ = window.set_position(tauri::PhysicalPosition::new(
+        p.x + ((s.width as f64 - WIDTH * scale) / 2.0) as i32,
+        p.y + (TOP * scale) as i32,
+    ));
 }
 
 /// Shows the pill without taking the focus from the app Harv works in. Tauri's `show()` activates

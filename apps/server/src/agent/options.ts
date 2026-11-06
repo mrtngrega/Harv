@@ -5,7 +5,7 @@ import { selfContext } from './harvSelf.ts';
 import type { HookCallbackMatcher, HookEvent, McpStdioServerConfig, Options } from '@anthropic-ai/claude-agent-sdk';
 import { HARV_VERSION, type EffortLevel, type Project } from '@harv/shared';
 import { IS_WINDOWS, OS_NAME } from '../platform.ts';
-import { DESKTOP_SERVER } from '../safety/desktop.ts';
+import { DESKTOP_SERVER, type WorkArea } from '../safety/desktop.ts';
 import type { SafetyGate } from '../safety/gate.ts';
 import { PLANS_DIR, WORKSPACE } from '../safety/paths.ts';
 import { loadSettings, workDir } from '../settings.ts';
@@ -74,10 +74,19 @@ export interface ChatContext {
   lights?: LightTools;
   /** Desktop control (Windows-MCP, docs/PLAN.md §6t item 1), when the user turned it on on this computer. */
   desktop?: McpStdioServerConfig;
+  /** The monitor desktop control works on, when the PC has more than one (the user's pick, else the smallest). */
+  desktopArea?: WorkArea | null;
 }
 
-/** How a chat with desktop control should use it (the gate enforces the asking part). */
+/** How a chat with desktop control should use it (the gate enforces the asking part and the monitor). */
 const DESKTOP_NOTE = `- Desktop control (the ${DESKTOP_SERVER} tools, the user turned it on): Snapshot reads the screen as text (windows, buttons and fields with labels), which costs far less than a Screenshot, so start with it and take a Screenshot only when the layout or a picture matters. Click, Type, Scroll, Move, Shortcut, App and Clipboard act on the user's real desktop: use them only when the user asked for something to be done on the computer. When the user names a desktop app (Discord, Spotify, Steam, Word…), work in that app on the desktop with these tools (App to open or switch to it, then Snapshot), not in its website in your browser, where they aren't signed in. Type always needs where to type: a label from the last Snapshot or a loc (it fails without one). A pill on the user's screen shows what you're doing and lets them stop you; it's left out of screenshots. The desktop is the user's first: an action fails with USER_CONTROL when they used the mouse or keyboard in the last 10 seconds (clicking Approve on your card counts), so then wait 10 seconds with PowerShell's \`Start-Sleep 10\` (the desktop tools, Wait and Snapshot included, are refused too while the user is active) and try once more. If it fails again, or with CONTROL_PREEMPTED (they moved the mouse while you worked), they've taken over: stop and ask. For plain file or shell work your other tools are still the better fit. The first action of each reply shows the user a card and waits for their OK; scheduled and background turns can't use them. Say what you're about to do before you do it.`;
+
+/** Which monitor to work on (docs/PLAN.md §6t item 1 "Monitors"); nothing to say with one monitor. */
+function monitorNote(area: WorkArea | null | undefined): string {
+  if (!area || area.count < 2) return '';
+  const [l, t, r, b] = area.region;
+  return ` The PC has ${area.count} monitors, and you work on the ${area.label} one (${r - l}×${b - t}, from (${l}, ${t}) to (${r}, ${b}) in the tools' coordinates): your Snapshots and Screenshots are limited to it, and actions on another monitor are refused unless the user's message names that monitor ("on the left monitor"). Open or bring apps there: if a window you need is on another monitor, move it onto yours with App mode "resize" and a window_loc inside it, rather than asking to use the other monitor.`;
+}
 
 /** The part about the user's other chats, shared by both kinds of chat. */
 function otherChats(chat: ChatContext): string {
@@ -160,7 +169,7 @@ function projectPrompt(chat: ChatContext, project: Project): string {
         : NO_CARDS,
       '- Background agents you start show in a strip above the prompt, where the user can stop each one; use ListAgents to check on them, and SendMessage to talk to one.',
       "- Harv's own tools: schedule_task / list_scheduled / cancel_scheduled for anything to run later or on a repeat (Claude Code's Cron and ScheduleWakeup tools don't work here). Files you make show as cards, pictures by full path show in the chat, and HTML, SVG and Mermaid open in a live preview pane.",
-      ...(chat.desktop ? [DESKTOP_NOTE] : []),
+      ...(chat.desktop ? [DESKTOP_NOTE + monitorNote(chat.desktopArea)] : []),
       `- The user's home folder is ${homedir()}. Today is ${today}.`,
     ].join('\n'),
     selfContext(),
@@ -183,7 +192,7 @@ function systemPrompt(chat?: ChatContext): string {
     [
       `- You're running inside Harv's dashboard on the user's ${OS_NAME}. Replies render as Markdown in a log-style chat, so keep formatting light.`,
       `- Your tools are Claude Code's full toolset: read and search files, search and fetch the web, create and edit files, ${IS_WINDOWS ? 'run PowerShell and Bash commands (prefer PowerShell for Windows tasks)' : 'run Bash commands'}, background shells and subagents (Agent; they show in a strip above the prompt where the user can stop each one), a task list (TodoWrite) for longer jobs, AskUserQuestion to give the user choices (it shows as a card), plan mode, and the user's own Claude Code setup: their skills (docx, xlsx, pptx, pdf, deep-research, skill-creator and the rest; use them for documents and research), plugins and claude.ai connectors (Claude Docs for docs they asked for). Plus Harv's own: remember/forget for your memory, list_chats/read_chat for your other chats, hand_off to give a task to another chat tab, and schedule_task / list_scheduled / cancel_scheduled for anything to run later or on a repeat ("every morning at 8…", "check X in an hour"; Claude Code's own Cron and ScheduleWakeup tools don't work here).`,
-      ...(chat?.desktop ? [DESKTOP_NOTE] : []),
+      ...(chat?.desktop ? [DESKTOP_NOTE + monitorNote(chat.desktopArea)] : []),
       '- Files you make show as cards with Open and Show in folder; pictures (png, jpg, svg, gif, webp) you make or mention by full path show right in the chat, and HTML pages, SVG and Mermaid open in a live preview pane. So when the user wants a drawing, a diagram, a chart or a small page, make it as a file (SVG, HTML with inline JS/CSS, a Mermaid ```mermaid block, or a picture from Python) and say its full path. Math in replies renders with $…$ and $$…$$.',
       ...(asks
         ? [

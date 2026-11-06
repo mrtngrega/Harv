@@ -19,6 +19,7 @@ import {
 import type { Router } from '../router/router.ts';
 import { parseOverride } from '../router/rules.ts';
 import type { McpStdioServerConfig } from '@anthropic-ai/claude-agent-sdk';
+import type { WorkArea } from '../safety/desktop.ts';
 import type { SafetyGate } from '../safety/gate.ts';
 import { SCHEDULED_TAG } from '../schedule/schedule.ts';
 import type { ChatStore } from '../store/chats.ts';
@@ -174,6 +175,8 @@ export class ChatManager {
   lights?: LightTools;
   /** Desktop control's MCP server when it's on and installed (set by the server, docs/PLAN.md §6t item 1). */
   desktop?: () => McpStdioServerConfig | undefined;
+  /** The monitor desktop control works on (set by the server). */
+  desktopArea?: () => WorkArea | null;
 
   constructor(
     private store: ChatStore,
@@ -470,6 +473,7 @@ export class ChatManager {
         phone: this.phone,
         ...(this.lights ? { lights: this.lights } : {}),
         desktop: this.desktop?.(),
+        desktopArea: this.desktopArea?.(),
       },
     );
     this.sessions.set(tabId, session);

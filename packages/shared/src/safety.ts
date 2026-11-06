@@ -102,7 +102,8 @@ export type SafetyServerMessage =
   | { type: 'action'; action: ActionEntry }
   /**
    * Desktop control (docs/PLAN.md §6t item 1): a chat is using the mouse and keyboard (`action`: what
-   * it's doing now, `since`: when its reply took over), or stopped (`action: null`). The app shows
+   * it's doing now, `since`: when its reply took over, `at`: where on the screen, in Windows-MCP's
+   * physical pixels), or stopped (`action: null`). The app shows
    * its pill, the dashboard marks the chat.
    */
-  | { type: 'desktop.control'; tabId: string; action: string | null; since?: number };
+  | { type: 'desktop.control'; tabId: string; action: string | null; since?: number; at?: [number, number] };

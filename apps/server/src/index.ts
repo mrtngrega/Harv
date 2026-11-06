@@ -172,6 +172,8 @@ const gate = new SafetyGate(actions, {
   attachedOf: (tabId) => store.attachedPaths(tabId),
   allow: (rules) => broadcast({ type: 'settings', settings: updateSettings({ allowRules: [...loadSettings().allowRules, ...rules] }) }),
   onPlanMode: (tabId, on) => chats.planningChanged(tabId, on),
+  // Desktop control keeps to one monitor (docs/PLAN.md §6t item 1 "Monitors"); windowsMcp is set up below.
+  desktopArea: () => (loadSettings().desktopControl ? windowsMcp.area() : null),
 });
 const routes = new RouteStore(join(HARV_HOME, 'harv.db'));
 const meter = new UsageMeter(
@@ -329,8 +331,9 @@ const windowsMcp = new WindowsMcp((status) => {
   if (!status.installing && status.installed && loadSettings().desktopControl) chats.reloadSessions();
 });
 chats.desktop = () => windowsMcp.server();
+chats.desktopArea = () => windowsMcp.area();
 onSettingsChange((before, after) => {
-  if (before.desktopControl !== after.desktopControl) chats.reloadSessions();
+  if (before.desktopControl !== after.desktopControl || before.desktopScreen !== after.desktopScreen) chats.reloadSessions();
 });
 // Harv's own skills: harv/skills → ~/.claude/skills, only what changed (docs/PLAN.md §6ab).
 try {
@@ -602,7 +605,11 @@ app.post('/api/lights/leaving', async (req) => {
     why === 'shutdown' ? 'the computer is shutting down' : why === 'logoff' ? 'you signed out' : 'the computer is going to sleep';
   return { off: await autoLights.leaving(reason) };
 });
-app.get('/api/desktop', async () => windowsMcp.status());
+app.get('/api/desktop', async () => {
+  // Monitors come and go: Settings sees the current ones next time.
+  windowsMcp.refreshMonitors();
+  return windowsMcp.status();
+});
 app.post('/api/desktop/install', async () => {
   void windowsMcp.install();
   return windowsMcp.status();
