@@ -215,6 +215,12 @@ export class SafetyGate {
     this.turnText.set(tabId, text);
   }
 
+  /** The user added a message to the running reply (a queued message Claude took mid-reply). */
+  addToTurn(tabId: string, text: string): void {
+    const before = this.turnText.get(tabId);
+    this.turnText.set(tabId, before === undefined ? text : `${before}\n${text}`);
+  }
+
   isPlanning(tabId: string): boolean {
     return this.planning.has(tabId);
   }

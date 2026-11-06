@@ -787,41 +787,50 @@ export function ChatPanel() {
 
         {!nonChat && active?.queued && active.queued.length > 0 && (
           <div className="flex flex-col gap-1 border-t border-line px-5 pt-2 text-xs">
-            {active.queued.map((q) => (
-              <div key={q.id} className="flex min-w-0 items-center gap-2">
-                <span className="flex-none text-faint">queued ›</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    chat.editQueued(active.id, q.id);
-                    inputRef.current?.focus();
-                  }}
-                  title="Edit: takes it back into the input (↑ in an empty input does too)"
-                  className="min-w-0 flex-1 cursor-pointer truncate rounded text-left text-muted hover:text-ink"
-                >
-                  {q.text || q.files?.join(', ')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => chat.sendNow(active.id, q.id)}
-                  title="Stop the current reply and send this now"
-                  className="flex-none cursor-pointer rounded border border-accent/50 px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent/15"
-                >
-                  send now
-                </button>
-                <button
-                  type="button"
-                  onClick={() => chat.unqueue(active.id, q.id)}
-                  aria-label="Remove queued message"
-                  title="Remove"
-                  className="size-6 flex-none cursor-pointer rounded text-muted hover:bg-white/10"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
+            {active.queued.map((q) =>
+              q.handed ? (
+                // Already with Claude: it reads it after the step it's on, so it can't be edited or removed now.
+                <div key={q.id} className="flex min-w-0 items-center gap-2" title="Harv reads this after the step it's on">
+                  <span className="flex-none text-accent">next step ›</span>
+                  <span className="min-w-0 flex-1 truncate text-muted">{q.text || q.files?.join(', ')}</span>
+                </div>
+              ) : (
+                <div key={q.id} className="flex min-w-0 items-center gap-2">
+                  <span className="flex-none text-faint">queued ›</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      chat.editQueued(active.id, q.id);
+                      inputRef.current?.focus();
+                    }}
+                    title="Edit: takes it back into the input (↑ in an empty input does too)"
+                    className="min-w-0 flex-1 cursor-pointer truncate rounded text-left text-muted hover:text-ink"
+                  >
+                    {q.text || q.files?.join(', ')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => chat.sendNow(active.id, q.id)}
+                    title="Stop the current reply and send this now"
+                    className="flex-none cursor-pointer rounded border border-accent/50 px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent/15"
+                  >
+                    send now
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => chat.unqueue(active.id, q.id)}
+                    aria-label="Remove queued message"
+                    title="Remove"
+                    className="size-6 flex-none cursor-pointer rounded text-muted hover:bg-white/10"
+                  >
+                    ×
+                  </button>
+                </div>
+              ),
+            )}
             <p className="text-[11px] text-faint">
-              Runs when Harv finishes · click one (or ↑) to edit it · “send now” stops this reply and sends it right away
+              Goes in at Harv’s next step, like Claude Code (or when it finishes) · click one (or ↑) to edit it until then · “send now”
+              stops this reply and sends it right away
             </p>
           </div>
         )}
@@ -946,9 +955,10 @@ export function ChatPanel() {
                   }
                 }
                 // ↑ in an empty input takes the newest queued message back to edit.
-                if (e.key === 'ArrowUp' && !draft && pending.length === 0 && active?.queued?.length) {
+                const editable = active?.queued?.filter((q) => !q.handed) ?? [];
+                if (e.key === 'ArrowUp' && !draft && pending.length === 0 && active && editable.length) {
                   e.preventDefault();
-                  chat.editQueued(active.id, active.queued.at(-1)!.id);
+                  chat.editQueued(active.id, editable.at(-1)!.id);
                   return;
                 }
                 if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;

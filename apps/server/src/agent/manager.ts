@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, type UUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { promisify } from 'node:util';
@@ -221,10 +221,11 @@ export class ChatManager {
   }
 
   private queuedOf(tabId: string): QueuedMessage[] {
-    return (this.followUps.get(tabId) ?? []).map(({ id, text, files, attachments }) => ({
+    return (this.followUps.get(tabId) ?? []).map(({ id, text, files, attachments, handed }) => ({
       id,
       text,
       ...(files?.length ? { files, attachments } : {}),
+      ...(handed ? { handed } : {}),
     }));
   }
 
@@ -235,7 +236,8 @@ export class ChatManager {
   /** Drops a message from a tab's queue before it runs. */
   unqueue(tabId: string, id: string): void {
     const list = this.followUps.get(tabId);
-    if (!list?.some((f) => f.id === id)) return;
+    // One already handed to Claude can't be taken back (it goes in at the reply's next step).
+    if (!list?.some((f) => f.id === id && !f.handed)) return;
     this.followUps.set(
       tabId,
       list.filter((f) => f.id !== id),
@@ -247,7 +249,7 @@ export class ChatManager {
   async sendNow(tabId: string, id: string): Promise<void> {
     const list = this.followUps.get(tabId);
     const item = list?.find((f) => f.id === id);
-    if (!list || !item) return;
+    if (!list || !item || item.handed) return;
     this.followUps.set(tabId, [item, ...list.filter((f) => f !== item)]);
     this.publishQueued(tabId);
     if (!this.busy(tabId)) return void this.nextFollowUp(tabId);
@@ -259,6 +261,8 @@ export class ChatManager {
   /** The turn ended: the next queued message runs (a plan limit sends it to the limit queue instead). */
   private async nextFollowUp(tabId: string): Promise<void> {
     if (this.busy(tabId)) return;
+    // A message already handed to Claude runs as Claude's own next turn (onFolded); the rest wait for it.
+    if (this.followUps.get(tabId)?.some((f) => f.handed)) return;
     const next = this.followUps.get(tabId)?.shift();
     if (!next) return;
     this.publishQueued(tabId);
@@ -266,6 +270,73 @@ export class ChatManager {
     await this.begin(tabId, next.message, next.choice, next.effort, next.attachments, false);
     // A message that ended without a turn (a refused command, a plan limit) lets the next one go too.
     if (!this.busy(tabId) && this.followUps.get(tabId)?.length) setTimeout(() => void this.nextFollowUp(tabId), 0);
+  }
+
+  /**
+   * The reply started a tool: queued messages go to Claude now, so it reads them after this step,
+   * like Claude Code (the user's wish, 2026-11-05; docs/PLAN.md §6ac). Commands (/opus …, /fresh…)
+   * still wait for the reply to end, as does everything while a plan limit pauses Harv.
+   */
+  private handOver(tabId: string): void {
+    const session = this.sessions.get(tabId);
+    const list = this.followUps.get(tabId);
+    if (!session?.toolRunning || !list?.length || this.meter.paused) return;
+    let handed = false;
+    for (const f of list) {
+      if (f.handed) continue;
+      // In order: a command waits, and so does everything typed after it.
+      if (f.message.trim().startsWith('/')) break;
+      const content = f.attachments.length ? buildContent(tabId, f.message, f.attachments) : f.message;
+      if (!session.fold(f.id as UUID, content)) break;
+      f.handed = true;
+      handed = true;
+    }
+    if (handed) this.publishQueued(tabId);
+  }
+
+  /** Claude took a handed-over message: it leaves the queue and shows as the user's line right here. */
+  private folded(tabId: string, id: string, newTurn: boolean): void {
+    const list = this.followUps.get(tabId) ?? [];
+    const f = list.find((x) => x.id === id);
+    if (!f) return;
+    this.followUps.set(
+      tabId,
+      list.filter((x) => x !== f),
+    );
+    this.publishQueued(tabId);
+    this.addLine(tabId, { kind: 'you', text: f.message, ...(f.files?.length ? { files: f.files } : {}) });
+    if (!newTurn) {
+      // The sending check and the monitor check read what this turn was asked, the new message too.
+      this.gate.addToTurn(tabId, f.message);
+      return;
+    }
+    // The reply ended (or was stopped) before its next step: Claude runs the message as its own turn.
+    this.gate.setTurn(tabId, f.message);
+    const last = this.lastRun.get(tabId) ?? this.lastTagged(tabId) ?? AUTO_FALLBACK;
+    const decision: RouteDecision = {
+      model: last.model,
+      effort: last.effort,
+      source: 'manual',
+      reason: 'your queued message, right after the reply',
+    };
+    this.router.manual(tabId, decision);
+    this.emit({
+      type: 'chat.started',
+      tabId,
+      model: this.modelName(last.model),
+      effort: last.effort,
+      auto: false,
+      reason: decision.reason,
+    });
+  }
+
+  /** The session is gone: messages handed to it never arrive, so they wait in the queue again. */
+  private unhand(tabId: string): void {
+    const list = this.followUps.get(tabId);
+    if (!list?.some((f) => f.handed)) return;
+    for (const f of list) delete f.handed;
+    this.publishQueued(tabId);
+    if (!this.busy(tabId)) setTimeout(() => void this.nextFollowUp(tabId), 0);
   }
 
   private modelName(id: string): string {
@@ -443,7 +514,10 @@ export class ChatManager {
           if (info.status === 'rejected') this.limited.add(tabId);
         },
         onStruggle: (why) => void this.stepUp(tabId, why),
+        onToolUse: () => this.handOver(tabId),
+        onFolded: (id, newTurn) => this.folded(tabId, id, newTurn),
         onEnded: () => {
+          this.unhand(tabId);
           // The next message starts a new session (resuming this conversation) instead of vanishing into a dead one.
           if (this.sessions.get(tabId) === session) this.sessions.delete(tabId);
         },
@@ -524,6 +598,8 @@ export class ChatManager {
       this.followUps.set(tabId, list);
       this.publishQueued(tabId);
       if (!this.busy(tabId)) void this.nextFollowUp(tabId);
+      // A tool is running right now: it goes in after it (like Claude Code), not after the whole reply.
+      else this.handOver(tabId);
       return;
     }
     this.store.addLine(tabId, { kind: 'you', text: message, ...(files.length ? { files: files.map(lineName) } : {}) });
@@ -1234,6 +1310,7 @@ export class ChatManager {
   private dropSession(tabId: string) {
     this.sessions.get(tabId)?.close();
     this.sessions.delete(tabId);
+    this.unhand(tabId);
   }
 
   /** The turn that changed a chat's project has ended: its old session goes. */

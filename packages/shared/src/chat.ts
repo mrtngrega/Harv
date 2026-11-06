@@ -33,6 +33,8 @@ export interface QueuedMessage {
   files?: string[];
   /** The files themselves, so the message can be taken back into the input to edit. */
   attachments?: Attachment[];
+  /** Already handed to Claude: it goes in at the running reply's next step and can't be edited or removed any more. */
+  handed?: boolean;
 }
 
 /** A background task a chat started (a subagent, a shell or a monitor), for the strip above the prompt. */

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, type UUID } from 'node:crypto';
 import {
   query,
   type McpStdioServerConfig,
@@ -42,6 +42,13 @@ export interface SessionHooks {
   onEnded?: () => void;
   /** The reply is struggling (tests failing, tool calls failing in a row): AUTO may step up mid-reply. */
   onStruggle?: (why: string) => void;
+  /** The reply started a tool: a message the user queued meanwhile can go in now (docs/PLAN.md §6ac). */
+  onToolUse?: () => void;
+  /**
+   * Claude took a message handed over with `fold`: into the running reply, or (`newTurn`) as a turn
+   * of its own when the reply ended before its next step, or was stopped.
+   */
+  onFolded?: (id: string, newTurn: boolean) => void;
 }
 
 /** Where one of the user's messages sits in the Claude conversation, for rewinding to before it. */
@@ -102,6 +109,10 @@ export class ChatSession {
   private said = false;
   busy = false;
   toolRunning = false;
+  /** Messages handed to Claude mid-reply that it hasn't taken yet (`fold`). */
+  private folding = new Set<string>();
+  /** The CLI reports when it takes each message (command_lifecycle): only then is handing over safe. */
+  private lifecycle = false;
   /** The tool running now, for the status pill ("working · Read"). */
   toolName: string | undefined;
   /** This turn's output tokens: finished messages (exact) plus the streaming one (characters / 4). */
@@ -204,6 +215,19 @@ export class ChatSession {
     this.chainEnd = uuid;
     this.input.push({ type: 'user', message: { role: 'user', content: message }, parent_tool_use_id: null, uuid });
     return mark;
+  }
+
+  /**
+   * A message the user typed while this reply runs, handed to Claude like Claude Code does: it goes
+   * in at the reply's next step (after the running tool), or runs right after the reply. It can't be
+   * taken back once handed over (the SDK has no cancel for it), so Harv hands it over only at a tool
+   * step. False when it can't (no reply running, or this CLI doesn't report when it takes messages).
+   */
+  fold(id: UUID, content: string | ContentBlockParam[]): boolean {
+    if (this.closed || this.ended || !this.busy || !this.lifecycle) return false;
+    this.folding.add(id);
+    this.input.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, uuid: id, priority: 'next' });
+    return true;
   }
 
   /** Tells Claude about memories other chats saved or forgot since this one last knew. */
@@ -339,6 +363,24 @@ export class ChatSession {
 
   private handle(msg: SDKMessage) {
     const tabId = this.tabId;
+    // Not in the SDK's types yet: the CLI saying it queued, started or completed one of our messages.
+    const life = msg as unknown as { type: string; command_uuid?: string; state?: string };
+    if (life.type === 'command_lifecycle') {
+      this.lifecycle = true;
+      if (life.state === 'started' && life.command_uuid && this.folding.delete(life.command_uuid)) {
+        // Taken after the reply ended (or was stopped): it's a turn of its own, not a background one.
+        const newTurn = !this.busy;
+        if (newTurn) {
+          this.said = false;
+          this.turnTokens = 0;
+          this.streamChars = 0;
+          this.thinkingTokens = 0;
+          this.setBusy(true);
+        }
+        this.hooks.onFolded?.(life.command_uuid, newTurn);
+      }
+      return;
+    }
     switch (msg.type) {
       case 'system':
         if (msg.subtype === 'thinking_tokens') {
@@ -472,7 +514,11 @@ export class ChatSession {
           }
         }
         if (text) this.say(text);
-        if (usedTool) this.setBusy(true, true);
+        if (usedTool) {
+          this.setBusy(true, true);
+          // A tool is running: messages the user queued can go in now, and Claude reads them after it.
+          this.hooks.onToolUse?.();
+        }
         return;
       }
 

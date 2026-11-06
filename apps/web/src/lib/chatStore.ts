@@ -753,7 +753,8 @@ export const chat = {
       .get()
       .tabs.find((t) => t.id === tabId)
       ?.queued?.find((q) => q.id === id);
-    if (!item) return;
+    // One already handed to Claude can't come back (it goes in at the reply's next step).
+    if (!item || item.handed) return;
     chat.unqueue(tabId, id);
     setDraftText(tabId, item.text);
     for (const file of item.attachments ?? []) addAttachment(tabId, file);

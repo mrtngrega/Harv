@@ -86,6 +86,27 @@ class FakeSession {
     this.retuned.push({ model, effort });
   }
 
+  /** Messages handed over mid-reply (`fold`), and whether this CLI reports taking them. */
+  folds: { id: string; content: unknown }[] = [];
+  lifecycle = true;
+  fold(id: string, content: unknown) {
+    if (!this.busy || !this.lifecycle) return false;
+    this.folds.push({ id, content });
+    return true;
+  }
+
+  /** The reply starts a tool. */
+  tool() {
+    this.toolRunning = true;
+    this.hooks.onToolUse?.();
+  }
+
+  /** Claude takes a handed-over message: mid-reply, or as its own turn after the reply ended. */
+  take(id: string, newTurn = false) {
+    if (newTurn) this.busy = true;
+    this.hooks.onFolded?.(id, newTurn);
+  }
+
   /** The Claude process dies under the session (a crash, a refusal). */
   die() {
     if (this.busy) this.emit({ type: 'chat.done', tabId: this.tabId, ok: false, stopped: false });
@@ -945,5 +966,111 @@ describe('AUTO steps up a struggling reply (2026-10-29)', () => {
     s.hooks.onStruggle!('the tests failed');
     await settle();
     expect(s.retuned).toEqual([]);
+  });
+});
+
+describe('queued messages go in mid-reply, like Claude Code (docs/PLAN.md §6ac)', () => {
+  const queued = (sent: ChatServerMessage[], tabId: string) =>
+    sent.flatMap((m) => (m.type === 'chat.queued' && m.tabId === tabId ? [m.items] : [])).at(-1) ?? [];
+  const youLines = (sent: ChatServerMessage[], tabId: string) =>
+    sent.flatMap((m) => (m.type === 'chat.line' && m.tabId === tabId && m.line.kind === 'you' ? [m.line.text] : []));
+
+  it('waits for the next tool step, then hands the message over; it shows when Claude takes it', async () => {
+    const { chats, sent } = setup();
+    await chats.send('q1', 'start the job', 'sonnet', 'medium');
+    const session = FakeSession.all.get('q1')!;
+    await chats.send('q1', 'also check the logs', 'sonnet', 'medium');
+    // No tool running yet: it waits in Harv's queue (still editable).
+    expect(session.folds).toHaveLength(0);
+    expect(queued(sent, 'q1')).toMatchObject([{ text: 'also check the logs' }]);
+    expect(queued(sent, 'q1')[0]!.handed).toBeUndefined();
+
+    session.tool();
+    expect(session.folds).toMatchObject([{ content: 'also check the logs' }]);
+    expect(queued(sent, 'q1')[0]!.handed).toBe(true);
+    // Handed over: it can't be removed or sent now any more.
+    chats.unqueue('q1', queued(sent, 'q1')[0]!.id);
+    await chats.sendNow('q1', queued(sent, 'q1')[0]!.id);
+    expect(queued(sent, 'q1')).toHaveLength(1);
+    expect(session.busy).toBe(true);
+
+    session.take(session.folds[0]!.id);
+    expect(queued(sent, 'q1')).toEqual([]);
+    // The typed message's line comes from the dashboard; the taken one is sent to every window.
+    expect(youLines(sent, 'q1')).toEqual(['also check the logs']);
+    session.finish();
+    await settle();
+    // It ran inside the reply: nothing is sent again after it.
+    expect(session.sent).toHaveLength(1);
+  });
+
+  it('hands a message typed while a tool runs over at once', async () => {
+    const { chats } = setup();
+    await chats.send('q2', 'build it', 'sonnet', 'medium');
+    const session = FakeSession.all.get('q2')!;
+    session.tool();
+    await chats.send('q2', 'use the dev branch', 'sonnet', 'medium');
+    expect(session.folds).toMatchObject([{ content: 'use the dev branch' }]);
+  });
+
+  it('keeps a command, and everything after it, for after the reply', async () => {
+    const { chats, sent } = setup();
+    await chats.send('q3', 'look around', 'sonnet', 'medium');
+    const session = FakeSession.all.get('q3')!;
+    await chats.send('q3', 'first note', 'sonnet', 'medium');
+    await chats.send('q3', '/haiku quick one', 'sonnet', 'medium');
+    await chats.send('q3', 'after the command', 'sonnet', 'medium');
+    session.tool();
+    expect(session.folds.map((f) => f.content)).toEqual(['first note']);
+    session.take(session.folds[0]!.id);
+    session.finish();
+    await settle();
+    expect(session.sent.at(-1)!.content).toBe('quick one');
+    expect(queued(sent, 'q3')).toMatchObject([{ text: 'after the command' }]);
+  });
+
+  it('a message the reply ended before taking runs as its own turn (never sent twice)', async () => {
+    const { chats, sent } = setup();
+    await chats.send('q4', 'one step', 'sonnet', 'medium');
+    const session = FakeSession.all.get('q4')!;
+    session.tool();
+    await chats.send('q4', 'then this', 'sonnet', 'medium');
+    session.finish();
+    await settle();
+    expect(session.sent).toHaveLength(1);
+    session.take(session.folds[0]!.id, true);
+    expect(youLines(sent, 'q4')).toEqual(['then this']);
+    expect(sent.some((m) => m.type === 'chat.started' && m.tabId === 'q4' && /queued message/.test(m.reason ?? ''))).toBe(true);
+    expect(queued(sent, 'q4')).toEqual([]);
+  });
+
+  it('a session that dies with handed messages gives them back to the queue', async () => {
+    const { chats, sent } = setup();
+    await chats.send('q5', 'go', 'sonnet', 'medium');
+    const session = FakeSession.all.get('q5')!;
+    session.tool();
+    await chats.send('q5', 'and this', 'sonnet', 'medium');
+    session.die();
+    await settle();
+    await settle();
+    // It runs in the next session like any queued message.
+    const next = FakeSession.all.get('q5')!;
+    expect(next).not.toBe(session);
+    expect(next.sent.at(-1)!.content).toBe('and this');
+    expect(queued(sent, 'q5')).toEqual([]);
+  });
+
+  it('hands nothing over while a plan limit pauses Harv, or when the CLI does not report taking messages', async () => {
+    const { chats, meter } = setup();
+    await chats.send('q6', 'go', 'sonnet', 'medium');
+    const session = FakeSession.all.get('q6')!;
+    await chats.send('q6', 'later', 'sonnet', 'medium');
+    meter.pause(Date.now() + 60_000);
+    session.tool();
+    expect(session.folds).toHaveLength(0);
+    (meter as unknown as { pausedUntil: number | null }).pausedUntil = null;
+    session.lifecycle = false;
+    session.tool();
+    expect(session.folds).toHaveLength(0);
   });
 });
