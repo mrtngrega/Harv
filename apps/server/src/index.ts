@@ -707,6 +707,9 @@ app.get('/ws', { websocket: true }, (socket, req) => {
     sync: sync.status(),
     schedules: scheduler.list(),
   });
+  // A chat using the desktop right now: the new window shows it too (the app's pill, the chat's marker).
+  const controlling = gate.desktopControl();
+  if (controlling) send({ type: 'desktop.control', ...controlling });
 
   const unsubscribe = metrics.onSnapshot((snapshot) => send({ type: 'metrics.tick', metrics: snapshot }));
   socket.on('close', () => {

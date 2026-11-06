@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Harv is using your desktop</title>
+    <style>
+      /* Desktop control's pill (src-tauri/src/pill.rs): over every window while Harv uses the mouse and keyboard. */
+      :root {
+        --ink: #dbe6f0;
+        --muted: #7d8c9c;
+        --accent: #a8c8e8;
+        --warn: #f2b880;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        user-select: none;
+        cursor: default;
+        font:
+          12px 'IBM Plex Mono',
+          ui-monospace,
+          Consolas,
+          monospace;
+        color: var(--ink);
+      }
+      .pill {
+        box-sizing: border-box;
+        position: absolute;
+        inset: 4px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 8px 0 16px;
+        border-radius: 999px;
+        background: rgba(16, 24, 34, 0.88);
+        border: 1px solid rgba(168, 200, 232, 0.55);
+        box-shadow:
+          0 0 0 1px rgba(10, 16, 24, 0.6),
+          0 0 16px rgba(168, 200, 232, 0.28);
+        animation: glow 2.4s ease-in-out infinite;
+      }
+      @keyframes glow {
+        50% {
+          box-shadow:
+            0 0 0 1px rgba(10, 16, 24, 0.6),
+            0 0 22px rgba(168, 200, 232, 0.5);
+        }
+      }
+      .dot {
+        flex: none;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 3px rgba(168, 200, 232, 0.22);
+        animation: pulse 1.4s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        50% {
+          opacity: 0.45;
+        }
+      }
+      .text {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .head {
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        color: var(--accent);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .head b {
+        font-weight: 600;
+      }
+      .head span {
+        color: var(--muted);
+        letter-spacing: 0.04em;
+      }
+      .action {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      button {
+        flex: none;
+        height: 34px;
+        padding: 0 16px;
+        border-radius: 999px;
+        border: 1px solid rgba(242, 184, 128, 0.7);
+        background: rgba(242, 184, 128, 0.14);
+        color: var(--warn);
+        font: inherit;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        cursor: pointer;
+      }
+      button:hover {
+        background: rgba(242, 184, 128, 0.28);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .pill,
+        .dot {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="pill">
+      <div class="dot"></div>
+      <div class="text">
+        <div class="head"><b>HARV</b> IS USING YOUR DESKTOP <span id="chat"></span></div>
+        <div class="action" id="action">…</div>
+      </div>
+      <button id="stop" type="button" title="Stop the chat that's using your desktop">STOP</button>
+    </div>
+    <script>
+      const chat = document.getElementById('chat');
+      const action = document.getElementById('action');
+      // What Harv is doing now (from the app, pill.rs): { action, chat }.
+      window.setPill = (p) => {
+        action.textContent = p.action || '…';
+        action.title = p.action || '';
+        chat.textContent = p.chat ? `· ${p.chat}` : '';
+      };
+      if (window.__pill) window.setPill(window.__pill);
+      document.getElementById('stop').addEventListener('click', () => window.__TAURI_INTERNALS__?.invoke('pill_stop'));
+    </script>
+  </body>
+</html>

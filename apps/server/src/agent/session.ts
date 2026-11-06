@@ -15,6 +15,7 @@ import type { ContentBlockParam } from './attachments.ts';
 import type { BrowserTools, Delegate, ImageTools, PhoneTools, ProjectTools, ScheduleTools, TerminalTools } from './chatTools.ts';
 import { toCommandInfo } from './commands.ts';
 import { describeTool, MEMORY_TOOLS } from './guard.ts';
+import { DESKTOP_SERVER, isDesktopTool } from '../safety/desktop.ts';
 import { memoryChanges, memorySnapshot } from './memory.ts';
 import { buildOptions, SUBSCRIPTION_KEY_SOURCES } from './options.ts';
 import { AsyncQueue } from './queue.ts';
@@ -463,7 +464,8 @@ export class ChatSession {
               type: 'chat.tool',
               tabId,
               id: block.id,
-              name: block.name.replace(/^mcp__harv__/, ''),
+              // Harv's own tools by their short name; desktop control as "desktop · open Calculator".
+              name: isDesktopTool(block.name) ? DESKTOP_SERVER : block.name.replace(/^mcp__harv__/, ''),
               detail: describeTool(block.name, input, (id) => this.store.title(id)),
             });
           }

@@ -29,7 +29,7 @@ export function StatusLine({ tab }: { tab: Tab | undefined }) {
   const conn = useConnection();
   const usage = useUsage();
   const { motion } = useSettings();
-  const { approvals } = useSafety();
+  const { approvals, desktop } = useSafety();
   const { tabs } = useChat();
   const card = approvals.find((a) => a.tabId === tab?.id);
   const waiting = !!card;
@@ -37,6 +37,8 @@ export function StatusLine({ tab }: { tab: Tab | undefined }) {
   // An approval card in another chat is invisible from here: say so, with a way there.
   const elsewhere = tabs.find((t) => t.id !== tab?.id && approvals.some((a) => a.tabId === t.id));
   const busy = Boolean(tab?.busy);
+  // This chat is using the mouse and keyboard (desktop control): said plainly, with its own clock.
+  const driving = busy && desktop?.tabId === tab?.id ? desktop : null;
   const [now, setNow] = useState(() => Date.now());
   const [frame, setFrame] = useState(0);
 
@@ -62,10 +64,17 @@ export function StatusLine({ tab }: { tab: Tab | undefined }) {
     color = COLOR.warn;
     label = usage?.pausedUntil ? `paused · Claude Pro limit until ${resetTime(usage.pausedUntil)}` : 'paused · Claude Pro limit';
   } else if (busy && tab) {
-    glyph = motion ? SPIN[frame % SPIN.length]! : '✻';
-    color = waiting ? COLOR.warn : tab.activity ? COLOR.warn : COLOR.accent;
-    label = waiting ? `needs you · ${ask}` : tab.activity ? `working · ${tab.activity}` : 'thinking…';
-    const parts = [tab.startedAt ? formatElapsed(now - tab.startedAt) : '', tab.outTokens ? `↓ ${tokens(tab.outTokens)} tokens` : ''];
+    glyph = driving && !waiting ? '⌖' : motion ? SPIN[frame % SPIN.length]! : '✻';
+    color = waiting ? COLOR.warn : driving ? COLOR.accent : tab.activity ? COLOR.warn : COLOR.accent;
+    label = waiting
+      ? `needs you · ${ask}`
+      : driving
+        ? `controlling your desktop · ${driving.action}`
+        : tab.activity
+          ? `working · ${tab.activity}`
+          : 'thinking…';
+    const since = driving && !waiting ? driving.since : tab.startedAt;
+    const parts = [since ? formatElapsed(now - since) : '', tab.outTokens ? `↓ ${tokens(tab.outTokens)} tokens` : ''];
     extra = `(${[...parts.filter(Boolean), 'esc to stop'].join(' · ')})`;
   } else {
     label = 'idle';
@@ -78,7 +87,11 @@ export function StatusLine({ tab }: { tab: Tab | undefined }) {
       aria-label={`Harv is ${label}`}
       className="flex h-7 min-w-0 items-center gap-2 border-t border-line px-5 pt-1.5 text-xs whitespace-nowrap"
     >
-      <span aria-hidden="true" className="w-3 flex-none text-center" style={{ color }}>
+      <span
+        aria-hidden="true"
+        className={`w-3 flex-none text-center ${driving && !waiting && motion ? 'animate-pulse' : ''}`}
+        style={{ color }}
+      >
         {glyph}
       </span>
       <span className="truncate" style={{ color: busy || color !== COLOR.ok ? color : undefined }}>

@@ -1,6 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { warningText } from '../components/Toasts.tsx';
-import { getChatState } from './chatStore.ts';
+import { chat, getChatState } from './chatStore.ts';
+import { getSafety, subscribeSafety } from './safetyStore.ts';
 import { onServerMessage } from './socket.ts';
 import { getConnection, subscribeConnection } from './useHarvSocket.ts';
 
@@ -88,5 +89,26 @@ if (inApp) {
         notify('Harv', msg.message);
         break;
     }
+  });
+
+  // Desktop control: the app's pill floats over every window while a chat uses the mouse and
+  // keyboard (docs/PLAN.md §6t item 1), and its STOP stops that chat.
+  let pill = '';
+  const showPill = () => {
+    const { desktop: control } = getSafety();
+    const key = control
+      ? `${control.tabId}
+${control.action}`
+      : '';
+    if (key === pill) return;
+    pill = key;
+    void invoke('desktop_pill', control ? { action: control.action, chat: tabTitle(control.tabId) } : { action: null, chat: null }).catch(
+      () => {},
+    );
+  };
+  subscribeSafety(showPill);
+  window.addEventListener('harv-pill-stop', () => {
+    const control = getSafety().desktop;
+    if (control) chat.stop(control.tabId);
   });
 }

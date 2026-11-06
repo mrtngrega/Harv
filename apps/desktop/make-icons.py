@@ -4,7 +4,8 @@
     npx tauri icon apps/desktop/src-tauri/icons/source.png   (from apps/desktop: every size Windows and Linux need)
 
 The app icon: an ice-blue ring and dot on Harv's dark rounded tile. The tray icons show Harv's status:
-idle (ice dot), busy (ice ring and dot), waiting for an approval (amber dot), paused or offline (dim ring).
+idle (ice dot), busy (ice ring and dot), waiting for an approval (amber dot), paused or offline (dim ring),
+using the desktop (ice crosshair).
 """
 
 import math
@@ -79,6 +80,15 @@ def ring(radius, width):
     return lambda x, y, r: abs(r - radius) - width / 2
 
 
+def ticks(inner, outer, width):
+    """Four short bars on the axes, from inner to outer (a crosshair's ticks)."""
+
+    def bar(along, across):
+        return max(abs(across) - width / 2, abs(along) - outer, inner - abs(along))
+
+    return lambda x, y, r: min(bar(x, y), bar(y, x))
+
+
 out = Path(__file__).parent / 'src-tauri' / 'icons'
 out.mkdir(parents=True, exist_ok=True)
 
@@ -93,6 +103,11 @@ for name, layers in (
     ('tray-busy', [(ICE, ring(T * 0.36, T * 0.09)), (ICE, disc(T * 0.16))]),
     ('tray-waiting', [(AMBER, ring(T * 0.36, T * 0.09)), (AMBER, disc(T * 0.16))]),
     ('tray-off', [(DIM, ring(T * 0.3, T * 0.08))]),
+    # Harv is using the mouse and keyboard (desktop control): a crosshair, like the ⌖ on its tab.
+    (
+        'tray-desktop',
+        [(ICE, ring(T * 0.27, T * 0.08)), (ICE, ticks(T * 0.12, T * 0.47, T * 0.08)), (ICE, disc(T * 0.07))],
+    ),
 ):
     (out / f'{name}.png').write_bytes(draw(T, layers))
 print('icons written to', out)

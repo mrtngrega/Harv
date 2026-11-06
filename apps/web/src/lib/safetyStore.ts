@@ -7,15 +7,36 @@ export interface SafetyState {
   approvals: ApprovalRequest[];
   /** The action log by id (tool lines in the chat look up their action here). */
   actions: Record<string, ActionEntry>;
+  /** The chat using the mouse and keyboard right now (desktop control), and what it's doing. */
+  desktop: DesktopControl | null;
 }
 
-const store = createStore<SafetyState>({ approvals: [], actions: {} });
+export interface DesktopControl {
+  tabId: string;
+  action: string;
+  since: number;
+}
+
+const store = createStore<SafetyState>({ approvals: [], actions: {}, desktop: null });
 export const useSafety = store.use;
+export const getSafety = store.get;
+export const subscribeSafety = store.subscribe;
 
 onServerMessage((msg) => {
   switch (msg.type) {
     case 'hello':
-      store.set({ approvals: msg.approvals, actions: Object.fromEntries(msg.actions.map((a) => [a.id, a])) });
+      // The server sends desktop.control right after hello when a chat is using the desktop.
+      store.set({ approvals: msg.approvals, actions: Object.fromEntries(msg.actions.map((a) => [a.id, a])), desktop: null });
+      break;
+    case 'desktop.control':
+      store.set((s) => ({
+        ...s,
+        desktop: msg.action
+          ? { tabId: msg.tabId, action: msg.action, since: msg.since ?? Date.now() }
+          : s.desktop?.tabId === msg.tabId
+            ? null
+            : s.desktop,
+      }));
       break;
     case 'approval.request':
       store.set((s) => ({ ...s, approvals: [...s.approvals.filter((a) => a.id !== msg.approval.id), msg.approval] }));

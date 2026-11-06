@@ -8,6 +8,7 @@ mod browser;
 mod harv;
 mod notify;
 mod paths;
+mod pill;
 #[cfg(windows)]
 mod power;
 mod prefs;
@@ -214,7 +215,9 @@ fn main() {
             pick_paths,
             set_see_through,
             browser::browser,
-            browser::browser_state
+            browser::browser_state,
+            pill::desktop_pill,
+            pill::pill_stop
         ])
         .setup(move |app| {
             let handle = app.handle();

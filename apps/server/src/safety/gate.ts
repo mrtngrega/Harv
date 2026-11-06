@@ -170,6 +170,8 @@ export class SafetyGate {
   private planning = new Set<string>();
   /** Chats whose current reply the user let use the mouse and keyboard (the desktop card, once per reply). */
   private desktopTurns = new Set<string>();
+  /** The chat using the desktop right now (the pill), until its reply ends or is stopped. */
+  private controlling: { tabId: string; action: string; since: number } | null = null;
 
   constructor(
     private actions: ActionStore,
@@ -290,6 +292,7 @@ export class SafetyGate {
       }
       this.backup(id, verdict.targets, tool, input);
       this.publish(id);
+      if (desktop) this.takeOver(tabId, verdict.summary);
       return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } };
     }
 
@@ -346,7 +349,10 @@ export class SafetyGate {
       if (allow?.length) this.hooks.allow?.(allow);
     }
     this.approved.add(id);
-    if (desktop) this.desktopTurns.add(tabId);
+    if (desktop) {
+      this.desktopTurns.add(tabId);
+      this.takeOver(tabId, verdict.summary);
+    }
     this.actions.update(id, { status: 'running' });
     this.publish(id);
     return {
@@ -461,6 +467,26 @@ export class SafetyGate {
     this.trustedTurns.delete(tabId);
     this.desktopTurns.delete(tabId);
     this.turnText.delete(tabId);
+    this.release(tabId);
+  }
+
+  /** Who is using the desktop now (for a dashboard that connects mid-way). */
+  desktopControl(): { tabId: string; action: string; since: number } | null {
+    return this.controlling;
+  }
+
+  /** A chat's desktop action is about to run: the pill shows it (the first one of a reply starts the clock). */
+  private takeOver(tabId: string, action: string): void {
+    const since = this.controlling?.tabId === tabId ? this.controlling.since : Date.now();
+    this.controlling = { tabId, action, since };
+    this.hooks.broadcast({ type: 'desktop.control', tabId, action, since });
+  }
+
+  /** The chat's reply ended or was stopped: it's no longer using the desktop. */
+  private release(tabId: string): void {
+    if (this.controlling?.tabId !== tabId) return;
+    this.controlling = null;
+    this.hooks.broadcast({ type: 'desktop.control', tabId, action: null });
   }
 
   /**
@@ -476,6 +502,7 @@ export class SafetyGate {
   cancel(tabId: string): void {
     this.trustedTurns.delete(tabId);
     this.desktopTurns.delete(tabId);
+    this.release(tabId);
     for (const p of [...this.pending.values()]) {
       if (p.approval.tabId === tabId) p.resolve({ approve: false, why: STOPPED });
     }

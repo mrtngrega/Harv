@@ -264,7 +264,7 @@ export function ChatPanel() {
   // Nothing until the saved chats are here: the starter tab only flashed "New chat" before them.
   const tabs = hydrated ? allTabs : [];
   const inSettings = activeId === SETTINGS_TAB;
-  const { approvals } = useSafety();
+  const { approvals, desktop: driving } = useSafety();
   const usage = useUsage();
   const { density, sendKey } = useSettings();
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -631,6 +631,10 @@ export function ChatPanel() {
                     {approvals.some((a) => a.tabId === t.id) ? (
                       <span title="Needs your approval" className="flex-none font-semibold text-warn">
                         !
+                      </span>
+                    ) : driving?.tabId === t.id && t.busy ? (
+                      <span title="Using your mouse and keyboard" className="animate-blink flex-none text-accent">
+                        ⌖
                       </span>
                     ) : (
                       t.busy && <span aria-hidden="true" className="animate-blink size-1.5 flex-none rounded-full bg-accent" />

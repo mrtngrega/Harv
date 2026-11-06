@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-desktop-pill"
+description = "Enables the desktop_pill command without any pre-configured scope."
+commands.allow = ["desktop_pill"]
+
+[[permission]]
+identifier = "deny-desktop-pill"
+description = "Denies the desktop_pill command without any pre-configured scope."
+commands.deny = ["desktop_pill"]

@@ -452,3 +452,62 @@ describe('desktop control (docs/PLAN.md §6t item 1)', () => {
     expect(decision(out)?.permissionDecision).toBe('deny');
   });
 });
+
+describe('desktop control signal (the pill)', () => {
+  const controls = (sent: SafetyServerMessage[]) =>
+    sent.flatMap((m) => (m.type === 'desktop.control' ? [{ tabId: m.tabId, action: m.action }] : []));
+
+  it('says which chat uses the desktop and what it does, until the reply ends', async () => {
+    writeSettings({ askRisky: false });
+    const { gate, sent } = setup();
+    gate.setTurn('tab', 'click the button');
+    await gate.preToolUse('tab', 'mcp__desktop__Snapshot', {}, 'p0', signal());
+    expect(controls(sent)).toEqual([]);
+    expect(gate.desktopControl()).toBeNull();
+
+    const first = gate.preToolUse('tab', 'mcp__desktop__Click', { label: 3 }, 'p1', signal());
+    await vi.waitFor(() => expect(gate.waiting).toBe(1));
+    // Not before the user said yes.
+    expect(controls(sent)).toEqual([]);
+    gate.answer('p1', true);
+    await first;
+    await gate.preToolUse('tab', 'mcp__desktop__Type', { text: 'hi' }, 'p2', signal());
+    expect(controls(sent)).toEqual([
+      { tabId: 'tab', action: 'click element #3 from the last snapshot' },
+      { tabId: 'tab', action: 'type “hi”' },
+    ]);
+    const since = gate.desktopControl()!.since;
+    expect(gate.desktopControl()).toMatchObject({ tabId: 'tab', action: 'type “hi”' });
+    expect(sent.filter((m) => m.type === 'desktop.control').every((m) => m.type === 'desktop.control' && m.since === since)).toBe(true);
+
+    gate.turnEnded('tab');
+    expect(controls(sent).at(-1)).toEqual({ tabId: 'tab', action: null });
+    expect(gate.desktopControl()).toBeNull();
+  });
+
+  it('Stop ends it, and another chat ending changes nothing', async () => {
+    writeSettings({ askRisky: false });
+    const { gate, sent } = setup();
+    gate.setTurn('tab', 'click it');
+    const first = gate.preToolUse('tab', 'mcp__desktop__Click', { label: 1 }, 'q1', signal());
+    await vi.waitFor(() => expect(gate.waiting).toBe(1));
+    gate.answer('q1', true);
+    await first;
+    gate.turnEnded('other');
+    expect(gate.desktopControl()?.tabId).toBe('tab');
+    gate.cancel('tab');
+    expect(gate.desktopControl()).toBeNull();
+    expect(controls(sent).at(-1)).toEqual({ tabId: 'tab', action: null });
+  });
+
+  it('a denied card never starts it', async () => {
+    writeSettings({ askRisky: false });
+    const { gate, sent } = setup();
+    gate.setTurn('tab', 'click it');
+    const first = gate.preToolUse('tab', 'mcp__desktop__Click', { label: 1 }, 'r1', signal());
+    await vi.waitFor(() => expect(gate.waiting).toBe(1));
+    gate.answer('r1', false);
+    await first;
+    expect(controls(sent)).toEqual([]);
+  });
+});

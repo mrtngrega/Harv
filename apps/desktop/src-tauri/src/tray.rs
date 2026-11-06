@@ -1,5 +1,7 @@
 //! The tray icon: Harv's status as the icon, and a menu to open, restart, update or quit Harv.
 
+use std::sync::Mutex;
+
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -18,6 +20,7 @@ fn icon(status: &str) -> Image<'static> {
         "thinking" | "working" => include_bytes!("../icons/tray-busy.png"),
         "waiting" => include_bytes!("../icons/tray-waiting.png"),
         "paused" | "offline" => include_bytes!("../icons/tray-off.png"),
+        "desktop" => include_bytes!("../icons/tray-desktop.png"),
         _ => include_bytes!("../icons/tray-idle.png"),
     };
     Image::from_bytes(bytes).expect("tray icon")
@@ -30,6 +33,7 @@ fn tooltip(status: &str) -> String {
         "waiting" => "waiting for your OK",
         "paused" => "paused (plan limit)",
         "offline" => "not connected",
+        "desktop" => "using your mouse and keyboard",
         _ => "idle",
     };
     format!("Harv · {what}")
@@ -97,10 +101,26 @@ pub fn action(app: &AppHandle, id: &str) {
     }
 }
 
+/// Harv's last status, and whether it's using the desktop (that icon wins while it lasts).
+static STATE: Mutex<(String, bool)> = Mutex::new((String::new(), false));
+
 pub fn set_status(app: &AppHandle, status: &str) {
+    STATE.lock().unwrap().0 = status.to_string();
+    refresh(app);
+}
+
+/// Desktop control on or off (the pill, pill.rs).
+pub fn set_desktop(app: &AppHandle, on: bool) {
+    STATE.lock().unwrap().1 = on;
+    refresh(app);
+}
+
+fn refresh(app: &AppHandle) {
+    let (status, desktop) = STATE.lock().unwrap().clone();
+    let shown = if desktop { "desktop" } else { status.as_str() };
     if let Some(tray) = app.tray_by_id(TRAY) {
-        let _ = tray.set_icon(Some(icon(status)));
-        let _ = tray.set_tooltip(Some(tooltip(status)));
+        let _ = tray.set_icon(Some(icon(shown)));
+        let _ = tray.set_tooltip(Some(tooltip(shown)));
     }
 }
 

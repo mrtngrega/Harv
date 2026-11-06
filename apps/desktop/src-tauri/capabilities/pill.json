@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "pill",
+  "description": "Desktop control's pill (pill.html, bundled): it may only ask the app to stop the chat that's using the desktop.",
+  "windows": ["pill"],
+  "permissions": ["allow-pill-stop"]
+}

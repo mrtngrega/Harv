@@ -20,6 +20,7 @@
     "allow-pick-paths",
     "allow-set-see-through",
     "allow-browser",
-    "allow-browser-state"
+    "allow-browser-state",
+    "allow-desktop-pill"
   ]
 }

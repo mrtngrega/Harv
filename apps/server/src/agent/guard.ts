@@ -1,12 +1,16 @@
 // Tool lists and chat-log descriptions. The safety checks themselves live in
 // ../safety (classify.ts sorts every call, gate.ts enforces it).
 
+import { classifyDesktop, isDesktopTool } from '../safety/desktop.ts';
+
 /** Harv's memory tools (they can only write inside ~/.harv/memory). */
 export const MEMORY_TOOLS = ['mcp__harv__remember', 'mcp__harv__forget'];
 
 /** One-line description of a tool call for the chat log; `chatTitle` names chats read with read_chat. */
 export function describeTool(name: string, input: Record<string, unknown>, chatTitle?: (id: string) => string | undefined): string {
   const pick = (key: string) => (typeof input[key] === 'string' ? (input[key] as string) : '');
+  // Desktop control: what it does in plain words, the same as on its card and the pill.
+  if (isDesktopTool(name)) return classifyDesktop(name, input).summary.replace(/^desktop: /, '');
   switch (name) {
     case 'Read':
     case 'Write':

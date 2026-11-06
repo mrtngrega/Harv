@@ -13,6 +13,8 @@ fn main() {
             "set_see_through",
             "browser",
             "browser_state",
+            "desktop_pill",
+            "pill_stop",
         ]),
     ))
     .expect("failed to run tauri-build");

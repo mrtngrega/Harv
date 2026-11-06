@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pill-stop"
+description = "Enables the pill_stop command without any pre-configured scope."
+commands.allow = ["pill_stop"]
+
+[[permission]]
+identifier = "deny-pill-stop"
+description = "Denies the pill_stop command without any pre-configured scope."
+commands.deny = ["pill_stop"]
