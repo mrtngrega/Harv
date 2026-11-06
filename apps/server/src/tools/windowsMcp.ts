@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { McpStdioServerConfig } from '@anthropic-ai/claude-agent-sdk';
 import { HARV_HOME } from '../paths.ts';
 import { IS_WINDOWS } from '../platform.ts';
@@ -18,6 +19,9 @@ export const WINDOWS_MCP_VERSION = '0.8.8';
 const HOME = join(HARV_HOME, 'windows-mcp');
 const VENV = join(HOME, 'venv');
 const EXE = join(VENV, 'Scripts', 'windows-mcp.exe');
+const PYTHON = join(VENV, 'Scripts', 'python.exe');
+/** Starts it without its own glow and notice pill: Harv's pill is the indicator (windows_mcp_quiet.py). */
+const QUIET = fileURLToPath(new URL('./windows_mcp_quiet.py', import.meta.url));
 
 /**
  * How the server is started. Its telemetry (PostHog, on unless told otherwise; it sends every
@@ -27,10 +31,12 @@ const EXE = join(VENV, 'Scripts', 'windows-mcp.exe');
 export const WINDOWS_MCP_ENV: Record<string, string> = {
   ANONYMIZED_TELEMETRY: 'false',
   WINDOWS_MCP_TOOLS: DESKTOP_TOOLS.join(','),
+  // No white flash over the screen at every screenshot.
+  WINDOWS_MCP_DISABLE_FLASH: '1',
 };
 
-/** A local server on stdin/stdout: no port, nothing on the network. */
-export const WINDOWS_MCP_ARGS = ['serve', '--transport', 'stdio'];
+/** A local server on stdin/stdout (no port, nothing on the network), through Harv's quiet launcher. */
+export const WINDOWS_MCP_ARGS = ['-I', QUIET, 'serve', '--transport', 'stdio'];
 
 export interface DesktopStatus {
   /** This OS can have it at all. */
@@ -63,7 +69,7 @@ export class WindowsMcp {
   /** What chats load, when the user turned it on and it's installed (else nothing). */
   server(): McpStdioServerConfig | undefined {
     if (!loadSettings().desktopControl || !this.installed()) return undefined;
-    return { type: 'stdio', command: EXE, args: WINDOWS_MCP_ARGS, env: WINDOWS_MCP_ENV };
+    return { type: 'stdio', command: PYTHON, args: WINDOWS_MCP_ARGS, env: WINDOWS_MCP_ENV };
   }
 
   /** Settings › Install: the venv with the reviewed version, once per computer (needs Python 3.14, the `py` launcher). */
