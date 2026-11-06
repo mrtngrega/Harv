@@ -30,6 +30,7 @@ Drawing realistic shapes in code is a weak spot: tracing a photo into vector sha
 1. Test backend and frontend, functionality and UI, from many angles: normal use, edge cases, restarts, odd input, and for UIs several window widths (phone, ~1100px, ~1280px, wide), many tabs or items, and live-updating parts watched for a while for layout shifts. Time anything that should feel quick from the user's moment (pressing the power button, logging in, clicking), not from when your own part starts.
 2. Don't fix on the spot. Re-check each finding (reproduce it again, read the code) to make sure it's real.
 3. Report all verified findings in one list (what, where, how to reproduce, severity), then wait for the green light before fixing.
+4. Live tests that take over the user's computer (moving the mouse, typing, opening apps) run only while they're away or after a heads-up: check first whether they're using it (the foreground window, recent input) and wait or ask if they are. Tests driven through a debug port don't count as real mouse or keyboard input, so anything that reacts to real input (an "is the user here?" check) still needs one real try by the user.
 
 ## Git
 
