@@ -18,6 +18,8 @@ import {
   type Verdict,
 } from './classify.ts';
 import { IS_WINDOWS } from '../platform.ts';
+import { SCHEDULED_TAG } from '../schedule/schedule.ts';
+import { actsOnDesktop } from './desktop.ts';
 import { fullPath, isInside, loadSettings, PLANS_DIR, WORKSPACE } from './paths.ts';
 
 /** How Harv's own folder is named to the model in a block message. */
@@ -166,6 +168,8 @@ export class SafetyGate {
   private turnText = new Map<string, string>();
   /** Chats in plan mode: only reading and planning until the user approves the plan. */
   private planning = new Set<string>();
+  /** Chats whose current reply the user let use the mouse and keyboard (the desktop card, once per reply). */
+  private desktopTurns = new Set<string>();
 
   constructor(
     private actions: ActionStore,
@@ -249,8 +253,19 @@ export class SafetyGate {
     // Sending to someone the user didn't ask to send to asks even with cards off (persona rule 12).
     const settings = loadSettings();
     const sending = verdict.tier !== 'blocked' && isSending(tool, input) && !askedToSend(tool, input, this.turnText.get(tabId) ?? '');
+    // Desktop control asks once per reply, even with cards off (docs/PLAN.md §6t item 1).
+    const desktop = verdict.tier !== 'blocked' && actsOnDesktop(tool, input);
+    if (desktop && this.unattended(tabId)) {
+      const reason = 'Nobody may be at the computer during a scheduled or background turn, so desktop control is off for it.';
+      this.actions.add({ id, tabId, at, tool, tier: 'blocked', summary: verdict.summary, reason, status: 'blocked', input });
+      this.publish(id);
+      return deny(`${reason} Tell the user what you wanted to do on the desktop; they can ask for it when they're there.`);
+    }
     const asks =
-      ((verdict.tier === 'red' && settings.askRisky) || (verdict.tier === 'yellow' && settings.confirmYellow) || sending) &&
+      ((verdict.tier === 'red' && settings.askRisky && !desktop) ||
+        (verdict.tier === 'yellow' && settings.confirmYellow) ||
+        sending ||
+        (desktop && !this.desktopTurns.has(tabId))) &&
       !this.trustedTurns.has(tabId);
     const status = verdict.tier === 'blocked' ? 'blocked' : asks ? 'pending' : 'running';
     this.actions.add({ id, tabId, at, tool, tier: verdict.tier, summary: verdict.summary, reason: verdict.reason, status, input });
@@ -298,6 +313,7 @@ export class SafetyGate {
       ...(notes.length ? { backupNote: notes.join(' ') } : {}),
       ...(rules?.length ? { rules } : {}),
       ...(sending ? { sending: true } : {}),
+      ...(desktop ? { desktop: true } : {}),
     };
     this.publish(id);
     const decision = await this.ask(approval, signal);
@@ -330,6 +346,7 @@ export class SafetyGate {
       if (allow?.length) this.hooks.allow?.(allow);
     }
     this.approved.add(id);
+    if (desktop) this.desktopTurns.add(tabId);
     this.actions.update(id, { status: 'running' });
     this.publish(id);
     return {
@@ -442,12 +459,23 @@ export class SafetyGate {
   /** The turn ended (or was stopped): "Approve all for this reply" is over. */
   turnEnded(tabId: string): void {
     this.trustedTurns.delete(tabId);
+    this.desktopTurns.delete(tabId);
     this.turnText.delete(tabId);
+  }
+
+  /**
+   * A turn nobody typed just now: a scheduled task, or one Claude started by itself when a
+   * background task finished (it never goes through setTurn, so there's no turn text).
+   */
+  private unattended(tabId: string): boolean {
+    const text = this.turnText.get(tabId);
+    return text === undefined || text.startsWith(SCHEDULED_TAG);
   }
 
   /** Stop: every approval waiting in this tab is denied. */
   cancel(tabId: string): void {
     this.trustedTurns.delete(tabId);
+    this.desktopTurns.delete(tabId);
     for (const p of [...this.pending.values()]) {
       if (p.approval.tabId === tabId) p.resolve({ approve: false, why: STOPPED });
     }

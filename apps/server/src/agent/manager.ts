@@ -18,7 +18,9 @@ import {
 } from '@harv/shared';
 import type { Router } from '../router/router.ts';
 import { parseOverride } from '../router/rules.ts';
+import type { McpStdioServerConfig } from '@anthropic-ai/claude-agent-sdk';
 import type { SafetyGate } from '../safety/gate.ts';
+import { SCHEDULED_TAG } from '../schedule/schedule.ts';
 import type { ChatStore } from '../store/chats.ts';
 import { SHARED_FILES, type RemoteChanges } from '../sync/engine.ts';
 import { cloneProject, createGitHubRepo, planLink, pullNotice, pullProject, remoteOf, sameRemote } from '../sync/projects.ts';
@@ -170,6 +172,8 @@ export class ChatManager {
   phone?: PhoneTools;
   /** The user's lights (set by the server, docs/PLAN.md §6z). */
   lights?: LightTools;
+  /** Desktop control's MCP server when it's on and installed (set by the server, docs/PLAN.md §6t item 1). */
+  desktop?: () => McpStdioServerConfig | undefined;
 
   constructor(
     private store: ChatStore,
@@ -465,6 +469,7 @@ export class ChatManager {
         browser: this.browser,
         phone: this.phone,
         ...(this.lights ? { lights: this.lights } : {}),
+        desktop: this.desktop?.(),
       },
     );
     this.sessions.set(tabId, session);
@@ -1152,7 +1157,7 @@ export class ChatManager {
     const { tabId } = task;
     this.ensureOpen(tabId, task.title);
     const when = late ? ', late: it was due while Harv was off' : '';
-    const message = `[Scheduled task "${task.title}"${when}] ${task.prompt}`;
+    const message = `${SCHEDULED_TAG}${task.title}"${when}] ${task.prompt}`;
     // Busy: it waits its turn like a typed message (and shows when it runs).
     if (this.busy(tabId) || this.followUps.get(tabId)?.length) return this.send(tabId, message, 'auto', 'high');
     // No dashboard typed it, so the line goes out to them too.
@@ -1209,6 +1214,17 @@ export class ChatManager {
 
   private publishProjects() {
     this.broadcast({ type: 'projects', projects: this.store.projects() });
+  }
+
+  /**
+   * What every chat loads changed (desktop control on or off): each session ends, after its reply
+   * if it's busy, and the next message resumes the same conversation with the new setup.
+   */
+  reloadSessions(): void {
+    for (const tabId of [...this.sessions.keys()]) {
+      if (this.busy(tabId)) this.switchAfterTurn.add(tabId);
+      else this.dropSession(tabId);
+    }
   }
 
   private dropSession(tabId: string) {

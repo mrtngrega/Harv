@@ -2,9 +2,10 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { selfContext } from './harvSelf.ts';
-import type { HookCallbackMatcher, HookEvent, Options } from '@anthropic-ai/claude-agent-sdk';
+import type { HookCallbackMatcher, HookEvent, McpStdioServerConfig, Options } from '@anthropic-ai/claude-agent-sdk';
 import { HARV_VERSION, type EffortLevel, type Project } from '@harv/shared';
 import { IS_WINDOWS, OS_NAME } from '../platform.ts';
+import { DESKTOP_SERVER } from '../safety/desktop.ts';
 import type { SafetyGate } from '../safety/gate.ts';
 import { PLANS_DIR, WORKSPACE } from '../safety/paths.ts';
 import { loadSettings, workDir } from '../settings.ts';
@@ -71,7 +72,12 @@ export interface ChatContext {
   phone?: PhoneTools;
   /** Harv's lights_list / lights_set tools (docs/PLAN.md §6z). */
   lights?: LightTools;
+  /** Desktop control (Windows-MCP, docs/PLAN.md §6t item 1), when the user turned it on on this computer. */
+  desktop?: McpStdioServerConfig;
 }
+
+/** How a chat with desktop control should use it (the gate enforces the asking part). */
+const DESKTOP_NOTE = `- Desktop control (the ${DESKTOP_SERVER} tools, the user turned it on): Snapshot reads the screen as text (windows, buttons and fields with labels), which costs far less than a Screenshot, so start with it and take a Screenshot only when the layout or a picture matters. Click, Type, Scroll, Move, Shortcut, App and Clipboard act on the user's real desktop: use them only when the user asked for something to be done on the computer, and prefer your other tools (files, shell, the browser) when they can do it. The first action of each reply shows the user a card and waits for their OK; scheduled and background turns can't use them. Say what you're about to do before you do it.`;
 
 /** The part about the user's other chats, shared by both kinds of chat. */
 function otherChats(chat: ChatContext): string {
@@ -154,6 +160,7 @@ function projectPrompt(chat: ChatContext, project: Project): string {
         : NO_CARDS,
       '- Background agents you start show in a strip above the prompt, where the user can stop each one; use ListAgents to check on them, and SendMessage to talk to one.',
       "- Harv's own tools: schedule_task / list_scheduled / cancel_scheduled for anything to run later or on a repeat (Claude Code's Cron and ScheduleWakeup tools don't work here). Files you make show as cards, pictures by full path show in the chat, and HTML, SVG and Mermaid open in a live preview pane.",
+      ...(chat.desktop ? [DESKTOP_NOTE] : []),
       `- The user's home folder is ${homedir()}. Today is ${today}.`,
     ].join('\n'),
     selfContext(),
@@ -176,6 +183,7 @@ function systemPrompt(chat?: ChatContext): string {
     [
       `- You're running inside Harv's dashboard on the user's ${OS_NAME}. Replies render as Markdown in a log-style chat, so keep formatting light.`,
       `- Your tools are Claude Code's full toolset: read and search files, search and fetch the web, create and edit files, ${IS_WINDOWS ? 'run PowerShell and Bash commands (prefer PowerShell for Windows tasks)' : 'run Bash commands'}, background shells and subagents (Agent; they show in a strip above the prompt where the user can stop each one), a task list (TodoWrite) for longer jobs, AskUserQuestion to give the user choices (it shows as a card), plan mode, and the user's own Claude Code setup: their skills (docx, xlsx, pptx, pdf, deep-research, skill-creator and the rest; use them for documents and research), plugins and claude.ai connectors (Claude Docs for docs they asked for). Plus Harv's own: remember/forget for your memory, list_chats/read_chat for your other chats, hand_off to give a task to another chat tab, and schedule_task / list_scheduled / cancel_scheduled for anything to run later or on a repeat ("every morning at 8…", "check X in an hour"; Claude Code's own Cron and ScheduleWakeup tools don't work here).`,
+      ...(chat?.desktop ? [DESKTOP_NOTE] : []),
       '- Files you make show as cards with Open and Show in folder; pictures (png, jpg, svg, gif, webp) you make or mention by full path show right in the chat, and HTML pages, SVG and Mermaid open in a live preview pane. So when the user wants a drawing, a diagram, a chart or a small page, make it as a file (SVG, HTML with inline JS/CSS, a Mermaid ```mermaid block, or a picture from Python) and say its full path. Math in replies renders with $…$ and $$…$$.',
       ...(asks
         ? [
@@ -322,6 +330,7 @@ export function buildOptions(
             chat.phone,
             chat.lights,
           ),
+          ...(chat.desktop ? { [DESKTOP_SERVER]: chat.desktop } : {}),
         }
       : {},
     permissionMode: planning ? 'plan' : 'default',

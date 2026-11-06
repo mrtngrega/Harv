@@ -71,6 +71,8 @@ export interface ApprovalRequest {
   plan?: string;
   /** This action sends something to someone the user didn't ask to send to (asked even with cards off). */
   sending?: boolean;
+  /** The first mouse or keyboard action of this reply (desktop control asks once per reply, even with cards off). */
+  desktop?: boolean;
 }
 
 export type SafetyClientMessage =

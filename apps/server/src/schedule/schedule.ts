@@ -6,6 +6,8 @@ const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 const HHMM = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 /** The shortest repeat: anything faster would eat the plan. */
 export const MIN_EVERY_MINUTES = 5;
+/** How a scheduled run's message starts: the gate knows nobody may be at the computer then. */
+export const SCHEDULED_TAG = '[Scheduled task "';
 
 const at = (base: Date, hh: number, mm: number) => new Date(base.getFullYear(), base.getMonth(), base.getDate(), hh, mm, 0, 0);
 

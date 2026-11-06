@@ -41,6 +41,7 @@ import { DeviceStore } from './devices/store.ts';
 import { LightsService } from './devices/lights.ts';
 import { lightTools } from './devices/tools.ts';
 import { AutoLights, findPlace } from './devices/autoLights.ts';
+import { WindowsMcp } from './tools/windowsMcp.ts';
 import { malformed } from './wsInput.ts';
 import { HarvBrowser } from './tools/harvBrowser.ts';
 import { cleanPath, listFolder, openWithDefault, places, previewType, suggestPaths } from './tools/files.ts';
@@ -322,6 +323,15 @@ const lights = new LightsService(devices, {
 });
 lights.start();
 chats.lights = lightTools(lights, loadSettings);
+// Desktop control (docs/PLAN.md §6t item 1): Windows-MCP for chats, when the user turned it on here.
+// Switching it (or a finished install) restarts each chat's session after its reply; the conversation resumes.
+const windowsMcp = new WindowsMcp((status) => {
+  if (!status.installing && status.installed && loadSettings().desktopControl) chats.reloadSessions();
+});
+chats.desktop = () => windowsMcp.server();
+onSettingsChange((before, after) => {
+  if (before.desktopControl !== after.desktopControl) chats.reloadSessions();
+});
 // Harv's own skills: harv/skills → ~/.claude/skills, only what changed (docs/PLAN.md §6ab).
 try {
   const written = installOwnSkills();
@@ -591,6 +601,11 @@ app.post('/api/lights/leaving', async (req) => {
   const reason =
     why === 'shutdown' ? 'the computer is shutting down' : why === 'logoff' ? 'you signed out' : 'the computer is going to sleep';
   return { off: await autoLights.leaving(reason) };
+});
+app.get('/api/desktop', async () => windowsMcp.status());
+app.post('/api/desktop/install', async () => {
+  void windowsMcp.install();
+  return windowsMcp.status();
 });
 app.post('/api/devices/setup', async () => {
   void lights.install().then(() => lights.scan());

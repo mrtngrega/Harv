@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { query, type Query, type SDKMessage, type SDKRateLimitInfo, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import {
+  query,
+  type McpStdioServerConfig,
+  type Query,
+  type SDKMessage,
+  type SDKRateLimitInfo,
+  type SDKUserMessage,
+} from '@anthropic-ai/claude-agent-sdk';
 import type { ChatServerMessage, EffortLevel, Project, SlashCommandInfo } from '@harv/shared';
 import { StruggleWatch } from '../router/struggle.ts';
 import type { SafetyGate } from '../safety/gate.ts';
@@ -136,6 +143,7 @@ export class ChatSession {
       images?: ImageTools;
       browser?: BrowserTools;
       phone?: PhoneTools;
+      desktop?: McpStdioServerConfig;
     } = {},
   ) {
     this.resume = start.resume;

@@ -111,6 +111,10 @@ export interface HarvSettings {
   /** Paired phones may open this device's Harv over Tailscale (`tailscale serve`). Per device, off by default. */
   phoneAccess: boolean;
 
+  // Desktop control (docs/PLAN.md §6t item 1), per device, Windows only.
+  /** Chats may read the screen and use the mouse and keyboard (Windows-MCP); the first action of each reply asks. Off by default. */
+  desktopControl: boolean;
+
   // Automatic lights (docs/PLAN.md §6z "Automatic lights"), per device: it needs the user at this computer.
   /** Turn the user's light on when it's dark outside and they're at this computer, off when they leave. */
   autoLights: boolean;
@@ -163,6 +167,7 @@ export const DEFAULT_SETTINGS: HarvSettings = {
   syncRepo: '',
   deviceName: '',
   phoneAccess: false,
+  desktopControl: false,
   autoLights: false,
   autoLightsPlace: null,
   autoLightsDark: 100,

@@ -206,9 +206,15 @@ function ActionCard({ approval }: { approval: ApprovalRequest }) {
       className="animate-fade-in flex flex-col gap-2.5 rounded-xl border border-warn/60 bg-[rgb(242_184_128/0.08)] p-3.5"
     >
       <div className="flex items-baseline gap-2">
-        <span className="text-xs font-semibold tracking-[2px] text-warn">{approval.sending ? 'SEND THIS?' : 'APPROVAL NEEDED'}</span>
+        <span className="text-xs font-semibold tracking-[2px] text-warn">
+          {approval.sending ? 'SEND THIS?' : approval.desktop ? 'USE YOUR DESKTOP?' : 'APPROVAL NEEDED'}
+        </span>
         <span className="text-xs text-muted">
-          {approval.sending ? 'Harv wants to send something you didn’t ask it to send.' : approval.reason}
+          {approval.sending
+            ? 'Harv wants to send something you didn’t ask it to send.'
+            : approval.desktop
+              ? 'Harv wants to use your mouse and keyboard. Approving lets it go on for the rest of this reply; Stop ends it.'
+              : approval.reason}
         </span>
       </div>
       <div className="text-ink">{approval.summary}</div>

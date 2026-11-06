@@ -1317,6 +1317,64 @@ function Watchdog() {
   );
 }
 
+interface DesktopStatus {
+  available: boolean;
+  installed: boolean;
+  installing: boolean;
+  error?: string;
+}
+
+/** Settings › Desktop control (Windows): chats may read the screen and use the mouse and keyboard (docs/PLAN.md §6t item 1). */
+function DesktopControl() {
+  const { desktopControl } = useSettings();
+  const [status, setStatus] = useState<DesktopStatus | null>(null);
+  const load = () =>
+    fetch('/api/desktop')
+      .then((r) => r.json() as Promise<DesktopStatus>)
+      .then(setStatus)
+      .catch(() => setStatus(null));
+  useEffect(() => {
+    void load();
+  }, []);
+  // While it installs, check every 2 s until it's done.
+  useEffect(() => {
+    if (!status?.installing) return;
+    const timer = setInterval(() => void load(), 2000);
+    return () => clearInterval(timer);
+  }, [status?.installing]);
+  if (!status?.available) return null;
+  const install = () =>
+    fetch('/api/desktop/install', { method: 'POST' })
+      .then((r) => r.json() as Promise<DesktopStatus>)
+      .then(setStatus)
+      .catch(() => {});
+  return (
+    <Sub title="Desktop control">
+      <Toggle
+        on={desktopControl}
+        label="Let Harv use my mouse and keyboard"
+        hint="Chats can read the screen, click, type and switch windows. Before the first action of each reply, Harv shows a card and waits for your OK; scheduled tasks never can. Off by default."
+        onChange={(on) => updateSettings({ desktopControl: on })}
+      />
+      {desktopControl && !status.installed && (
+        <>
+          <Note>
+            It needs Windows-MCP (version 0.8.8, reviewed on 6 Nov, telemetry off) in Harv’s own folder, once per computer. Python 3.14 does
+            the install.
+          </Note>
+          <div className="flex items-center gap-3">
+            <button type="button" className={BUTTON} disabled={status.installing} onClick={() => void install()}>
+              {status.installing ? 'Installing…' : 'Install'}
+            </button>
+            {status.error && <span className="text-xs text-warn">Install failed: {status.error}</span>}
+          </div>
+        </>
+      )}
+      {desktopControl && status.installed && <Note>Installed. Chats pick it up with their next message.</Note>}
+    </Sub>
+  );
+}
+
 function ProtectedFolders() {
   const example = useExample('C:\\Users\\you\\Documents\\Taxes', '/home/you/Documents/Taxes');
   const { protectedPaths } = useSettings();
@@ -1625,6 +1683,7 @@ export function SettingsView() {
         <ScheduledTasks />
         <Pictures />
         <Watchdog />
+        {!isPhone && <DesktopControl />}
         {inApp && <AppSection />}
       </Group>
 

@@ -368,3 +368,87 @@ describe('questions, plans and sending (docs/PLAN.md §6s)', () => {
     gate.cancel('tab');
   });
 });
+
+describe('desktop control (docs/PLAN.md §6t item 1)', () => {
+  const click = 'mcp__desktop__Click';
+
+  it('asks once per reply before using the mouse or keyboard, even with cards off', async () => {
+    writeSettings({ askRisky: false });
+    const { gate, sent } = setup();
+    gate.setTurn('tab', 'open Discord and click the general channel');
+    // Looking is free.
+    expect(decision(await gate.preToolUse('tab', 'mcp__desktop__Snapshot', {}, 'd0', signal()))?.permissionDecision).toBe('allow');
+    expect(sent.some((m) => m.type === 'approval.request')).toBe(false);
+
+    const first = gate.preToolUse('tab', click, { label: 4 }, 'd1', signal());
+    await vi.waitFor(() => expect(gate.waiting).toBe(1));
+    const card = sent.find((m) => m.type === 'approval.request');
+    expect(card?.type === 'approval.request' && card.approval.desktop).toBe(true);
+    gate.answer('d1', true);
+    expect(decision(await first)?.permissionDecision).toBe('allow');
+    expect(await gate.canUseTool(click, { label: 4 }, 'd1', 'tab')).toMatchObject({ behavior: 'allow' });
+
+    // The rest of the reply goes on without a card.
+    expect(decision(await gate.preToolUse('tab', 'mcp__desktop__Type', { text: 'hi' }, 'd2', signal()))?.permissionDecision).toBe('allow');
+    expect(await gate.canUseTool('mcp__desktop__Type', { text: 'hi' }, 'd2', 'tab')).toMatchObject({ behavior: 'allow' });
+
+    // A new reply asks again.
+    gate.turnEnded('tab');
+    gate.setTurn('tab', 'and now the next one');
+    const again = gate.preToolUse('tab', click, { label: 5 }, 'd3', signal());
+    await vi.waitFor(() => expect(gate.waiting).toBe(1));
+    gate.answer('d3', false);
+    expect(decision(await again)?.permissionDecision).toBe('deny');
+  });
+
+  it('asks only once per reply with cards on too, not on every click', async () => {
+    const { gate } = setup();
+    gate.setTurn('tab', 'click it');
+    const first = gate.preToolUse('tab', click, { label: 1 }, 'e1', signal());
+    await vi.waitFor(() => expect(gate.waiting).toBe(1));
+    gate.answer('e1', true);
+    await first;
+    expect(decision(await gate.preToolUse('tab', click, { label: 2 }, 'e2', signal()))?.permissionDecision).toBe('allow');
+  });
+
+  it('a denied card keeps asking for the rest of the reply, and Stop clears the OK', async () => {
+    writeSettings({ askRisky: false });
+    const { gate } = setup();
+    gate.setTurn('tab', 'click it');
+    const denied = gate.preToolUse('tab', click, { label: 1 }, 'f1', signal());
+    await vi.waitFor(() => expect(gate.waiting).toBe(1));
+    gate.answer('f1', false);
+    await denied;
+    const next = gate.preToolUse('tab', click, { label: 1 }, 'f2', signal());
+    await vi.waitFor(() => expect(gate.waiting).toBe(1));
+    gate.answer('f2', true);
+    await next;
+    gate.cancel('tab');
+    gate.setTurn('tab', 'go on');
+    void gate.preToolUse('tab', click, { label: 1 }, 'f3', signal());
+    await vi.waitFor(() => expect(gate.waiting).toBe(1));
+    gate.cancel('tab');
+  });
+
+  it('refuses scheduled and background turns, where nobody may be at the computer', async () => {
+    writeSettings({ askRisky: false });
+    const { gate, store, sent } = setup();
+    gate.setTurn('tab', '[Scheduled task "Morning"] click the button');
+    expect(decision(await gate.preToolUse('tab', click, { label: 1 }, 'g1', signal()))?.permissionDecision).toBe('deny');
+    expect(store.get('g1')?.status).toBe('blocked');
+    // A turn Claude started by itself has no turn text.
+    gate.turnEnded('tab');
+    expect(decision(await gate.preToolUse('tab', click, { label: 1 }, 'g2', signal()))?.permissionDecision).toBe('deny');
+    // Reading the screen is still fine.
+    expect(decision(await gate.preToolUse('tab', 'mcp__desktop__Snapshot', {}, 'g3', signal()))?.permissionDecision).toBe('allow');
+    expect(sent.some((m) => m.type === 'approval.request')).toBe(false);
+  });
+
+  it('blocks launch_executable even after the OK', async () => {
+    writeSettings({ askRisky: false });
+    const { gate } = setup();
+    gate.setTurn('tab', 'run it');
+    const out = await gate.preToolUse('tab', 'mcp__desktop__App', { mode: 'launch_executable', executable: 'x.exe' }, 'h1', signal());
+    expect(decision(out)?.permissionDecision).toBe('deny');
+  });
+});

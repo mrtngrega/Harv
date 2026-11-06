@@ -99,6 +99,7 @@ export function cleanSettings(raw: Raw, base: HarvSettings = DEFAULT_SETTINGS): 
       : base.watchdogIgnored,
     syncEnabled: bool(raw.syncEnabled, base.syncEnabled),
     phoneAccess: bool(raw.phoneAccess, base.phoneAccess),
+    desktopControl: bool(raw.desktopControl, base.desktopControl),
     autoLights: bool(raw.autoLights, base.autoLights),
     autoLightsPlace: place(raw.autoLightsPlace, base.autoLightsPlace),
     autoLightsDark: num(raw.autoLightsDark, 5, 500, base.autoLightsDark),

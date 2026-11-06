@@ -5,6 +5,7 @@ import type { Tier } from '@harv/shared';
 import { IS_WINDOWS } from '../platform.ts';
 import { fullPath, isHarvData, isInside, isProgramDir, isSystemDir, isTempDir, loadSettings, WORKSPACE } from './paths.ts';
 import { BROWSER_TOOLS, browserSends, classifyBrowser } from './browser.ts';
+import { classifyDesktop, isDesktopTool } from './desktop.ts';
 import { reachesSecret } from './secrets.ts';
 
 /** How the OS folders are named in reasons. */
@@ -305,6 +306,11 @@ export function classify(tool: string, input: Record<string, unknown>, ctx: Clas
     return verdict(v.tier, v.reason, v.summary);
   }
 
+  if (isDesktopTool(tool)) {
+    const v = classifyDesktop(tool, input);
+    return verdict(v.tier, v.reason, v.summary);
+  }
+
   if (tool.startsWith('mcp__')) return classifyMcp(tool);
 
   if (SCHEDULER_TOOLS.includes(tool))
@@ -394,6 +400,8 @@ function mentions(message: string, recipient: string, service: string): boolean 
  */
 export function isSending(tool: string, input: Record<string, unknown>): boolean {
   if (BROWSER_TOOLS.includes(tool)) return browserSends(tool, input);
+  // Desktop control has its own card (once per reply), whatever it does.
+  if (isDesktopTool(tool)) return false;
   if (tool.startsWith('mcp__') && !SHELL_TOOLS.includes(tool)) {
     const [, server = '', ...rest] = tool.split('__');
     return !PRIVATE_MCP.test(server) && server !== 'harv' && MCP_SENDS.test(rest.join('__'));
